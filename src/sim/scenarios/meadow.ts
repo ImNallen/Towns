@@ -6,7 +6,9 @@ import { compactEndConnection, roundedJunctionCorner } from '../network/endConne
 import { NetworkBuilder } from '../network/builder';
 import { streetCrossings, throughArms, type StreetCrossing } from '../network/junctions';
 import { buildStreetNetwork } from '../network/streets';
-import type { Bounds, Decor, House, Scenario } from './types';
+import type { Network } from '../network/types';
+import type { AccessPoint } from '../traffic/routing';
+import type { Bounds, Decor, House, RegionSpec, Scenario } from './types';
 
 export interface MeadowRoad {
   readonly points: readonly Vec2[];
@@ -27,6 +29,14 @@ const MIN_RADIUS = 18;
 const MAX_CORNER_TURN = -0.5 - 1e-9;
 /** Matches the coalescing threshold: a gentler corner would merge into one kinked street without a connector. */
 const SMOOTH_NODE = 0.95;
+/**
+ * The towns behind the West and East portals. Westbrook has a few modest jobs; Eastford has
+ * plenty of better-paid ones, so connecting the neighbourhoods raises West incomes.
+ */
+const REGIONS: readonly Omit<RegionSpec, 'sink' | 'source'>[] = [
+  { name: 'Westbrook', wage: 16, jobs: 4, groceryPrice: 6 },
+  { name: 'Eastford', wage: 30, jobs: 14, groceryPrice: 6 },
+];
 const BOUNDS: Bounds = { minX: -180, maxX: 180, minY: -115, maxY: 115 };
 const BUILD_MARGIN = WIDTH / 2 + 2;
 export const MEADOW_BUILD_BOUNDS: Bounds = {
@@ -237,12 +247,14 @@ export function meadowScenario(roads: readonly MeadowEdit[] = []): Scenario {
   const replay = replayMeadow(roads);
   const streets = coalesceStreets(replay.chains);
   const crossings = replay.crossings.filter((crossing) => degree(streets, crossing.point) === 4);
-  const { network, demand } = buildStreetNetwork(new NetworkBuilder(), streets, PORTALS, crossings);
+  const { network, demand, entries } = buildStreetNetwork(new NetworkBuilder(), streets, PORTALS, crossings);
   const decor = scenery();
   const driveways = new NetworkBuilder();
-  for (const house of decor.houses) {
+  const homes = decor.houses.map((house) => ({ access: [] as AccessPoint[], region: house.x < 0 ? 0 : 1 }));
+  for (const [index, house] of decor.houses.entries()) {
     const streetY = house.x < 0 ? -8 : 8;
     if (!streets.some((street) => containsPoint(street, { x: house.x - 4, y: streetY }))) continue;
+    homes[index]!.access = accessPoints(network, { x: house.x - 4, y: streetY });
     const side = Math.sign(house.y - streetY);
     const x = house.x - 4;
     driveways.addSurface('driveway', polyline([
@@ -251,7 +263,25 @@ export function meadowScenario(roads: readonly MeadowEdit[] = []): Scenario {
     ]), 2.6);
   }
   for (const surface of driveways.build().surfaces) network.surfaces.push({ ...surface, id: network.surfaces.length });
-  return { name: 'meadow', network, demand, bounds: { ...BOUNDS }, decor };
+  const regions = REGIONS.map((region, i) => ({ ...region, sink: i, source: entries[i]! }));
+  return { name: 'meadow', network, demand, bounds: { ...BOUNDS }, decor, town: { homes, regions } };
+}
+
+/** Where a driveway at `p` meets each directional road lane passing it. */
+function accessPoints(network: Network, p: Vec2): AccessPoint[] {
+  const access: AccessPoint[] = [];
+  for (const lane of network.lanes) {
+    if (lane.kind !== 'road') continue;
+    const { pts, cum } = lane.path;
+    for (let k = 1; k < cum.length; k++) {
+      const a = { x: pts[k * 2 - 2]!, y: pts[k * 2 - 1]! };
+      const q = projectOntoSegment(p, a, { x: pts[k * 2]!, y: pts[k * 2 + 1]! });
+      if (distance(p, q) > 2.5) continue;
+      access.push({ lane: lane.id, s: cum[k - 1]! + distance(a, q) });
+      break;
+    }
+  }
+  return access;
 }
 
 function pointSegmentDistance(p: Vec2, a: Vec2, b: Vec2): number {

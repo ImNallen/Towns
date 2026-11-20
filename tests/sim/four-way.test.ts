@@ -84,7 +84,7 @@ it('builds a shorter route across an existing street and drives through the resu
   const node = shortcut.fourWays![0]!.point;
   const scenario = meadowScenario(roads);
   const network = scenario.network;
-  const world = new World({ ...scenario, demand: [] }, 1);
+  const world = new World({ ...scenario, demand: [], town: undefined }, 1);
   const source = scenario.demand[0]!.lane;
   expect(world.routing.travelTime(1, source)).toBeLessThan(new Routing(before.network).travelTime(1, before.demand[0]!.lane));
   const car = world.vehicles.spawn(source, 0, 9, 1, 0);

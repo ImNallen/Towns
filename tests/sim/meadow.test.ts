@@ -17,15 +17,26 @@ function run(world: World, seconds: number): void {
 }
 
 describe('meadow starter map', () => {
-  it('registers two quiet disconnected streets and leaves the central field clear', () => {
+  it('registers two disconnected streets without through traffic and leaves the central field clear', () => {
     const scenario = buildScenario('meadow');
     expect(scenario.network.surfaces.filter((s) => s.style === 'twoWay')).toHaveLength(2);
     expect(meadowTips([])).toEqual([{ x: -45, y: -8 }, { x: 45, y: 8 }]);
     expect(scenario.demand).toEqual([]);
     expect(scenario.decor.houses.every((h) => Math.abs(h.x) > 75)).toBe(true);
+    const quiet = new World({ ...scenario, town: undefined }, 1);
+    run(quiet, 120);
+    expect(quiet.stats().spawned).toBe(0);
+
     const world = new World(scenario, 1);
-    run(world, 120);
-    expect(world.stats().spawned).toBe(0);
+    let unowned = 0;
+    for (let i = 0; i < 120 / DT; i++) {
+      world.step();
+      for (let slot = 0; slot < world.vehicles.highWater; slot++) {
+        if (world.vehicles.alive[slot] && world.vehicles.owner[slot]! < 0) unowned++;
+      }
+    }
+    expect(world.stats().spawned).toBeGreaterThan(0);
+    expect(unowned).toBe(0);
   });
 
   it.each([false, true])('connects in a single drag in either direction (reverse=%s)', (reverse) => {
@@ -57,7 +68,7 @@ describe('meadow starter map', () => {
     const tips = meadowTips(roads);
     place(roads, tips[0]!, tips[1]!);
     const scenario = meadowScenario(roads);
-    const world = new World({ ...scenario, demand: [] }, 1);
+    const world = new World({ ...scenario, demand: [], town: undefined }, 1);
     for (const source of scenario.network.sources) {
       const destination = world.routing.sinks.findIndex((_, i) => world.routing.canReach(i, source));
       expect(destination).toBeGreaterThanOrEqual(0);

@@ -2,6 +2,7 @@ import type { Vec2 } from '../sim/math/vec';
 import type { Network } from '../sim/network/types';
 import type { MeadowEdit } from '../sim/scenarios/meadow';
 import type { Scenario, ScenarioName } from '../sim/scenarios';
+import type { TownView } from '../sim/town/town';
 import type { SimStats } from '../sim/world';
 
 /** Main thread → simulation worker. */
@@ -20,6 +21,8 @@ export type FromWorker =
   | { type: 'editWaiting' }
   | { type: 'editRejected'; reason: string }
   | { type: 'ready'; scenario: Scenario; capacity: number }
+  /** Residents and their households, a few times a second while the map has a town. */
+  | { type: 'town'; view: TownView }
   | {
       type: 'frame';
       tick: number;

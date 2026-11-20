@@ -88,12 +88,12 @@ describe('meadow bulldozer history', () => {
     const edits: MeadowEdit[] = [bend.road];
     build(edits, meadowSnap(edits, { x: -47.27, y: 27.85 }, 2)!, meadowSnap(edits, { x: 52.30, y: 27.74 }, 2)!);
     const streets = meadowScenario(edits);
-    const world = new World({ ...streets, demand: [] }, 7);
+    const world = new World({ ...streets, demand: [], town: undefined }, 7);
     const car = world.vehicles.spawn(streets.demand[0]!.lane, 2, 9, 1, 0);
     for (let i = 0; i < 30; i++) world.step();
 
     edits.push({ remove: meadowSegments(edits).length - 1 });
-    const migration = world.editNetwork({ ...meadowScenario(edits), demand: [] });
+    const migration = world.editNetwork({ ...meadowScenario(edits), demand: [], town: undefined });
     if (!migration.ok) throw new Error(migration.reason);
     const crossAt = (simulation: World): number => {
       let y = NaN;
@@ -146,7 +146,7 @@ describe('meadow bulldozer history', () => {
     expect(connectors(edits)).toHaveLength(6);
     expect(scenario.network.lanes.filter((lane) => lane.kind === 'road' && lane.length < 0.5)).toHaveLength(2);
     expect(meadowTips(edits)).toContainEqual(seam);
-    const world = new World({ ...scenario, demand: [] }, 1);
+    const world = new World({ ...scenario, demand: [], town: undefined }, 1);
     const lane = scenario.network.lanes.find((lane) => lane.kind === 'road' && distance(startOf(lane.path), branch) < 3)!;
     const destination = world.routing.sinks.findIndex((_, index) => world.routing.canReach(index, lane.id));
     expect(destination).toBeGreaterThanOrEqual(0);
@@ -169,7 +169,7 @@ describe('meadow bulldozer history', () => {
     const scenario = meadowScenario(edits);
     expect(connectors(edits)).toHaveLength(6);
     expect(scenario.network.lanes.some((lane) => lane.kind === 'road' && lane.length < 5)).toBe(true);
-    const world = new World({ ...scenario, demand: [] }, 1);
+    const world = new World({ ...scenario, demand: [], town: undefined }, 1);
     const lane = scenario.network.lanes.find((lane) => lane.kind === 'road' && distance(startOf(lane.path), branch) < 3)!;
     const destination = world.routing.sinks.findIndex((_, index) => world.routing.canReach(index, lane.id));
     expect(destination).toBeGreaterThanOrEqual(0);

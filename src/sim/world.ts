@@ -5,9 +5,12 @@ import type { Scenario } from './scenarios/types';
 import { IDM, VEHICLE_LENGTH, idmAccel } from './traffic/idm';
 import { Routing } from './traffic/routing';
 import { Vehicles } from './traffic/vehicles';
+import { CLOCK_START, Town, type TownView } from './town/town';
 
 /** Fixed simulation timestep, seconds (20 Hz). */
 export const DT = 1 / 20;
+/** The town clock runs one game minute per simulated second. */
+const TICKS_PER_MINUTE = 20;
 
 /** How far ahead a driver looks along their route for leaders, slow lanes and give-ways (m). */
 const LOOKAHEAD = 90;
@@ -59,6 +62,7 @@ export class World {
   private readonly lanes: Lane[];
   private readonly yieldingMovements: number[][];
   private readonly rng: Rng;
+  private town: Town | null;
   private _tick = 0;
   private admissionsOpen = true;
 
@@ -96,6 +100,7 @@ export class World {
     this.routing = new Routing(this.network, scenario.town?.homes.map((home) => home.access));
     this.vehicles = new Vehicles(capacity);
     this.rng = new Rng(seed);
+    this.town = scenario.town ? new Town(scenario.town, this.routing.sinks.length, seed, this.routing) : null;
 
     const n = this.lanes.length;
     this.laneLen = Float64Array.from(this.lanes, (l) => l.length);
@@ -130,11 +135,17 @@ export class World {
   }
 
   step(): void {
+    if (this.town && this._tick % TICKS_PER_MINUTE === 0) this.town.update(this.minute(), this);
     this.buildBuckets();
     this.computeAccelerations();
     this.integrate();
     this.spawn();
     this._tick++;
+  }
+
+  /** Game minutes since midnight before day 1. */
+  private minute(): number {
+    return Math.floor(this._tick / TICKS_PER_MINUTE) + CLOCK_START;
   }
 
   /** Pause new arrivals while existing trips drain before retrying a deferred edit. */
@@ -149,6 +160,9 @@ export class World {
    */
   editNetwork(scenario: Scenario): { ok: true; world: World } | { ok: false; reason: string } {
     const edited = new World(scenario, 0, this.vehicles.capacity, this.tick);
+    if (this.town && edited.town?.spec.homes.length !== this.town.spec.homes.length) {
+      return { ok: false, reason: 'The edited map must keep every home.' };
+    }
     const V = this.vehicles;
     const sinkCount = this.routing.sinks.length;
     const destinations = Array.from({ length: this.routing.destinations }, (_, dest) => {
@@ -222,6 +236,8 @@ export class World {
       }
     }
     edited.rng.copyFrom(this.rng);
+    if (this.town) edited.town!.copyFrom(this.town);
+    else edited.town = null;
     edited.admissionsOpen = this.admissionsOpen;
     edited.spawned = this.spawned;
     edited.completed = this.completed;
@@ -433,7 +449,8 @@ export class World {
 
   private integrate(): void {
     const V = this.vehicles;
-    const { s, v, lane, dest, acc } = V;
+    const { s, v, lane, dest, acc, owner } = V;
+    const minute = this.minute();
     for (let i = 0; i < V.highWater; i++) {
       if (!V.alive[i]) continue;
       let vi = v[i]! + acc[i]! * DT;
@@ -445,6 +462,7 @@ export class World {
       for (;;) {
         if (si >= this.routing.exit(d, L)) {
           this.recordArrival(i);
+          if (owner[i]! >= 0) this.town?.arrived(owner[i]!, minute);
           V.despawn(i);
           break;
         }
@@ -452,6 +470,7 @@ export class World {
         const nh = this.routing.nextHop(d, L);
         if (nh < 0) {
           this.lost++;
+          if (owner[i]! >= 0) this.town?.lost(owner[i]!);
           V.despawn(i);
           break;
         }
@@ -589,6 +608,11 @@ export class World {
     return V.highWater;
   }
 
+  /** The residents, their households and the clock; null on maps without a town. Allocates. */
+  townView(): TownView | null {
+    return this.town?.view(this.minute()) ?? null;
+  }
+
   /** FNV-1a hash of the full dynamic state. Equal hashes ⇒ identical simulations. */
   hash(): string {
     let h = 0x811c9dc5;
@@ -608,7 +632,9 @@ export class World {
       mix(V.lane[i]!);
       mix(Math.round(V.s[i]! * 1e4));
       mix(Math.round(V.v[i]! * 1e4));
+      if (this.town) mix(V.owner[i]!);
     }
+    this.town?.hash(mix);
     return (h >>> 0).toString(16).padStart(8, '0');
   }
 }
