@@ -34,7 +34,7 @@ test('shape a winding route and build a bypass under live traffic', async ({ pag
 
   await page.getByRole('button', { name: 'Build road', exact: true }).click();
   await drag(-47.27, 27.85, 52.30, 27.74);
-  await expect.poll(editor, { timeout: 20_000 }).toMatchObject({ roadCount: 2, connected: true });
+  await expect.poll(editor).toMatchObject({ roadCount: 2, connected: true });
   expect((await stats())!.spawned).toBeGreaterThanOrEqual(before!.spawned);
   await expect.poll(async () => (await stats())?.completed ?? 0, { timeout: 30_000 }).toBeGreaterThan(2);
   await page.screenshot({ path: 'artifacts/screens/meadow-bypass.png' });
@@ -44,7 +44,7 @@ test('shape a winding route and build a bypass under live traffic', async ({ pag
   await page.keyboard.press('l');
   await page.screenshot({ path: 'artifacts/screens/meadow-t-junction-lanes.png' });
   await page.getByRole('button', { name: 'Undo road' }).click();
-  await expect.poll(editor, { timeout: 30_000 }).toMatchObject({ roadCount: 1, connected: true });
+  await expect.poll(editor).toMatchObject({ roadCount: 1, connected: true });
   expect((await stats())!.lost).toBe(0);
   expect(errors).toEqual([]);
 });

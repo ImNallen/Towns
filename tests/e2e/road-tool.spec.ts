@@ -50,7 +50,7 @@ test('build a street, see a completed trip, and undo the connection', async ({ p
   await page.screenshot({ path: 'artifacts/screens/meadow-joins.png' });
 
   await page.getByRole('button', { name: 'Undo road', exact: true }).click();
-  await expect.poll(editor, { timeout: 30_000 }).toMatchObject({ roadCount: 0, connected: false });
+  await expect.poll(editor).toMatchObject({ roadCount: 0, connected: false });
   const stats = await page.evaluate(() => window.__towns?.stats());
   expect(stats?.completed).toBeGreaterThan(0);
   await expect.poll(() => page.evaluate(() => window.__towns?.stats()?.active), { timeout: 15_000 }).toBe(0);
