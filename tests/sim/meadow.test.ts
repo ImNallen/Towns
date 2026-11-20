@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { endOf, offsetPolyline, polyline, polylinePoints, startOf } from '../../src/sim/math/polyline';
 import { distance, dot, normalize, sub, type Vec2 } from '../../src/sim/math/vec';
 import { buildScenario } from '../../src/sim/scenarios';
-import { meadowScenario, meadowTips, planMeadowRoad, type MeadowRoad } from '../../src/sim/scenarios/meadow';
+import { meadowConnected, meadowScenario, meadowSnap, meadowStreets, meadowTips, planMeadowRoad, type MeadowRoad } from '../../src/sim/scenarios/meadow';
 import { DT, World } from '../../src/sim/world';
 
 function place(roads: MeadowRoad[], start: Vec2, end: Vec2): MeadowRoad {
@@ -141,5 +141,99 @@ describe('meadow starter map', () => {
   it('rejects a near miss of the other street instead of creating a crossing', () => {
     const result = planMeadowRoad([], { x: -45, y: -8 }, { x: 60, y: 8 });
     expect(result.ok).toBe(false);
+  });
+});
+
+
+describe('meadow street graph', () => {
+  function curvedConnection(): MeadowRoad[] {
+    const result = planMeadowRoad([], { x: -45, y: -8 }, { x: 45, y: 8 }, { x: 0, y: 20 });
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.road.points).toContainEqual({ x: 0, y: 20 });
+    expect(polylinePoints(result.path)).toEqual(result.road.points);
+    return [result.road];
+  }
+
+  it('prioritizes the closest free tip, then projects to buildable street interiors', () => {
+    expect(meadowSnap([], { x: -48, y: -6 }, 5)).toEqual({ x: -45, y: -8 });
+    expect(meadowSnap([], { x: -44, y: -8 }, 0.5)).toBeUndefined();
+    const roads = curvedConnection();
+    const p = meadowSnap(roads, { x: -38, y: 0 }, 10)!;
+    expect(p.x).toBeCloseTo(-35.10372686317824);
+    expect(p.y).toBeCloseTo(-5.3968307544603675);
+    expect(meadowSnap(roads, { x: 0, y: -90 }, 4)).toBeUndefined();
+  });
+
+  it('adds a shorter bypass with two T junctions on the same host and restores it on undo', () => {
+    const roads = curvedConnection();
+    const original = meadowScenario(roads);
+    const start = meadowSnap(roads, { x: -38, y: 0 }, 10)!;
+    const end = meadowSnap(roads, { x: 40, y: 0 }, 10)!;
+    const bypass = planMeadowRoad(roads, start, end, { x: (start.x + end.x) / 2, y: -4 });
+    if (!bypass.ok) throw new Error(bypass.reason);
+    roads.push(bypass.road);
+    expect(meadowConnected(roads)).toBe(true);
+    expect(meadowTips(roads)).toEqual([]);
+    const chains = meadowStreets(roads);
+    expect(chains).toHaveLength(4);
+    const replaced = chains.find((chain) => distance(chain[0]!, start) < 1e-6 && distance(chain.at(-1)!, end) < 1e-6)!;
+    expect(bypass.path.length).toBeLessThan(polyline(replaced).length);
+    const scenario = meadowScenario(structuredClone(roads));
+    expect(scenario.network.surfaces[0]!.style).toBe('twoWay');
+    expect(scenario.demand).toHaveLength(2);
+    expect(meadowSnap(roads, start, 1)).toBeUndefined();
+    expect(planMeadowRoad(roads, start, { x: start.x, y: -50 }).ok).toBe(false);
+    roads.pop();
+    expect(meadowScenario(roads)).toEqual(original);
+    roads.pop();
+    expect(meadowConnected(roads)).toBe(false);
+    expect(meadowTips(roads)).toHaveLength(2);
+  });
+
+  it('keeps a branch dead end valid before connecting it back to a street', () => {
+    const roads = curvedConnection();
+    const start = meadowSnap(roads, { x: -38, y: 0 }, 10)!;
+    const branch = place(roads, start, { x: -20, y: -15 });
+    expect(meadowTips(roads)).toEqual([branch.points.at(-1)]);
+    const intermediate = meadowScenario(roads);
+    expect(intermediate.demand).toHaveLength(2);
+    expect(intermediate.network.surfaces.some((s) => s.style === 'junction')).toBe(true);
+    const end = meadowSnap(roads, { x: 40, y: 0 }, 10)!;
+    place(roads, branch.points.at(-1)!, end);
+    expect(meadowTips(roads)).toEqual([]);
+    expect(meadowScenario(roads).demand).toHaveLength(2);
+  });
+
+  it('rejects too-close junctions, unsnapped crossings, and an out-of-bounds curve', () => {
+    const roads = curvedConnection();
+    const start = meadowSnap(roads, { x: -38, y: 0 }, 10)!;
+    const nearby = meadowSnap(roads, { x: -25, y: 0 }, 20)!;
+    expect(planMeadowRoad(roads, start, nearby, { x: -30, y: -30 }).ok).toBe(false);
+    expect(planMeadowRoad([], { x: -45, y: -8 }, { x: 60, y: 8 }).ok).toBe(false);
+    expect(planMeadowRoad([], { x: -45, y: -8 }, { x: 45, y: 8 }, { x: 0, y: 1e10 }).ok).toBe(false);
+  });
+
+  it('supports branching before the towns connect and preserves short tip completions', () => {
+    const branch: MeadowRoad[] = [];
+    place(branch, { x: -65, y: -8 }, { x: -40, y: 35 });
+    expect(meadowTips(branch)).toHaveLength(3);
+    expect(meadowConnected(branch)).toBe(false);
+    expect(meadowScenario(branch).demand).toEqual([]);
+    const roads: MeadowRoad[] = [];
+    place(roads, { x: -45, y: -8 }, { x: 34, y: 7 });
+    const short = place(roads, { x: 34, y: 7 }, { x: 45, y: 8 });
+    expect(polyline(short.points).length).toBeLessThan(12);
+    expect(meadowConnected(roads)).toBe(true);
+    expect(meadowScenario(roads).demand).toHaveLength(2);
+  });
+
+  it('coalesces near-equal replay endpoints into exact shared junction coordinates', () => {
+    const roads = curvedConnection();
+    const vertex = roads[0]!.points[30]!;
+    const endpoint = { x: vertex.x + 1e-8, y: vertex.y };
+    const chains = meadowStreets([...roads, { points: [endpoint, { x: endpoint.x, y: -40 }] }]);
+    const incident = chains.flatMap((c) => [c[0]!, c.at(-1)!]).filter((p) => distance(p, endpoint) < 1e-6);
+    expect(incident).toHaveLength(3);
+    expect(incident.every((p) => p.x === endpoint.x && p.y === endpoint.y)).toBe(true);
   });
 });
