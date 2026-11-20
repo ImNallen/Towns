@@ -25,6 +25,7 @@ export const PALETTE = {
   editorInvalid: '#bb5941',
   buildBoundary: '#aaa99b',
   editorPaper: '#fffdf4',
+  selection: '#21705d',
 
   debugLane: { road: '#2f6fe0', connector: '#f08a24', ring: '#d6338a' },
   debugYield: '#e03131',

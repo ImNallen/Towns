@@ -8,6 +8,7 @@ import { buildLaneOverlay } from './debug';
 import { disposeLayer } from './dispose';
 import { RoadEditor, type EditorState, type MapTool } from './roadEditor';
 import { buildDecor } from './decor';
+import { HouseLayer } from './houses';
 import { PALETTE } from './palette';
 import { buildRoads } from './roads';
 import { VehicleLayer } from './vehicles';
@@ -76,6 +77,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   const mapCamera = new MapCamera(canvas, (event) => editor?.canPan(event) ?? true);
   let roadLayer: THREE.Group | null = null;
   let vehicles: VehicleLayer | null = null;
+  let houses: HouseLayer | null = null;
   let laneOverlay: THREE.Group | null = null;
   let showLanes = options.showLanes;
   let speed = options.speed;
@@ -102,6 +104,8 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     if (msg.type === 'ready') {
       const { scenario } = msg;
       scene.add(buildDecor(scenario.decor));
+      houses = new HouseLayer(scenario.decor.houses);
+      scene.add(houses.group);
       drawNetwork(scenario.network);
       if (editor) editor.accept([]);
       vehicles = new VehicleLayer(msg.capacity);
@@ -121,6 +125,8 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
       editor?.waitForTraffic();
     } else if (msg.type === 'editRejected') {
       editor?.reject(msg.reason);
+    } else if (msg.type === 'town') {
+      for (const household of msg.view.households) houses?.setLevel(household.home, household.level);
     } else if (msg.type === 'frame') {
       vehicles?.push(msg, performance.now());
       latestStats = msg.stats;

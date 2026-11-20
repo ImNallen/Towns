@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Vec2 } from '../sim/math/vec';
 import { Rng } from '../sim/rng';
 import type { Blob, Decor, Hill } from '../sim/scenarios/types';
@@ -25,10 +24,7 @@ export function buildDecor(decor: Decor): THREE.Group {
   }
 
   for (const hill of decor.hills) group.add(buildHill(hill));
-  if (decor.houses.length > 0) {
-    group.add(buildHouses(decor));
-    addGardens(group, decor);
-  }
+  addGardens(group, decor);
   return group;
 }
 
@@ -68,34 +64,6 @@ function buildHill(hill: Hill): THREE.Group {
   return group;
 }
 
-/** Gable-roofed house, ridge along local x, centred at the origin on the ground. */
-function houseGeometry(): THREE.BufferGeometry {
-  const w = 10;
-  const d = 7.5;
-  const wallH = 3.2;
-  const roofH = 2.8;
-  const overhang = 0.5;
-
-  const walls = new THREE.BoxGeometry(w, wallH, d).toNonIndexed();
-  walls.translate(0, wallH / 2, 0);
-
-  const half = d / 2 + overhang;
-  const profile = new THREE.Shape([new THREE.Vector2(-half, 0), new THREE.Vector2(half, 0), new THREE.Vector2(0, roofH)]);
-  const roof = new THREE.ExtrudeGeometry(profile, { depth: w + overhang * 2, bevelEnabled: false });
-  roof.rotateY(Math.PI / 2); // profile in the z-y plane, extruded along x
-  roof.translate(-(w / 2 + overhang), wallH, 0);
-
-  const tint = (g: THREE.BufferGeometry, k: number): THREE.BufferGeometry => {
-    const n = g.getAttribute('position').count;
-    g.setAttribute('color', new THREE.Float32BufferAttribute(new Array(n * 3).fill(k), 3));
-    return g;
-  };
-  const merged = mergeGeometries([tint(walls, 0.82), tint(roof, 1)]);
-  if (!merged) throw new Error('house geometry merge failed');
-  merged.computeVertexNormals();
-  return merged;
-}
-
 function addGardens(group: THREE.Group, decor: Decor): void {
   const parcels = PALETTE.gardens.map(() => new FlatMesh(0.03));
   const planted = decor.houses.filter((house) => house.garden);
@@ -125,23 +93,4 @@ function addGardens(group: THREE.Group, decor: Decor): void {
     lawn.receiveShadow = true;
     group.add(lawn);
   });
-}
-
-function buildHouses(decor: Decor): THREE.InstancedMesh {
-  const material = new THREE.MeshLambertMaterial({ vertexColors: true });
-  const mesh = new THREE.InstancedMesh(houseGeometry(), material, decor.houses.length);
-  const m = new THREE.Matrix4();
-  const q = new THREE.Quaternion();
-  const up = new THREE.Vector3(0, 1, 0);
-  const color = new THREE.Color();
-  decor.houses.forEach((h, i) => {
-    q.setFromAxisAngle(up, h.angle);
-    m.compose(new THREE.Vector3(h.x, 0, -h.y), q, new THREE.Vector3(1, 1, 1));
-    mesh.setMatrixAt(i, m);
-    const roofs = h.garden ? PALETTE.cottageRoofs : PALETTE.houses;
-    mesh.setColorAt(i, color.set(roofs[h.variant % roofs.length]!));
-  });
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  return mesh;
 }
