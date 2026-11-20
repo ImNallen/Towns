@@ -1,0 +1,89 @@
+import * as THREE from 'three';
+import { sampleAt, type PathSample, type Polyline } from '../sim/math/polyline';
+import type { Network } from '../sim/network/types';
+import { FlatMesh, flatMaterial } from './flat';
+import { PALETTE } from './palette';
+
+const OUTLINE = 0.45;
+/** Distance from a priority lane's centre at which the give-way line is drawn (half the ring width + a little). */
+const GIVE_WAY_CLEARANCE = 4.9;
+const LAYER = { outline: 0.05, surface: 0.1, marking: 0.15 } as const;
+
+/**
+ * Roads are drawn as layered ribbons: every surface's widened outline first, then every
+ * surface on top. Overlapping junction pieces merge into one clean shape with a single outline.
+ */
+export function buildRoads(network: Network): THREE.Group {
+  const outline = new FlatMesh(LAYER.outline);
+  const surface = new FlatMesh(LAYER.surface);
+  const centerLines = new FlatMesh(LAYER.marking);
+  const giveWay = new FlatMesh(LAYER.marking);
+
+  for (const s of network.surfaces) {
+    outline.ribbon(s.centerline, s.width + OUTLINE * 2);
+    surface.ribbon(s.centerline, s.width);
+    if (s.style === 'twoWay') centerLines.ribbon(s.centerline, 0.3);
+  }
+
+  // Give-way line: short dashes across the lane where it reaches the edge of the priority road.
+  for (const lane of network.lanes) {
+    if (lane.yieldTo.length === 0) continue;
+    const priority = [...lane.yieldTo, ...lane.next].map((id) => network.lanes[id]!.path);
+    let s = lane.length;
+    while (s > 0 && distanceToPaths(sampleAt(lane.path, s, sample), priority) < GIVE_WAY_CLEARANCE) s -= 0.25;
+    const e = sampleAt(lane.path, s, { x: 0, y: 0, hx: 0, hy: 0 });
+    const back = { x: e.x - e.hx * 0.4, y: e.y - e.hy * 0.4 };
+    const across = { x: -e.hy, y: e.hx };
+    const half = 1.9;
+    const line = {
+      a: { x: back.x - across.x * half, y: back.y - across.y * half },
+      b: { x: back.x + across.x * half, y: back.y + across.y * half },
+    };
+    for (let k = 0; k < 6; k++) {
+      const t0 = k / 6 + 0.02;
+      const t1 = t0 + 0.09;
+      const p0 = { x: line.a.x + (line.b.x - line.a.x) * t0, y: line.a.y + (line.b.y - line.a.y) * t0 };
+      const p1 = { x: line.a.x + (line.b.x - line.a.x) * t1, y: line.a.y + (line.b.y - line.a.y) * t1 };
+      const w = { x: e.hx * 0.2, y: e.hy * 0.2 };
+      giveWay.quad(
+        { x: p0.x - w.x, y: p0.y - w.y },
+        { x: p1.x - w.x, y: p1.y - w.y },
+        { x: p1.x + w.x, y: p1.y + w.y },
+        { x: p0.x + w.x, y: p0.y + w.y },
+      );
+    }
+  }
+
+  const group = new THREE.Group();
+  group.name = 'roads';
+  const add = (mesh: FlatMesh, color: string): void => {
+    if (mesh.empty) return;
+    const m = new THREE.Mesh(mesh.build(), flatMaterial(color));
+    m.receiveShadow = true;
+    group.add(m);
+  };
+  add(outline, PALETTE.roadOutline);
+  add(surface, PALETTE.roadSurface);
+  add(centerLines, PALETTE.centerLine);
+  add(giveWay, PALETTE.giveWay);
+  return group;
+}
+
+const sample: PathSample = { x: 0, y: 0, hx: 0, hy: 0 };
+
+function distanceToPaths(p: { x: number; y: number }, paths: readonly Polyline[]): number {
+  let best = Infinity;
+  for (const path of paths) {
+    const { pts } = path;
+    for (let i = 0; i + 3 < pts.length; i += 2) {
+      const ax = pts[i]!;
+      const ay = pts[i + 1]!;
+      const dx = pts[i + 2]! - ax;
+      const dy = pts[i + 3]! - ay;
+      const len2 = dx * dx + dy * dy;
+      const t = len2 > 0 ? Math.min(1, Math.max(0, ((p.x - ax) * dx + (p.y - ay) * dy) / len2)) : 0;
+      best = Math.min(best, Math.hypot(ax + dx * t - p.x, ay + dy * t - p.y));
+    }
+  }
+  return best;
+}
