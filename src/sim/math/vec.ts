@@ -21,3 +21,11 @@ export const normalize = (a: Vec2): Vec2 => {
 export const perp = (a: Vec2): Vec2 => ({ x: -a.y, y: a.x });
 
 export const fromAngle = (radians: number): Vec2 => ({ x: Math.cos(radians), y: Math.sin(radians) });
+
+export function projectOntoSegment(p: Vec2, a: Vec2, b: Vec2): Vec2 {
+  const delta = sub(b, a);
+  const squared = dot(delta, delta);
+  if (squared === 0) return a;
+  const t = Math.max(0, Math.min(1, dot(sub(p, a), delta) / squared));
+  return add(a, scale(delta, t));
+}

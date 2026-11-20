@@ -134,6 +134,12 @@ export function App({ game }: { game: Game }) {
           <p role="status" aria-live="polite">{instruction}</p>
           {editor.canCancel && editor.pending && speed === 0 && <button className="cancel-edit" onClick={() => changeSpeed(lastSpeed)}>Resume traffic</button>}
           {editor.canCancel && <button className="cancel-edit" onClick={() => game.cancelRoadEdit()}>Cancel edit</button>}
+          {editor.tool === 'road' && <label className="angle-toggle">
+            <input type="checkbox" checked={editor.angleSnapping} onChange={(e) => {
+              game.setAngleSnapping(e.target.checked);
+              setEditor(game.editor());
+            }} /> Angle snap
+          </label>}
           <span className="mouse-help">{editor.tool !== 'pan' ? 'Esc cancels · ' : ''}Scroll to zoom · Right-drag to pan</span>
         </div>
         <div className="tool-bar panel" role="group" aria-label="Map tools">
