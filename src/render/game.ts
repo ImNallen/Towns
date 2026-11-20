@@ -23,6 +23,7 @@ export interface GameOptions {
 
 export interface Game {
   editor(): EditorState | null;
+  setAngleSnapping(enabled: boolean): void;
   setTool(tool: MapTool): void;
   undoRoad(): void;
   cancelRoadEdit(): void;
@@ -159,6 +160,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
 
   const game: Game = {
     editor: () => editor?.state() ?? null,
+    setAngleSnapping: (enabled) => editor?.setAngleSnapping(enabled),
     setTool: (tool) => editor?.setTool(tool),
     undoRoad: () => editor?.undo(),
     cancelRoadEdit: () => editor?.cancel(),

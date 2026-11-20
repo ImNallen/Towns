@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { offsetPolyline, polyline, type Polyline } from '../sim/math/polyline';
-import { distance, type Vec2 } from '../sim/math/vec';
-import { meadowConnected, meadowScenario, meadowSnap, meadowTips, planMeadowRoad, type MeadowRoad } from '../sim/scenarios/meadow';
+import { add, scale, distance, type Vec2 } from '../sim/math/vec';
+import { meadowConnected, meadowScenario, snapToMeadowStreet, meadowStreets, meadowTips, planMeadowRoad, type MeadowRoad } from '../sim/scenarios/meadow';
+import { angleGuide, fitGuideToStreet, type StreetPoint, type AngleGuide } from '../sim/network/angleSnap';
 import type { ToWorker } from '../worker/protocol';
 import type { MapCamera } from './camera';
 import { disposeLayer } from './dispose';
@@ -17,11 +18,12 @@ export interface EditorState {
   hint: string;
   pending: boolean;
   canCancel: boolean;
+  angleSnapping: boolean;
 }
 
 type EditPhase =
   | { kind: 'idle' }
-  | { kind: 'drawing'; id: number; start: Vec2; press: Vec2 }
+  | { kind: 'drawing'; id: number; host: StreetPoint; press: Vec2; pointer: PointerEvent }
   | { kind: 'bending'; start: Vec2; end: Vec2; id: number | null }
   | { kind: 'pending' | 'waiting' };
 
@@ -45,6 +47,8 @@ function roadMarker(): THREE.Group {
 export class RoadEditor {
   private roads: readonly MeadowRoad[] = [];
   private connected = false;
+  private angleSnapping = true;
+  private streets: Vec2[][] = [];
   private phase: EditPhase = { kind: 'pending' };
   private tool: MapTool = 'road';
   private hint = '';
@@ -82,6 +86,7 @@ export class RoadEditor {
     const kind = this.phase.kind;
     return {
       tool: this.tool, hint: this.hint, roadCount: this.roads.length, connected: this.connected,
+      angleSnapping: this.angleSnapping,
       pending: kind === 'pending' || kind === 'waiting',
       canCancel: kind === 'bending' || kind === 'waiting',
     };
@@ -89,6 +94,11 @@ export class RoadEditor {
 
   canPan(e: PointerEvent): boolean {
     return this.phase.kind !== 'drawing' && (this.tool === 'pan' || e.button !== 0);
+  }
+
+  setAngleSnapping(enabled: boolean): void {
+    this.angleSnapping = enabled;
+    if (this.phase.kind === 'drawing') this.move ??= this.phase.pointer;
   }
 
   setTool(tool: MapTool): void {
@@ -100,6 +110,7 @@ export class RoadEditor {
 
   accept(roads: readonly MeadowRoad[], width: number): void {
     this.roads = roads;
+    this.streets = meadowStreets(roads);
     this.width = width;
     this.connected = meadowConnected(roads);
     this.finish();
@@ -157,8 +168,8 @@ export class RoadEditor {
     return this.camera.screenToWorld(e.clientX - bounds.left, e.clientY - bounds.top);
   }
 
-  private snap(p: Vec2): Vec2 | undefined {
-    return meadowSnap(this.roads, p, Math.min(10, Math.max(3, 18 * this.camera.mpp)));
+  private snap(p: Vec2): StreetPoint | undefined {
+    return snapToMeadowStreet(this.streets, p, Math.min(10, Math.max(3, 18 * this.camera.mpp)));
   }
 
   private mark(p?: Vec2): void {
@@ -176,13 +187,13 @@ export class RoadEditor {
       return;
     }
     if (this.phase.kind !== 'idle') return;
-    const start = this.snap(this.world(e));
-    if (!start) {
+    const host = this.snap(this.world(e));
+    if (!host) {
       this.hint = 'Start on a street or a marked road end.';
       return;
     }
-    this.mark(start);
-    this.phase = { kind: 'drawing', start, id: e.pointerId, press: { x: e.clientX, y: e.clientY } };
+    this.mark(host.point);
+    this.phase = { kind: 'drawing', host, id: e.pointerId, pointer: e, press: { x: e.clientX, y: e.clientY } };
     this.hint = 'Drag to the other end of your new road.';
     this.canvas.setPointerCapture(e.pointerId);
   }
@@ -193,7 +204,7 @@ export class RoadEditor {
     const phase = this.phase;
     const cursor = this.world(e);
     if (phase.kind === 'idle') {
-      this.mark(this.snap(cursor));
+      this.mark(this.snap(cursor)?.point);
       return;
     }
     if (phase.kind === 'bending') {
@@ -202,15 +213,23 @@ export class RoadEditor {
       return;
     }
     if (phase.kind !== 'drawing' || e.pointerId !== phase.id) return;
-    const { start, press } = phase;
+    phase.pointer = e;
+    const { host, press } = phase;
+    const start = host.point;
     if (Math.hypot(e.clientX - press.x, e.clientY - press.y) < 3) {
       this.clearPreview();
       if (release) this.finish();
       return;
     }
     const snap = this.snap(cursor);
-    const end = snap ?? cursor;
-    this.mark(snap);
+    let guide = this.tool === 'road' && this.angleSnapping
+      ? angleGuide(this.streets, host, cursor) : undefined;
+    if (guide && snap) {
+      guide = fitGuideToStreet(guide, start, snap, Math.min(8, 14 * this.camera.mpp));
+      if (guide && !snapToMeadowStreet(this.streets, guide.end, 1e-6)) guide = undefined;
+    }
+    const end = guide?.end ?? snap?.point ?? cursor;
+    this.mark(guide?.end ?? snap?.point);
     if (release && this.tool === 'curve' && distance(start, end) >= 2) {
       this.finish();
       this.phase = { kind: 'bending', start, end, id: null };
@@ -221,10 +240,10 @@ export class RoadEditor {
     }
     const hint = this.tool === 'curve' ? 'Release to set the end, then place the bend.'
       : snap ? 'Release to connect the streets.' : 'Release to extend the street.';
-    this.place(start, end, undefined, release, hint);
+    this.place(start, end, undefined, release, guide ? `${guide.label} · ${hint}` : hint, guide);
   }
 
-  private place(start: Vec2, end: Vec2, bend: Vec2 | undefined, release: boolean, hint: string): void {
+  private place(start: Vec2, end: Vec2, bend: Vec2 | undefined, release: boolean, hint: string, alignment?: AngleGuide): void {
     const plan = planMeadowRoad(this.roads, start, end, bend);
     this.clearPreview();
     if (!plan.ok) {
@@ -247,9 +266,30 @@ export class RoadEditor {
     const edges = new FlatMesh(0.19);
     for (const side of [-1, 1]) edges.ribbon(offsetPolyline(plan.path, side * (this.width / 2 - 0.35)), 0.35);
     preview.add(new THREE.Mesh(edges.build(), new THREE.MeshBasicMaterial({ color: PALETTE.editorHandle })));
+    if (alignment) this.drawAngle(preview, start, alignment);
     this.setRoadVisibility(false);
     this.scene.add(preview);
     this.preview = preview;
+  }
+
+  private drawAngle(preview: THREE.Group, start: Vec2, guide: AngleGuide): void {
+    const size = Math.min(distance(start, guide.end) / 3, Math.max(this.width / 2 + 8 * this.camera.mpp, 16 * this.camera.mpp));
+    const marks = new FlatMesh(0.45);
+    const width = Math.max(0.14, 1.7 * this.camera.mpp);
+    const along = scale(guide.reference, size);
+    const out = scale(guide.direction, size);
+    if (guide.label === '90°') {
+      marks.ribbon(polyline([add(start, along), add(add(start, along), out), add(start, out)]), width);
+    } else if (guide.label === '45°') {
+      const arc = Array.from({ length: 9 }, (_, i) => {
+        const direction = add(scale(guide.reference, 1 - i / 8), scale(guide.direction, i / 8));
+        return add(start, scale(direction, size / Math.hypot(direction.x, direction.y)));
+      });
+      marks.ribbon(polyline(arc), width);
+    } else {
+      marks.ribbon(polyline([add(guide.origin, scale(along, -2)), add(guide.origin, scale(along, 2))]), width);
+    }
+    preview.add(new THREE.Mesh(marks.build(), new THREE.MeshBasicMaterial({ color: PALETTE.editorHandle })));
   }
 
   private guide(path: Polyline, color: string): void {

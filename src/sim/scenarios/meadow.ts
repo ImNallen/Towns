@@ -1,6 +1,7 @@
 import { cubicPoints } from '../math/curves';
 import { polyline, type Polyline } from '../math/polyline';
-import { add, distance, dot, normalize, scale, sub, type Vec2 } from '../math/vec';
+import { add, distance, dot, normalize, projectOntoSegment, scale, sub, type Vec2 } from '../math/vec';
+import type { StreetPoint } from '../network/angleSnap';
 import { NetworkBuilder } from '../network/builder';
 import { buildStreetNetwork } from '../network/streets';
 import type { Bounds, Decor, House, Scenario } from './types';
@@ -43,12 +44,6 @@ const same = (a: Vec2, b: Vec2): boolean => distance(a, b) < 1e-6;
 const tip = (chain: readonly Vec2[]): Vec2 => chain[chain.length - 1]!;
 const PORTALS: readonly Vec2[] = [{ x: -185, y: -8 }, { x: 185, y: 8 }];
 const isPortal = (p: Vec2): boolean => PORTALS.some((portal) => same(p, portal));
-
-function projection(p: Vec2, a: Vec2, b: Vec2): Vec2 {
-  const delta = sub(b, a);
-  const t = Math.max(0, Math.min(1, dot(sub(p, a), delta) / dot(delta, delta)));
-  return add(a, scale(delta, t));
-}
 
 /** Replay into maximal chains whose endpoints are dead ends, portals or junctions. */
 export function meadowStreets(roads: readonly MeadowRoad[]): Vec2[][] {
@@ -116,26 +111,33 @@ export function meadowConnected(roads: readonly MeadowRoad[]): boolean {
 }
 
 export function meadowSnap(roads: readonly MeadowRoad[], point: Vec2, radius: number): Vec2 | undefined {
+  return snapToMeadowStreet(meadowStreets(roads), point, radius)?.point;
+}
+
+export function snapToMeadowStreet(chains: readonly (readonly Vec2[])[], point: Vec2, radius: number): StreetPoint | undefined {
   if (![point.x, point.y, radius].every(Number.isFinite) || radius < 0) return undefined;
-  const chains = meadowStreets(roads);
-  const ends = chains.flatMap((c) => [c[0]!, tip(c)]).map((p) => ({ p, degree: degree(chains, p) }));
-  let best: Vec2 | undefined;
+  const ends = chains.flatMap((street) => [0, street.length - 1].map((i) => ({
+    street, i, p: street[i]!, degree: degree(chains, street[i]!),
+  })));
+  let best: StreetPoint | undefined;
   let reach = radius;
   for (const end of ends) {
     const d = distance(end.p, point);
     if (end.degree === 1 && !isPortal(end.p) && d <= reach) {
-      best = end.p;
+      const adjacent = end.i === 0 ? 1 : end.i - 1;
+      best = { kind: 'tip', street: end.street, point: end.p, tangent: normalize(sub(end.p, end.street[adjacent]!)) };
       reach = d;
     }
   }
-  if (best) return { ...best };
+  if (best) return best;
   for (const chain of chains) {
     for (let i = 1; i < chain.length; i++) {
-      const p = projection(point, chain[i - 1]!, chain[i]!);
+      const p = projectOntoSegment(point, chain[i - 1]!, chain[i]!);
       const d = distance(p, point);
       if (d > reach || !insideMeadow(p)) continue;
       if (ends.some((end) => distance(p, end.p) < (end.degree >= 3 ? 23 : 12))) continue;
-      best = p;
+      const j = i > 1 && same(p, chain[i - 1]!) ? i - 1 : i;
+      best = { kind: 'street', street: chain, point: p, tangent: normalize(sub(chain[j]!, chain[j - 1]!)) };
       reach = d;
     }
   }
@@ -160,7 +162,7 @@ export function meadowScenario(roads: readonly MeadowRoad[] = []): Scenario {
 }
 
 function pointSegmentDistance(p: Vec2, a: Vec2, b: Vec2): number {
-  return distance(p, projection(p, a, b));
+  return distance(p, projectOntoSegment(p, a, b));
 }
 
 function blockedByScenery(p: Vec2, decor: Decor): boolean {
@@ -251,7 +253,7 @@ export function planMeadowRoad(roads: readonly MeadowRoad[], start: Vec2, end: V
     if (blockedByScenery(p, decor)) return fail('Leave room around buildings, water and hills.');
     for (const chain of chains) {
       for (let j = 1; j < chain.length; j++) {
-        const closest = projection(p, chain[j - 1]!, chain[j]!);
+        const closest = projectOntoSegment(p, chain[j - 1]!, chain[j]!);
         const joining = joins.some((join) =>
           distance(closest, join) <= 12 && distance(p, join) <= 16);
         if (!joining && distance(p, closest) < WIDTH + 1) return fail('Leave space between streets or snap to the street.');
