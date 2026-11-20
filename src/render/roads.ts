@@ -30,9 +30,9 @@ export function buildRoads(network: Network, marking: 'dashed' | 'solid' = 'soli
 
   // Give-way line: short dashes across the lane where it reaches the edge of the priority road.
   for (const lane of network.lanes) {
-    if (lane.yieldTo.length === 0) continue;
+    if (lane.yieldTo.length === 0 && lane.crossingYieldTo.length === 0) continue;
     const priority = [...lane.yieldTo, ...lane.next].map((id) => network.lanes[id]!.path);
-    let s = lane.length;
+    let s = lane.crossingYieldTo.length > 0 ? 0 : lane.length;
     while (s > 0 && distanceToPaths(sampleAt(lane.path, s, sample), priority) < GIVE_WAY_CLEARANCE) s -= 0.25;
     const e = sampleAt(lane.path, s, { x: 0, y: 0, hx: 0, hy: 0 });
     const back = { x: e.x - e.hx * 0.4, y: e.y - e.hy * 0.4 };

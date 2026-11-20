@@ -290,6 +290,10 @@ export class World {
       let cur = L;
       let nxt = this.routing.nextHop(d, cur);
       while (nxt >= 0 && dist < LOOKAHEAD) {
+        if (this.lanes[nxt]!.crossingYieldTo.length > 0 && dist < YIELD_ZONE
+          && dist >= COMMIT_DISTANCE && this.junctionBlocked(nxt, dist, vi)) {
+          a = Math.min(a, idmAccel(vi, v0, dist, vi));
+        }
         const limit = this.laneSpeed[nxt]!;
         if (limit < vi) a = Math.min(a, (limit * limit - vi * vi) / (2 * Math.max(dist, 2)));
         if (!leaderFound) {
@@ -324,7 +328,8 @@ export class World {
       bestS = s[best]!;
     }
     for (const p of this.lanes[lane]!.prev) {
-      if (p === from || this.lanes[p]!.yieldTo.length === 0 || this.bucketCount[p]! === 0) continue;
+      if (p === from || (this.lanes[p]!.yieldTo.length === 0 && this.lanes[p]!.crossingYieldTo.length === 0)
+        || this.bucketCount[p]! === 0) continue;
       const j = this.order[this.bucketStart[p]!]!; // frontmost on the give-way lane
       const front = s[j]! - this.laneLen[p]!;
       if (front > -COMMIT_DISTANCE && front < bestS) {
@@ -340,6 +345,40 @@ export class World {
     if (dEnd < COMMIT_DISTANCE) return Infinity;
     if (!this.mergeBlocked(yieldLane, dEnd, v)) return Infinity;
     return idmAccel(v, v0, dEnd, v); // treat the merge point as a stopped obstacle
+  }
+
+  /** Reserve the conflict area before entry; vehicles already inside finish clearing it. */
+  private junctionBlocked(movement: number, distance: number, speed: number): boolean {
+    const tEntry = distance / Math.max(speed, 2);
+    const clearTime = this.laneLen[movement]! / Math.max(Math.min(speed, this.laneSpeed[movement]!), 3);
+    for (const priority of this.lanes[movement]!.crossingYieldTo) {
+      if (this.bucketCount[priority]! > 0) return true;
+      if (this.junctionApproachArrives(priority, priority, 0, tEntry + clearTime + CONFLICT_AFTER, 0)) return true;
+    }
+    return false;
+  }
+
+  private junctionApproachArrives(
+    lane: number, movement: number, offset: number, latest: number, depth: number,
+  ): boolean {
+    if (depth >= 6 || offset > PRIORITY_SCAN) return false;
+    const V = this.vehicles;
+    for (const upstream of this.lanes[lane]!.prev) {
+      const start = this.bucketStart[upstream]!;
+      const count = this.bucketCount[upstream]!;
+      for (let q = 0; q < count; q++) {
+        const j = this.order[start + q]!;
+        if (this.routing.nextHop(V.dest[j]!, upstream) !== lane) continue;
+        // Also verify the eventual movement when looking beyond the immediate approach.
+        let next = lane;
+        for (let step = 0; step < depth && next !== movement; step++) next = this.routing.nextHop(V.dest[j]!, next);
+        if (next !== movement) continue;
+        const remaining = offset + this.laneLen[upstream]! - V.s[j]!;
+        if (remaining <= PRIORITY_SCAN && remaining / Math.max(V.v[j]!, 1) < latest) return true;
+      }
+      if (this.junctionApproachArrives(upstream, movement, offset + this.laneLen[upstream]!, latest, depth + 1)) return true;
+    }
+    return false;
   }
 
   private mergeBlocked(yieldLane: number, dEnd: number, v: number): boolean {

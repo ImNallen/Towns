@@ -20,6 +20,8 @@ export interface Lane {
    * A yielding lane has exactly one `next`, which every priority lane also feeds.
    */
   readonly yieldTo: number[];
+  /** Conflicting junction movements with priority. Stop before entering this lane. */
+  readonly crossingYieldTo: number[];
 }
 
 /** Drawable road surface. Purely visual; traffic only uses lanes. */

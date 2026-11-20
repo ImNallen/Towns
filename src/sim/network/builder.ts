@@ -18,7 +18,7 @@ export class NetworkBuilder {
 
   addLane(kind: LaneKind, path: Polyline, speedLimit: number): number {
     const id = this.lanes.length;
-    this.lanes.push({ id, kind, path, length: path.length, speedLimit, next: [], prev: [], yieldTo: [] });
+    this.lanes.push({ id, kind, path, length: path.length, speedLimit, next: [], prev: [], yieldTo: [], crossingYieldTo: [] });
     return id;
   }
 
@@ -35,6 +35,11 @@ export class NetworkBuilder {
   /** `lane` gives way to `priority` lanes where it merges. */
   giveWay(lane: number, priority: readonly number[]): void {
     this.lane(lane).yieldTo.push(...priority);
+  }
+
+  /** Give way before entering a junction, including traffic crossing this movement. */
+  giveWayAtEntry(lane: number, priority: readonly number[]): void {
+    this.lane(lane).crossingYieldTo.push(...priority);
   }
 
   addSurface(style: SurfaceStyle, centerline: Polyline, width: number): number {
