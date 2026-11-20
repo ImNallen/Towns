@@ -23,6 +23,8 @@ const PRIORITY_SCAN = 60;
 /** Priority vehicles arriving within [tMe - BEFORE, tMe + AFTER] of us block the merge (s). */
 const CONFLICT_BEFORE = 1.5;
 const CONFLICT_AFTER = 2.5;
+/** Speed for turning off the road into a driveway (m/s). */
+const TURN_SPEED = 4;
 /** A new car needs the car ahead this far beyond its own front bumper (m). */
 const SPAWN_SPACING = VEHICLE_LENGTH + IDM.minGap + 3;
 
@@ -339,6 +341,13 @@ export class World {
         dist += this.laneLen[nxt]!;
         cur = nxt;
         nxt = this.routing.nextHop(d, cur);
+      }
+      // The route ends on `cur`. A building's driveway part-way along it is a turn to slow for;
+      // a sink at the lane end is not.
+      const exit = nxt < 0 ? this.routing.exit(d, cur) : Infinity;
+      if (exit < this.laneLen[cur]! && vi > TURN_SPEED) {
+        const toExit = dist - this.laneLen[cur]! + exit;
+        a = Math.min(a, (TURN_SPEED * TURN_SPEED - vi * vi) / (2 * Math.max(toExit, 2)));
       }
       acc[i] = Math.max(a, -IDM.maxDecel);
     }
