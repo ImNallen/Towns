@@ -28,8 +28,10 @@ export interface SimStats {
   active: number;
   spawned: number;
   completed: number;
-  /** Vehicles removed because they could not continue (should stay 0). */
+  /** Vehicles that drove off the network: a simulation bug, so this should stay 0. */
   lost: number;
+  /** Vehicles removed because an edited road network could not carry them. */
+  cleared: number;
   meanTripTime: number;
   meanSpeed: number;
   /** Share of active vehicles below 0.5 m/s. */
@@ -58,7 +60,6 @@ export class World {
   private readonly yieldingMovements: number[][];
   private readonly rng: Rng;
   private _tick = 0;
-  private admissionsOpen = true;
 
   private readonly laneLen: Float64Array;
   private readonly laneSpeed: Float64Array;
@@ -77,6 +78,7 @@ export class World {
   private spawned = 0;
   private completed = 0;
   private lost = 0;
+  private cleared = 0;
   private tripTimeSum = 0;
   private readonly completedPerSecond = new Uint32Array(60);
   private lastSecond = 0;
@@ -135,93 +137,120 @@ export class World {
     this._tick++;
   }
 
-  /** Pause new arrivals while existing trips drain before retrying a deferred edit. */
-  setAdmissions(open: boolean): void {
-    this.admissionsOpen = open;
-  }
-
   /**
-   * Construct an independent world with new geometry, preserving all running trips.
-   * A removal or changed curve that cannot represent a car's current pose is deferred;
-   * close admissions, keep stepping this world, and retry when traffic has cleared.
+   * Construct an independent world with new geometry, carrying over every running trip the
+   * new roads can still represent. Cars that cannot continue are cleared and counted.
    */
-  editNetwork(scenario: Scenario): { ok: true; world: World } | { ok: false; reason: string } {
+  editNetwork(scenario: Scenario): World {
     const edited = new World(scenario, 0, this.vehicles.capacity, this.tick);
-    const V = this.vehicles;
+    const V = edited.vehicles;
+    V.copyFrom(this.vehicles);
     const destinations = this.routing.sinks.map((sink) => {
       const oldEnd = endOf(this.lanes[sink]!.path);
       return edited.routing.sinks.findIndex((candidate) => {
         const end = endOf(edited.lanes[candidate]!.path);
-        return Math.hypot(end.x - oldEnd.x, end.y - oldEnd.y) <= 0.25
-          && end.hx * oldEnd.hx + end.hy * oldEnd.hy > 0.99;
+        const dx = end.x - oldEnd.x;
+        const dy = end.y - oldEnd.y;
+        return dx * dx + dy * dy <= 0.25 * 0.25 && end.hx * oldEnd.hx + end.hy * oldEnd.hy > 0.99;
       });
     });
-    const fail = (slot: number): { ok: false; reason: string } => ({
-      ok: false,
-      reason: `Vehicle ${V.id[slot]} still needs this road to reach its destination. Pause arrivals and let traffic clear before retrying.`,
-    });
-    edited.vehicles.copyFrom(V);
+    const pose: PathSample = { x: 0, y: 0, hx: 0, hy: 0 };
     for (let slot = 0; slot < V.highWater; slot++) {
       if (!V.alive[slot]) continue;
       const dest = destinations[V.dest[slot]!]!;
-      if (dest < 0) return fail(slot);
-      const pose = sampleAt(this.lanes[V.lane[slot]!]!.path, V.s[slot]!, { x: 0, y: 0, hx: 0, hy: 0 });
-      let best: { lane: number; s: number; error: number } | undefined;
-      for (const lane of edited.lanes) {
-        if (!edited.routing.canReach(dest, lane.id)) continue;
-        const { pts, cum } = lane.path;
-        for (let k = 0; k < cum.length - 1; k++) {
-          const dx = pts[k * 2 + 2]! - pts[k * 2]!;
-          const dy = pts[k * 2 + 3]! - pts[k * 2 + 1]!;
-          const length = cum[k + 1]! - cum[k]!;
-          if (length <= 0 || (dx * pose.hx + dy * pose.hy) / length < 1 - 1e-6) continue;
-          const t = Math.max(0, Math.min(1, ((pose.x - pts[k * 2]!) * dx + (pose.y - pts[k * 2 + 1]!) * dy) / (length * length)));
-          const s = cum[k]! + t * length;
-          // sampleAt resolves a vertex's heading to the following segment, just as rendering does.
-          const projected = sampleAt(lane.path, s, { x: 0, y: 0, hx: 0, hy: 0 });
-          if (projected.hx * pose.hx + projected.hy * pose.hy < 1 - 1e-6) continue;
-          const error = Math.hypot(projected.x - pose.x, projected.y - pose.y);
-          if (error > 1e-4 || (best && best.error <= error)) continue;
-          best = { lane: lane.id, s, error };
-        }
+      sampleAt(this.lanes[V.lane[slot]!]!.path, V.s[slot]!, pose);
+      const match = dest < 0 ? undefined : edited.locate(pose, dest);
+      if (!match) {
+        V.despawn(slot);
+        edited.cleared++;
+        continue;
       }
-      if (!best) return fail(slot);
-      edited.vehicles.lane[slot] = best.lane;
-      edited.vehicles.s[slot] = best.s;
-      edited.vehicles.dest[slot] = dest;
-      edited.laneMinS[best.lane] = Math.min(edited.laneMinS[best.lane]!, best.s);
+      V.lane[slot] = match.lane;
+      V.s[slot] = match.s;
+      V.dest[slot] = dest;
     }
-
-    // A split can put two cars on opposite sides of a lane boundary. Check spacing
-    // along each driver's new route, rather than only inside individual lanes.
-    edited.buildBuckets();
-    for (let slot = 0; slot < V.highWater; slot++) {
-      if (!V.alive[slot]) continue;
-      const lane = edited.vehicles.lane[slot]!;
-      const s = edited.vehicles.s[slot]!;
-      const rank = edited.rank[slot]!;
-      if (rank > 0) {
-        const leader = edited.order[edited.bucketStart[lane]! + rank - 1]!;
-        if (edited.vehicles.s[leader]! - s < VEHICLE_LENGTH - 1e-4) return fail(slot);
-      }
-      let distance = edited.laneLen[lane]! - s;
-      let next = edited.routing.nextHop(edited.vehicles.dest[slot]!, lane);
-      while (next >= 0 && distance < VEHICLE_LENGTH) {
-        if (edited.bucketCount[next]! > 0
-          && distance + edited.vehicles.s[edited.tail(next)]! < VEHICLE_LENGTH - 1e-4) return fail(slot);
-        distance += edited.laneLen[next]!;
-        next = edited.routing.nextHop(edited.vehicles.dest[slot]!, next);
-      }
-    }
+    edited.clearSpacingConflicts();
+    edited.updateLaneMinS();
     edited.rng.copyFrom(this.rng);
-    edited.admissionsOpen = this.admissionsOpen;
     edited.spawned = this.spawned;
     edited.completed = this.completed;
     edited.lost = this.lost;
+    edited.cleared += this.cleared;
     edited.tripTimeSum = this.tripTimeSum;
     edited.completedPerSecond.set(this.completedPerSecond);
     edited.lastSecond = this.lastSecond;
-    return { ok: true, world: edited };
+    return edited;
+  }
+
+  /** The lane position that shows `pose` exactly and can still reach `dest`. Ties go to the lowest lane id. */
+  private locate(pose: PathSample, dest: number): { lane: number; s: number } | undefined {
+    const at: PathSample = { x: 0, y: 0, hx: 0, hy: 0 };
+    let best: { lane: number; s: number; error: number } | undefined;
+    for (const lane of this.lanes) {
+      if (!this.routing.canReach(dest, lane.id)) continue;
+      const { pts, cum } = lane.path;
+      for (let k = 0; k < cum.length - 1; k++) {
+        const dx = pts[k * 2 + 2]! - pts[k * 2]!;
+        const dy = pts[k * 2 + 3]! - pts[k * 2 + 1]!;
+        const length = cum[k + 1]! - cum[k]!;
+        if (length <= 0 || (dx * pose.hx + dy * pose.hy) / length < 1 - 1e-6) continue;
+        const t = Math.max(0, Math.min(1, ((pose.x - pts[k * 2]!) * dx + (pose.y - pts[k * 2 + 1]!) * dy) / (length * length)));
+        const s = cum[k]! + t * length;
+        // sampleAt resolves a vertex's heading to the following segment, just as rendering does.
+        sampleAt(lane.path, s, at);
+        if (at.hx * pose.hx + at.hy * pose.hy < 1 - 1e-6) continue;
+        const ex = at.x - pose.x;
+        const ey = at.y - pose.y;
+        const error = ex * ex + ey * ey;
+        if (error > 1e-8 || (best && best.error <= error)) continue;
+        best = { lane: lane.id, s, error };
+      }
+    }
+    return best;
+  }
+
+  /**
+   * A split can put two cars on opposite sides of a lane boundary. Check spacing along each
+   * driver's new route and clear followers until every carried car has room.
+   */
+  private clearSpacingConflicts(): void {
+    const V = this.vehicles;
+    const leader = new Int32Array(V.highWater);
+    for (let cleared = true; cleared;) {
+      this.buildBuckets();
+      for (let slot = 0; slot < V.highWater; slot++) leader[slot] = V.alive[slot] ? this.tooCloseBehind(slot) : -1;
+      cleared = false;
+      for (let slot = 0; slot < V.highWater; slot++) {
+        // Clear only the front of a queue of conflicts; the cars behind it may fit once it is gone.
+        if (leader[slot]! < 0 || leader[leader[slot]!]! >= 0) continue;
+        V.despawn(slot);
+        this.cleared++;
+        cleared = true;
+      }
+    }
+  }
+
+  /** The leader `slot` sits less than a car length behind on its route, or -1. */
+  private tooCloseBehind(slot: number): number {
+    const V = this.vehicles;
+    const lane = V.lane[slot]!;
+    const s = V.s[slot]!;
+    const rank = this.rank[slot]!;
+    if (rank > 0) {
+      const leader = this.order[this.bucketStart[lane]! + rank - 1]!;
+      return V.s[leader]! - s < VEHICLE_LENGTH - 1e-4 ? leader : -1;
+    }
+    let distance = this.laneLen[lane]! - s;
+    let next = this.routing.nextHop(V.dest[slot]!, lane);
+    while (next >= 0 && distance < VEHICLE_LENGTH) {
+      if (this.bucketCount[next]! > 0) {
+        const leader = this.tail(next);
+        return distance + V.s[leader]! < VEHICLE_LENGTH - 1e-4 ? leader : -1;
+      }
+      distance += this.laneLen[next]!;
+      next = this.routing.nextHop(V.dest[slot]!, next);
+    }
+    return -1;
   }
 
   // --- Spatial index ----------------------------------------------------------
@@ -448,9 +477,14 @@ export class World {
       lane[i] = L;
     }
 
+    this.updateLaneMinS();
+  }
+
+  private updateLaneMinS(): void {
+    const { s, lane, alive, highWater } = this.vehicles;
     this.laneMinS.fill(Infinity);
-    for (let i = 0; i < V.highWater; i++) {
-      if (V.alive[i] && s[i]! < this.laneMinS[lane[i]!]!) this.laneMinS[lane[i]!] = s[i]!;
+    for (let i = 0; i < highWater; i++) {
+      if (alive[i] && s[i]! < this.laneMinS[lane[i]!]!) this.laneMinS[lane[i]!] = s[i]!;
     }
   }
 
@@ -460,7 +494,6 @@ export class World {
       // Always draw both numbers so the random stream does not depend on traffic state.
       const arrival = this.rng.next();
       const pick = this.rng.next();
-      if (!this.admissionsOpen) continue;
       if (arrival >= sp.rate * DT || sp.destinations.length === 0) continue;
       if (this.laneMinS[sp.lane]! < minSpacing) continue;
       const dest = sp.destinations[Math.floor(pick * sp.destinations.length)]!;
@@ -512,6 +545,7 @@ export class World {
       spawned: this.spawned,
       completed: this.completed,
       lost: this.lost,
+      cleared: this.cleared,
       meanTripTime: this.completed > 0 ? this.tripTimeSum / this.completed : 0,
       meanSpeed: V.count > 0 ? speedSum / V.count : 0,
       stoppedShare: V.count > 0 ? stopped / V.count : 0,

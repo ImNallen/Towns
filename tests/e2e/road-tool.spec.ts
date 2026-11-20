@@ -84,7 +84,7 @@ test.describe('touch controls', () => {
   });
 });
 
-test('cancel a deferred undo without removing the road or its traffic', async ({ page }) => {
+test('undo the only link under traffic applies at once and clears the stranded cars', async ({ page }) => {
   await page.goto('/?speed=0&x=0&y=0&mpp=0.5');
   const editor = () => page.evaluate(() => window.__towns?.editor());
   await expect.poll(editor).toMatchObject({ pending: false });
@@ -99,17 +99,14 @@ test('cancel a deferred undo without removing the road or its traffic', async ({
   await expect.poll(editor).toMatchObject({ connected: true });
   await page.keyboard.press('4');
   await expect.poll(() => stat('active')).toBeGreaterThan(1);
-  await page.getByRole('button', { name: 'Pause simulation' }).click();
-  const active = await stat('active');
   await page.getByRole('button', { name: 'Undo road' }).click();
-  await expect(page.getByRole('button', { name: 'Resume traffic' })).toBeVisible();
-  await page.getByRole('button', { name: 'Cancel edit' }).click();
-  await expect.poll(editor).toMatchObject({ pending: false, connected: true, roadCount: 1 });
-  expect(await stat('active')).toBe(active);
-  await page.keyboard.press('4');
-  await expect.poll(() => stat('completed'), { timeout: 20_000 }).toBeGreaterThan(0);
+  await expect.poll(editor, { timeout: 1000 }).toMatchObject({ pending: false, connected: false, roadCount: 0 });
+  await expect.poll(() => stat('active'), { timeout: 1000 }).toBe(0);
+  expect(await stat('cleared')).toBeGreaterThan(1);
+  expect(await stat('lost')).toBe(0);
+  await expect(page.getByRole('button', { name: 'Cancel edit' })).toHaveCount(0);
 
-  function stat(key: 'active' | 'completed') {
+  function stat(key: 'active' | 'cleared' | 'lost') {
     return page.evaluate((name) => window.__towns?.stats()?.[name] ?? 0, key);
   }
 });

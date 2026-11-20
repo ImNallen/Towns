@@ -135,7 +135,6 @@ export function App({ game }: { game: Game }) {
       {editor && <section className="editor" aria-label="Road editor">
         <div className="placement-info panel">
           <p role="status" aria-live="polite">{instruction}</p>
-          {editor.canCancel && editor.pending && speed === 0 && <button className="cancel-edit" onClick={() => changeSpeed(lastSpeed)}>Resume traffic</button>}
           {editor.canCancel && <button className="cancel-edit" onClick={() => game.cancelRoadEdit()}>Cancel edit</button>}
           {editor.chaining && <button className="cancel-edit" onClick={() => {
             game.cancelRoadEdit();
