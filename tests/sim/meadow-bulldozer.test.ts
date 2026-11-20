@@ -203,8 +203,18 @@ describe('meadow bulldozer history', () => {
     expect(rebuilt[1]!.x).toBe(center.x);
   });
 
-  it('keeps ordinary free tips from acquiring perpendicular extensions', () => {
-    expect(planMeadowRoad([], { x: -45, y: -8 }, { x: -45, y: -45 }).ok).toBe(false);
+  it('turns an ordinary free tip into a square corner that carries traffic', () => {
+    const edits: MeadowEdit[] = [];
+    const corner = { x: -45, y: -8 };
+    build(edits, corner, { x: -45, y: -45 });
+    const built = meadowSegments(edits).at(-1)!;
+    expect(built.every((p) => Math.abs(p.x - corner.x) < 1e-9)).toBe(true);
+    expect(connectors(edits)).toHaveLength(2);
+    build(edits, { x: -45, y: -45 }, { x: 45, y: 8 });
+    const world = new World(meadowScenario(edits), 5);
+    for (let i = 0; i < 300 / DT; i++) world.step();
+    expect(world.stats().completed).toBeGreaterThan(40);
+    expect(world.stats().lost).toBe(0);
   });
 
   it('protects portal approaches and ignores invalid removal indices', () => {

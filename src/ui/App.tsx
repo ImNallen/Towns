@@ -87,8 +87,8 @@ export function App({ game }: { game: Game }) {
     : editor?.tool === 'pan' ? 'Drag the map to pan.'
     : editor?.tool === 'bulldoze' ? 'Select a street segment to remove.'
     : editor?.tool === 'curve' ? 'Drag between two points, then place the bend.'
-    : editor?.connected ? 'Drag across a street for a crossing, or from its side for a branch.'
-    : 'Drag from one marked road end to the other to connect them.');
+    : editor?.connected ? 'Drag across a street for a crossing or from its side for a branch, or click points one by one.'
+    : 'Drag between marked ends to connect them, or click points one by one.');
   const tripStatus = editor?.pending ? 'Updating roads' : speed === 0 ? 'Paused' : editor && !editor.connected ? 'Waiting for a connection' : 'Traffic running';
 
   return (
@@ -137,13 +137,17 @@ export function App({ game }: { game: Game }) {
           <p role="status" aria-live="polite">{instruction}</p>
           {editor.canCancel && editor.pending && speed === 0 && <button className="cancel-edit" onClick={() => changeSpeed(lastSpeed)}>Resume traffic</button>}
           {editor.canCancel && <button className="cancel-edit" onClick={() => game.cancelRoadEdit()}>Cancel edit</button>}
+          {editor.chaining && <button className="cancel-edit" onClick={() => {
+            game.cancelRoadEdit();
+            setEditor(game.editor());
+          }}>Finish road</button>}
           {editor.tool === 'road' && <label className="angle-toggle">
             <input type="checkbox" checked={editor.angleSnapping} onChange={(e) => {
               game.setAngleSnapping(e.target.checked);
               setEditor(game.editor());
             }} /> Angle snap
           </label>}
-          <span className="mouse-help">{editor.tool !== 'pan' ? 'Esc cancels · ' : ''}Scroll to zoom · Right-drag to pan</span>
+          <span className="mouse-help">{editor.tool === 'pan' ? '' : editor.chaining ? 'Esc finishes · ' : 'Esc cancels · '}Scroll to zoom · Right-drag to pan</span>
         </div>
         <div className="tool-bar panel" role="group" aria-label="Map tools">
           <button aria-label="Build road" aria-pressed={editor.tool === 'road'} aria-keyshortcuts="R" className={editor.tool === 'road' ? 'active tool' : 'tool'} onClick={() => changeTool('road')} title="Build road (R)">

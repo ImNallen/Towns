@@ -84,6 +84,12 @@ export function angleGuide(streets: readonly Street[], host: StreetPoint, cursor
     }
     return undefined;
   }
+  if (host.kind === 'tip') {
+    const normal = perp(host.tangent);
+    const across = dot(normal, sub(cursor, start)) < 0 ? scale(normal, -1) : normal;
+    return capture(start, cursor, 'Straight', host.tangent, host.tangent)
+      ?? capture(start, cursor, '90°', across, host.tangent);
+  }
   if (host.kind !== 'street') return capture(start, cursor, 'Straight', host.tangent, host.tangent);
   const local = localAngle(start, cursor, host.tangent);
   if (local) return local;

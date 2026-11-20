@@ -21,14 +21,19 @@ export interface EditorState {
   canCancel: boolean;
   canUndo: boolean;
   angleSnapping: boolean;
+  chaining: boolean;
 }
+
+const CHAIN_HINT = 'Click to place the next point. Click the last point or press Esc to finish.';
 
 type EditPhase =
   | { kind: 'idle' }
   | { kind: 'drawing'; id: number; host: StreetPoint | undefined; start: Vec2; press: Vec2; pointer: PointerEvent }
   | { kind: 'removing'; id: number; segment: number; press: Vec2 }
   | { kind: 'bending'; start: Vec2; end: Vec2; id: number | null }
-  | { kind: 'pending' | 'waiting' };
+  | { kind: 'chaining'; host: StreetPoint | undefined; start: Vec2; id: number | null }
+  | { kind: 'pending'; chain?: { from: Vec2; to: Vec2 } }
+  | { kind: 'waiting' };
 
 function roadMarker(): THREE.Group {
   const marker = new THREE.Group();
@@ -78,6 +83,7 @@ export class RoadEditor {
   private readonly hover = roadMarker();
   private preview: THREE.Group | null = null;
   private move: PointerEvent | null = null;
+  private pointer: PointerEvent | null = null;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -91,7 +97,11 @@ export class RoadEditor {
     this.hover.visible = false;
     scene.add(this.handles, this.hover, this.boundary);
     canvas.addEventListener('pointerdown', (e) => this.begin(e), { signal });
-    canvas.addEventListener('pointermove', (e) => { if (e.isPrimary) this.move = e; }, { signal });
+    canvas.addEventListener('pointermove', (e) => {
+      if (!e.isPrimary) return;
+      this.move = e;
+      this.pointer = e;
+    }, { signal });
     canvas.addEventListener('pointerleave', () => {
       this.hover.visible = false;
       this.move = null;
@@ -110,7 +120,7 @@ export class RoadEditor {
     const kind = this.phase.kind;
     return {
       tool: this.tool, hint: this.hint, roadCount: this.roadCount, connected: this.connected,
-      angleSnapping: this.angleSnapping,
+      angleSnapping: this.angleSnapping, chaining: kind === 'chaining',
       pending: kind === 'pending' || kind === 'waiting',
       canCancel: kind === 'bending' || kind === 'waiting',
       canUndo: this.edits.length > 0,
@@ -124,6 +134,7 @@ export class RoadEditor {
   setAngleSnapping(enabled: boolean): void {
     this.angleSnapping = enabled;
     if (this.phase.kind === 'drawing') this.move ??= this.phase.pointer;
+    else if (this.phase.kind === 'chaining') this.move ??= this.pointer;
   }
 
   setTool(tool: MapTool): void {
@@ -135,6 +146,7 @@ export class RoadEditor {
   }
 
   accept(edits: readonly MeadowEdit[]): void {
+    const chain = this.phase.kind === 'pending' ? this.phase.chain : undefined;
     const latest = edits.at(-1);
     const removed = edits.length > this.edits.length && latest && 'remove' in latest;
     this.edits = edits;
@@ -151,6 +163,11 @@ export class RoadEditor {
       marker.position.set(tip.x, 0, -tip.y);
       this.handles.add(marker);
     }
+    const tip = chain && layout.tips.find((p) => distance(p, chain.to) < 1e-6);
+    if (tip) {
+      this.chain(tip);
+      this.move = this.pointer;
+    }
     this.update();
   }
 
@@ -160,7 +177,9 @@ export class RoadEditor {
   }
 
   reject(reason: string): void {
-    this.finish();
+    const chain = this.phase.kind === 'pending' ? this.phase.chain : undefined;
+    if (chain) this.chain(chain.from);
+    else this.finish();
     this.hint = reason;
   }
 
@@ -200,8 +219,12 @@ export class RoadEditor {
     return this.camera.screenToWorld(e.clientX - bounds.left, e.clientY - bounds.top);
   }
 
+  private reach(): number {
+    return Math.min(10, Math.max(3, 18 * this.camera.mpp));
+  }
+
   private snap(p: Vec2, extraReach = 0): StreetPoint | undefined {
-    return snapToMeadowStreet(this.streets, p, Math.min(10, Math.max(3, 18 * this.camera.mpp)) + extraReach);
+    return snapToMeadowStreet(this.streets, p, this.reach() + extraReach);
   }
 
   private segmentAt(cursor: Vec2): number | null {
@@ -237,6 +260,7 @@ export class RoadEditor {
           && Math.abs(dot(landing.tangent, square.direction)) < 1e-6) return square;
       }
     }
+    if (host?.kind === 'tip' && snap?.kind === 'tip') return undefined;
     let guide = host ? angleGuide(this.streets, host, cursor) : crossingAngleGuide(this.streets, start, cursor);
     if (guide && snap) {
       guide = fitGuideToStreet(guide, start, snap, Math.min(8, 14 * this.camera.mpp));
@@ -261,7 +285,7 @@ export class RoadEditor {
   private begin(e: PointerEvent): void {
     if (e.button !== 0 || !e.isPrimary || this.tool === 'pan') return;
     this.move = null;
-    if (this.phase.kind === 'bending') {
+    if (this.phase.kind === 'bending' || this.phase.kind === 'chaining') {
       this.phase.id = e.pointerId;
       this.canvas.setPointerCapture(e.pointerId);
       this.point(e, false);
@@ -286,7 +310,7 @@ export class RoadEditor {
     const start = host?.point ?? cursor;
     this.mark(start);
     this.phase = { kind: 'drawing', host, start, id: e.pointerId, pointer: e, press: { x: e.clientX, y: e.clientY } };
-    this.hint = host ? 'Drag to the other end of your new road.' : 'Drag across an existing street to build a crossing.';
+    this.hint = host ? 'Drag to the other end of your new road.' : 'Drag to lay a new road, or click to place it point by point.';
     this.canvas.setPointerCapture(e.pointerId);
   }
 
@@ -316,14 +340,25 @@ export class RoadEditor {
       this.place(phase.start, phase.end, cursor, release, 'Release or click to build this curve.');
       return;
     }
-    if (phase.kind !== 'drawing' || e.pointerId !== phase.id) return;
-    phase.pointer = e;
-    const { host, press, start } = phase;
-    if (Math.hypot(e.clientX - press.x, e.clientY - press.y) < 3) {
-      this.clearPreview();
-      if (release) this.finish();
-      return;
-    }
+    if (phase.kind === 'chaining') {
+      if (phase.id === null ? release : e.pointerId !== phase.id) return;
+      if (distance(cursor, phase.start) <= this.reach()) {
+        this.clearPreview();
+        this.mark(phase.start);
+        if (release) this.finish();
+        else this.hint = CHAIN_HINT;
+        return;
+      }
+    } else if (phase.kind === 'drawing' && e.pointerId === phase.id) {
+      phase.pointer = e;
+      if (Math.hypot(e.clientX - phase.press.x, e.clientY - phase.press.y) < 3) {
+        this.clearPreview();
+        if (release && this.tool === 'road') this.chain(phase.start);
+        else if (release) this.finish();
+        return;
+      }
+    } else return;
+    const { host, start } = phase;
     const snap = this.snap(cursor);
     const guide = this.roadGuide(host, start, cursor, snap);
     const end = guide?.end ?? snap?.point ?? cursor;
@@ -337,7 +372,8 @@ export class RoadEditor {
       return;
     }
     const joinedSide = guide?.label === '90° at both ends' || guide?.label === '90° at junction';
-    const hint = this.tool === 'curve' ? 'Release to set the end, then place the bend.'
+    const hint = phase.kind === 'chaining' ? CHAIN_HINT
+      : this.tool === 'curve' ? 'Release to set the end, then place the bend.'
       : host?.kind === 'tip' && snap?.kind === 'tip' ? 'Release to connect the road ends.'
       : snap || joinedSide ? 'Release to connect the streets.' : 'Release to extend the street.';
     this.place(start, end, undefined, release, hint, guide);
@@ -347,25 +383,21 @@ export class RoadEditor {
     const plan = planMeadowRoad(this.edits, start, end, bend);
     this.clearPreview();
     if (!plan.ok) {
-      if (release && this.phase.kind !== 'bending') this.finish();
-      else if (distance(start, end) > 0.1) {
+      if (distance(start, end) > 0.1) {
         this.guide(polyline(plan.points ?? (bend ? [start, bend, end] : [start, end])), PALETTE.editorInvalid, plan.points ? MEADOW_ROAD_WIDTH : 0);
       }
-      if (release && this.phase.kind === 'bending') this.phase.id = null;
       this.hint = !release && this.phase.kind === 'drawing' && this.tool === 'curve' ? hint : plan.reason;
-      return;
     }
     if (release) {
-      this.finish();
-      this.phase = { kind: 'pending' };
-      this.send({ type: 'buildRoad', start, end, bend });
+      this.release(plan, start, end, bend);
       return;
     }
+    if (!plan.ok) return;
     const fourWays = plan.road.fourWays ?? [];
     const placingBendEnd = this.tool === 'curve' && this.phase.kind === 'drawing';
     if (fourWays.length && !placingBendEnd) {
       const count = fourWays.length === 1 ? 'a four-way intersection' : `${fourWays.length} four-way intersections`;
-      hint = `Release to build ${count}.`;
+      hint = `${this.phase.kind === 'chaining' ? 'Click' : 'Release'} to build ${count}.`;
     }
     this.hint = alignment ? `${alignment.label} · ${hint}` : hint;
     const preview = buildRoads(meadowScenario([...this.edits, plan.road]).network, 'dashed');
@@ -386,6 +418,26 @@ export class RoadEditor {
     this.setRoadVisibility(false);
     this.scene.add(preview);
     this.preview = preview;
+  }
+
+  private release(plan: ReturnType<typeof planMeadowRoad>, start: Vec2, end: Vec2, bend: Vec2 | undefined): void {
+    const phase = this.phase;
+    if (plan.ok) {
+      this.finish();
+      this.phase = phase.kind === 'chaining' ? { kind: 'pending', chain: { from: start, to: end } } : { kind: 'pending' };
+      this.send({ type: 'buildRoad', start, end, bend });
+    } else if (phase.kind === 'bending' || phase.kind === 'chaining') {
+      phase.id = null;
+    } else {
+      this.finish();
+      this.hint = plan.reason;
+    }
+  }
+
+  private chain(start: Vec2): void {
+    this.finish();
+    this.phase = { kind: 'chaining', host: snapToMeadowStreet(this.streets, start, 1e-6), start, id: null };
+    this.hint = CHAIN_HINT;
   }
 
   private drawAngle(preview: THREE.Group, roadStart: Vec2, guide: AngleGuide): void {
@@ -436,17 +488,18 @@ export class RoadEditor {
 
   private cancelPointer(e: PointerEvent): void {
     const phase = this.phase;
-    if ((phase.kind === 'drawing' || phase.kind === 'bending' || phase.kind === 'removing') && phase.id === e.pointerId) this.cancelDraft();
+    if ('id' in phase && phase.id === e.pointerId) this.cancelDraft();
   }
 
   private cancelDraft(): void {
-    if (!this.state().pending) this.finish();
+    if (this.phase.kind === 'pending') this.phase = { kind: 'pending' };
+    else if (this.phase.kind !== 'waiting') this.finish();
   }
 
   private finish(): void {
     const phase = this.phase;
     this.phase = { kind: 'idle' };
-    if ((phase.kind === 'drawing' || phase.kind === 'bending' || phase.kind === 'removing') && phase.id !== null && this.canvas.hasPointerCapture(phase.id)) {
+    if ('id' in phase && phase.id !== null && this.canvas.hasPointerCapture(phase.id)) {
       this.canvas.releasePointerCapture(phase.id);
     }
     this.move = null;
