@@ -1,8 +1,10 @@
-import type { HouseholdView, TownEventView, TownView } from '../sim/town/town';
+import { PALETTE } from '../render/palette';
+import type { HouseholdView, PersonView, TownEventView, TownView } from '../sim/town/town';
 
-const FEED_LENGTH = 4;
+const FEED_LENGTH = 3;
 const ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth'];
 export const CAR_MODELS = ['Compact', 'Estate', 'Tourer'] as const;
+const HOMES = ['Cottage', 'Family home', 'Two-storey home'];
 
 const pad = (n: number): string => String(n).padStart(2, '0');
 
@@ -51,17 +53,14 @@ export function TownPanel({ town }: { town: TownView }) {
   const recent = town.events.slice(-FEED_LENGTH).reverse();
   return (
     <section className="town panel" aria-label="Residents">
-      <div className="panel-heading"><span>Residents</span></div>
-      <div className="town-summary">
-        <strong>{totals.population}</strong>
-        <span>people in {town.households.length} homes</span>
-      </div>
+      <div className="panel-heading"><span>Residents</span><span>{town.households.length} homes</span></div>
       <dl className="town-stats">
-        <dt>Employed adults</dt><dd>{totals.employed} / {totals.adults}</dd>
-        <dt>Working across town</dt><dd>{totals.crossCommuters}</dd>
-        <dt>Cars</dt><dd>{totals.cars}</dd>
-        <dt>Homes upgraded</dt><dd>{upgraded}</dd>
-        <dt>Avg household funds</dt><dd>{money(totals.meanFunds)}</dd>
+        <div><dt>people</dt><dd>{totals.population}</dd></div>
+        <div><dt>adults employed</dt><dd>{totals.employed}/{totals.adults}</dd></div>
+        <div><dt>cross-commuting</dt><dd>{totals.crossCommuters}</dd></div>
+        <div><dt>cars</dt><dd>{totals.cars}</dd></div>
+        <div><dt>homes upgraded</dt><dd>{upgraded}</dd></div>
+        <div><dt>avg. funds</dt><dd>{money(totals.meanFunds)}</dd></div>
       </dl>
       {recent.length > 0 && <ol className="town-feed" aria-label="Recent events">
         {recent.map((event) => (
@@ -71,6 +70,64 @@ export function TownPanel({ town }: { town: TownView }) {
           </li>
         ))}
       </ol>}
+    </section>
+  );
+}
+
+function activity(person: PersonView): string {
+  const { place } = person;
+  switch (person.activity) {
+    case 'home': return 'At home';
+    case 'homebound': return 'Driving home';
+    case 'outbound': return person.errand === 'work' ? `Driving to work in ${place}` : `Driving to the shops in ${place}`;
+    case 'away': return person.errand === 'work' ? `At work in ${place}` : `Shopping in ${place}`;
+  }
+}
+
+function Need({ label, value }: { label: string; value: number }) {
+  const percent = Math.round(value * 100);
+  return (
+    <div className="need">
+      <span>{label}</span>
+      <div className={`need-bar${value < 0.34 ? ' low' : ''}`} role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
+        <i style={{ width: `${percent}%` }} />
+      </div>
+    </div>
+  );
+}
+
+export function HouseholdCard({ household, onClose }: { household: HouseholdView; onClose: () => void }) {
+  const { needs } = household;
+  const model = CAR_MODELS[household.carModel - 1];
+  return (
+    <section className="household panel" aria-label="Household">
+      <div className="panel-heading">
+        <span>{household.region} · {HOMES[household.level - 1]}</span>
+        <button className="close" onClick={onClose} aria-label="Close household" title="Close (Esc)">×</button>
+      </div>
+      <h2 className="household-name">{family(household)}</h2>
+      <p className="household-meta">
+        <span><i className="car-swatch" style={{ background: PALETTE.carModels[household.carModel - 1] }} aria-hidden="true" />{household.cars} {model}{household.cars === 1 ? '' : 's'}</span>
+        <span>{money(household.funds)}</span>
+      </p>
+      <div className="needs">
+        <Need label="Food" value={needs.food} />
+        <Need label="Comfort" value={needs.comfort} />
+        <Need label="Mobility" value={needs.mobility} />
+        <Need label="Security" value={needs.security} />
+        <Need label="Happiness" value={household.happiness} />
+      </div>
+      <ul className="members">
+        {household.members.map((person) => (
+          <li key={person.id}>
+            <div>
+              <strong>{person.firstName}, {person.age === 0 ? 'baby' : person.age}</strong>
+              {person.role === 'adult' && <span>{person.job ? `Works in ${person.job}` : 'Looking for work'}</span>}
+            </div>
+            <span className="member-activity">{activity(person)}</span>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

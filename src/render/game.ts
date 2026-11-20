@@ -32,6 +32,9 @@ export interface Game {
   stats(): SimStats | null;
   /** Residents and the town clock; null on maps without a town. */
   town(): TownView | null;
+  /** Index into `scenario.decor.houses` (= `HouseholdView.home`) of the inspected house. */
+  selectedHouse(): number | null;
+  selectHouse(house: number | null): void;
   fps(): number;
   speed(): number;
   setSpeed(speed: number): void;
@@ -86,12 +89,20 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   let speed = options.speed;
   let latestStats: SimStats | null = null;
   let latestTown: TownView | null = null;
+  let selectedHouse: number | null = null;
+  const selectHouse = (house: number | null): void => {
+    selectedHouse = house;
+    houses?.select(house);
+  };
 
   const worker = new Worker(new URL('../worker/sim.worker.ts', import.meta.url), { type: 'module' });
   const send = (msg: ToWorker): void => worker.postMessage(msg);
 
   if (options.scenario === 'meadow') editor = new RoadEditor(canvas, mapCamera, scene, send, (visible) => {
     if (roadLayer) roadLayer.visible = visible;
+  }, {
+    houseAt: (p) => (latestTown ? houses?.houseAt(p) ?? null : null),
+    select: selectHouse,
   });
 
   const drawNetwork = (network: Network): void => {
@@ -177,6 +188,8 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     cancelRoadEdit: () => editor?.cancel(),
     stats: () => (ready ? latestStats : null),
     town: () => latestTown,
+    selectedHouse: () => selectedHouse,
+    selectHouse,
     fps: () => fps,
     speed: () => speed,
     setSpeed(next) {

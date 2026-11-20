@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Game } from '../render/game';
-import { dayClock, TownPanel } from './town';
+import { dayClock, HouseholdCard, TownPanel } from './town';
 
 const SPEEDS = [1, 2, 4, 8] as const;
 type Editor = ReturnType<Game['editor']>;
@@ -16,6 +16,7 @@ function clock(seconds: number): string {
 export function App({ game }: { game: Game }) {
   const [stats, setStats] = useState(game.stats());
   const [town, setTown] = useState(game.town());
+  const [selected, setSelected] = useState(game.selectedHouse());
   const [editor, setEditor] = useState<Editor>(() => game.editor());
   const [fps, setFps] = useState(0);
   const [speed, setSpeed] = useState(game.speed());
@@ -26,6 +27,7 @@ export function App({ game }: { game: Game }) {
     const timer = setInterval(() => {
       setStats(game.stats());
       setTown(game.town());
+      setSelected(game.selectedHouse());
       setEditor(game.editor());
       setFps(game.fps());
     }, 100);
@@ -45,6 +47,10 @@ export function App({ game }: { game: Game }) {
     game.setTool(tool);
     setEditor(game.editor());
   };
+  const selectHouse = (house: number | null): void => {
+    game.selectHouse(house);
+    setSelected(house);
+  };
   const undo = (): void => {
     game.undoRoad();
     setEditor(game.editor());
@@ -62,7 +68,10 @@ export function App({ game }: { game: Game }) {
         return;
       }
       if (e.altKey || e.repeat) return;
-      if (editor && e.key.toLowerCase() === 'r') {
+      if (e.key === 'Escape') {
+        // Esc finishes a road in progress first; the next one closes the household card.
+        if (selected !== null && !editor?.chaining && !editor?.canCancel) selectHouse(null);
+      } else if (editor && e.key.toLowerCase() === 'r') {
         changeTool('road');
       } else if (editor && e.key.toLowerCase() === 'c') {
         changeTool('curve');
@@ -92,51 +101,55 @@ export function App({ game }: { game: Game }) {
     : editor?.tool === 'curve' ? 'Drag between two points, then place the bend.'
     : editor?.connected ? 'Drag across a street for a crossing or from its side for a branch, or click points one by one.'
     : 'Drag between marked ends to connect them, or click points one by one.');
+  const household = selected === null ? undefined : town?.households.find((h) => h.home === selected);
   const tripStatus = editor?.pending ? 'Updating roads' : speed === 0 ? 'Paused' : editor && !editor.connected ? 'Waiting for a connection' : 'Traffic running';
 
   return (
     <aside className="hud" aria-label="Map controls">
       <div className="hud-column left">
-      <section className="map-info panel" aria-label="Map objective">
-        <header className="map-heading">
-          <span className="wordmark">Towns</span>
-        </header>
-        <h1>{editor ? 'Meadow Vale' : 'Traffic study'}</h1>
-        {editor && <div className={`objective${editor.connected ? ' is-complete' : ''}`}>
-          <span className="objective-marker" aria-hidden="true">{editor.connected ? '✓' : '○'}</span>
-          <h2>{editor.connected ? 'Neighborhoods connected' : 'Connect the two neighborhoods'}</h2>
-        </div>}
-        <div className="trip-summary">
-          <div><strong>{stats?.completed ?? 0}</strong><span>{stats?.completed === 1 ? 'trip' : 'trips'} completed</span></div>
-          <span className="traffic-status"><i className={speed > 0 && (!editor || editor.connected) && !editor?.pending ? 'running' : ''} aria-hidden="true" />{tripStatus}</span>
-        </div>
-      </section>
-      {town && <TownPanel town={town} />}
+        <section className="map-info panel" aria-label="Map objective">
+          <header className="map-heading">
+            <span className="wordmark">Towns</span>
+          </header>
+          <h1>{editor ? 'Meadow Vale' : 'Traffic study'}</h1>
+          {editor && <div className={`objective${editor.connected ? ' is-complete' : ''}`}>
+            <span className="objective-marker" aria-hidden="true">{editor.connected ? '✓' : '○'}</span>
+            <h2>{editor.connected ? 'Neighborhoods connected' : 'Connect the two neighborhoods'}</h2>
+          </div>}
+          <div className="trip-summary">
+            <div><strong>{stats?.completed ?? 0}</strong><span>{stats?.completed === 1 ? 'trip' : 'trips'} completed</span></div>
+            <span className="traffic-status"><i className={speed > 0 && (!editor || editor.connected) && !editor?.pending ? 'running' : ''} aria-hidden="true" />{tripStatus}</span>
+          </div>
+        </section>
+        {town && <TownPanel town={town} />}
       </div>
 
-      <section className="simulation panel" aria-label="Simulation">
-        <div className="simulation-heading"><span>Simulation</span><time className="clock">{town ? dayClock(town) : stats ? clock(stats.time) : '00:00:00'}</time></div>
-        <div className="controls" role="group" aria-label="Simulation speed">
-          <button className={speed === 0 ? 'active pause' : 'pause'} onClick={() => changeSpeed(speed === 0 ? lastSpeed : 0)} aria-label={speed === 0 ? 'Resume simulation' : 'Pause simulation'} title="Pause / resume (Space)" aria-pressed={speed === 0}>
-            <span aria-hidden="true">{speed === 0 ? '▶' : 'Ⅱ'}</span>
-          </button>
-          {SPEEDS.map((s, i) => (
-            <button key={s} className={speed === s ? 'active' : ''} onClick={() => changeSpeed(s)} aria-label={`${s}× speed`} aria-pressed={speed === s} title={`${s}× speed (${i + 1})`}>{s}×</button>
-          ))}
-        </div>
-        <details className="traffic-details">
-          <summary>Traffic details</summary>
-          <dl>
-            <dt>Vehicles</dt><dd>{stats?.active ?? 0}</dd>
-            <dt>Trips / min</dt><dd>{stats?.completedLastMinute ?? 0}</dd>
-            <dt>Avg speed</dt><dd>{stats ? `${(stats.meanSpeed * 3.6).toFixed(0)} km/h` : '–'}</dd>
-            <dt>Stopped</dt><dd>{stats ? `${(stats.stoppedShare * 100).toFixed(0)}%` : '–'}</dd>
-            <dt>Avg trip</dt><dd>{stats ? `${stats.meanTripTime.toFixed(0)} s` : '–'}</dd>
-          </dl>
-          <label className="toggle"><input type="checkbox" checked={lanes} onChange={toggleLanes} />Lane graph <kbd>L</kbd></label>
-          <div className="performance">{fps.toFixed(0)} fps</div>
-        </details>
-      </section>
+      <div className="hud-column right">
+        <section className="simulation panel" aria-label="Simulation">
+          <div className="simulation-heading"><span>Simulation</span><time className="clock">{town ? dayClock(town) : stats ? clock(stats.time) : '00:00:00'}</time></div>
+          <div className="controls" role="group" aria-label="Simulation speed">
+            <button className={speed === 0 ? 'active pause' : 'pause'} onClick={() => changeSpeed(speed === 0 ? lastSpeed : 0)} aria-label={speed === 0 ? 'Resume simulation' : 'Pause simulation'} title="Pause / resume (Space)" aria-pressed={speed === 0}>
+              <span aria-hidden="true">{speed === 0 ? '▶' : 'Ⅱ'}</span>
+            </button>
+            {SPEEDS.map((s, i) => (
+              <button key={s} className={speed === s ? 'active' : ''} onClick={() => changeSpeed(s)} aria-label={`${s}× speed`} aria-pressed={speed === s} title={`${s}× speed (${i + 1})`}>{s}×</button>
+            ))}
+          </div>
+          <details className="traffic-details">
+            <summary>Traffic details</summary>
+            <dl>
+              <dt>Vehicles</dt><dd>{stats?.active ?? 0}</dd>
+              <dt>Trips / min</dt><dd>{stats?.completedLastMinute ?? 0}</dd>
+              <dt>Avg speed</dt><dd>{stats ? `${(stats.meanSpeed * 3.6).toFixed(0)} km/h` : '–'}</dd>
+              <dt>Stopped</dt><dd>{stats ? `${(stats.stoppedShare * 100).toFixed(0)}%` : '–'}</dd>
+              <dt>Avg trip</dt><dd>{stats ? `${stats.meanTripTime.toFixed(0)} s` : '–'}</dd>
+            </dl>
+            <label className="toggle"><input type="checkbox" checked={lanes} onChange={toggleLanes} />Lane graph <kbd>L</kbd></label>
+            <div className="performance">{fps.toFixed(0)} fps</div>
+          </details>
+        </section>
+        {household && <HouseholdCard household={household} onClose={() => selectHouse(null)} />}
+      </div>
 
       {editor && <section className="editor" aria-label="Road editor">
         <div className="placement-info panel">
