@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { add, distance, dot, fromAngle, normalize, perp, scale, sub, vec2 } from '../../src/sim/math/vec';
-import { angleGuide, fitGuideToStreet } from '../../src/sim/network/angleSnap';
+import { angleGuide, crossingAngleGuide, fitGuideToStreet } from '../../src/sim/network/angleSnap';
 import { meadowStreets, planMeadowRoad, snapToMeadowStreet } from '../../src/sim/scenarios/meadow';
 
 const streets = meadowStreets([]);
@@ -73,4 +73,22 @@ it('keeps a compatible target tip exact and releases the angle for an offset tip
     if (x === -65) expect(fitted?.end).toEqual(tip);
     else expect(fitted).toBeUndefined();
   }
+});
+
+it('places the right-angle guide on the actual junction when crossing a curved street from open ground', () => {
+  const arch = planMeadowRoad([], vec2(-45, -8), vec2(45, 8), vec2(0, 20));
+  if (!arch.ok) throw new Error(arch.reason);
+  const roads = [arch.road];
+  const streets = meadowStreets(roads);
+  const ref = snapToMeadowStreet(streets, vec2(-25, 15), 20)!;
+  const normal = perp(ref.tangent);
+  const start = add(ref.point, scale(normal, -30));
+  const cursor = add(add(ref.point, scale(normal, 30)), scale(ref.tangent, 1.5));
+  const guide = crossingAngleGuide(streets, start, cursor)!;
+  expect(guide.label).toBe('90°');
+  const plan = planMeadowRoad(roads, start, guide.end);
+  if (!plan.ok) throw new Error(plan.reason);
+  const junction = plan.road.fourWays![0]!;
+  expect(distance(junction.point, guide.origin)).toBeLessThan(1e-8);
+  expect(dot(junction.priorityAxis, guide.direction)).toBeCloseTo(0, 8);
 });

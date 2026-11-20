@@ -181,7 +181,7 @@ describe('meadow street graph', () => {
     const scenario = meadowScenario(structuredClone(roads));
     expect(scenario.network.surfaces[0]!.style).toBe('twoWay');
     expect(scenario.demand).toHaveLength(2);
-    expect(meadowSnap(roads, start, 1)).toBeUndefined();
+    expect(meadowSnap(roads, start, 1)).toEqual(start);
     expect(planMeadowRoad(roads, start, { x: start.x, y: -50 }).ok).toBe(false);
     roads.pop();
     expect(meadowScenario(roads)).toEqual(original);

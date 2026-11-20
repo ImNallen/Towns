@@ -168,3 +168,50 @@ describe('street junctions', () => {
     expect(world.stats().lost).toBe(0);
   });
 });
+
+describe('four-way priority intersections', () => {
+  const N = { x: 0, y: 100 };
+  const approaches = [W, E, S, N];
+  const { network } = build([...streets, [C, N]], approaches);
+  const moves = approaches.flatMap((from) => approaches.filter((to) => to !== from).map((to) => ({
+    from, to, turn: movement(network, from, to), dest: network.sinks.indexOf(arrival(network, to)),
+  })));
+
+  it('drives all twelve turns and through movements to the intended exits under contention', () => {
+    const world = new World(scenario(network), 1);
+    const cars = moves.map(({ from, dest }, i) => {
+      const enter = source(network, from);
+      return world.vehicles.spawn(enter, network.lanes[enter]!.length - 22 - i % 3 * 18, 6, dest, 0);
+    });
+    const traveled = new Set<number>();
+    for (let i = 0; i < 180 / DT; i++) {
+      world.step();
+      const occupied = new Set<number>();
+      for (const [index, slot] of cars.entries()) {
+        if (!world.vehicles.alive[slot]) continue;
+        const lane = network.lanes[world.vehicles.lane[slot]!]!;
+        if (lane.kind !== 'connector') continue;
+        expect(lane.id).toBe(moves[index]!.turn);
+        occupied.add(lane.id);
+        traveled.add(lane.id);
+      }
+      for (const id of occupied) {
+        expect(network.lanes[id]!.crossingYieldTo.some((conflict) => occupied.has(conflict))).toBe(false);
+      }
+    }
+    expect(traveled.size).toBe(12);
+    expect(world.stats()).toMatchObject({ completed: 12, lost: 0, active: 0 });
+  });
+
+  it('gives the main street priority and makes a left turn yield to oncoming through and right turns', () => {
+    const yields = (from: Vec2, to: Vec2) => network.lanes[movement(network, from, to)]!.crossingYieldTo;
+    expect(yields(W, E)).toEqual([]);
+    expect(yields(E, W)).toEqual([]);
+    expect(yields(S, N)).toContain(movement(network, W, E));
+    expect(yields(N, S)).toContain(movement(network, E, W));
+    expect(yields(W, N)).toContain(movement(network, E, W));
+    expect(yields(W, N)).toContain(movement(network, E, N));
+    expect(yields(S, W)).toContain(movement(network, N, S));
+    expect(yields(S, W)).toContain(movement(network, N, W));
+  });
+});

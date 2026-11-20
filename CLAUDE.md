@@ -76,9 +76,9 @@ The editor previews a placement with the same planner the worker uses to accept 
 
 ## Roadmap (rough order)
 
-1. Meadow Vale supports road extensions, deliberate curves, T-junctions, live edits, and undo.
+1. Meadow Vale supports road extensions, deliberate curves, T-junctions, four-way crossings, live edits, and undo.
    Future network tools can add arbitrary deletion and incremental routing for larger maps.
-2. Intersections: four-way junctions, then traffic lights.
+2. Traffic lights for busy intersections.
 3. Zoning + buildings as sim entities; trips generated from homes → jobs/shops instead of map edges.
 4. Congestion-aware routing (costs from measured lane speeds, recomputed across several ticks).
 5. Level of detail: aggregate flow for off-screen or distant areas.
