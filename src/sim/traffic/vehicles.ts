@@ -7,8 +7,10 @@ export class Vehicles {
   readonly alive: Uint8Array;
   readonly id: Int32Array;
   readonly lane: Int32Array;
-  /** Index into `Routing.sinks`. */
+  /** Routing destination index. */
   readonly dest: Int32Array;
+  /** Resident driving this car, or -1 for through traffic. */
+  readonly owner: Int32Array;
   /** Arc length of the front bumper along the lane, m. */
   readonly s: Float64Array;
   readonly v: Float64Array;
@@ -29,6 +31,7 @@ export class Vehicles {
     this.id = new Int32Array(capacity);
     this.lane = new Int32Array(capacity);
     this.dest = new Int32Array(capacity);
+    this.owner = new Int32Array(capacity).fill(-1);
     this.s = new Float64Array(capacity);
     this.v = new Float64Array(capacity);
     this.acc = new Float64Array(capacity);
@@ -45,6 +48,7 @@ export class Vehicles {
     this.id.set(source.id);
     this.lane.set(source.lane);
     this.dest.set(source.dest);
+    this.owner.set(source.owner);
     this.s.set(source.s);
     this.v.set(source.v);
     this.acc.set(source.acc);
@@ -57,13 +61,14 @@ export class Vehicles {
   }
 
   /** Returns the slot, or -1 when full. */
-  spawn(lane: number, s: number, v: number, dest: number, time: number): number {
+  spawn(lane: number, s: number, v: number, dest: number, time: number, owner = -1): number {
     if (this.freeTop === 0) return -1;
     const slot = this.freeSlots[--this.freeTop]!;
     this.alive[slot] = 1;
     this.id[slot] = this.nextId++;
     this.lane[slot] = lane;
     this.dest[slot] = dest;
+    this.owner[slot] = owner;
     this.s[slot] = s;
     this.v[slot] = v;
     this.acc[slot] = 0;

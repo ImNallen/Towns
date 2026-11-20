@@ -1,4 +1,5 @@
 import type { Network } from '../network/types';
+import type { AccessPoint } from '../traffic/routing';
 
 /** Vehicles entering the map at the start of a source lane. */
 export interface Demand {
@@ -43,10 +44,39 @@ export interface Bounds {
   maxY: number;
 }
 
+/** A house residents live in. `homes[i]` is `decor.houses[i]`. */
+export interface HomeSpec {
+  /** Where the driveway meets its street, one per direction. Empty when the street is gone. */
+  access: AccessPoint[];
+  /** The off-map town this neighbourhood grew up around. */
+  region: number;
+}
+
+/** An off-map town behind a portal, where residents work and shop. */
+export interface RegionSpec {
+  name: string;
+  /** Routing destination index (a sink) for trips into the region. */
+  sink: number;
+  /** Lane where trips leaving the region enter the map. */
+  source: number;
+  /** Per hour worked. */
+  wage: number;
+  jobs: number;
+  /** Groceries, per person per day of food. */
+  groceryPrice: number;
+}
+
+export interface TownSpec {
+  homes: HomeSpec[];
+  regions: RegionSpec[];
+}
+
 export interface Scenario {
   name: string;
   network: Network;
   demand: Demand[];
   decor: Decor;
   bounds: Bounds;
+  /** Residents and the places they travel to. Absent for traffic-only maps. */
+  town?: TownSpec;
 }
