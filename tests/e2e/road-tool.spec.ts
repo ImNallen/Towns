@@ -50,9 +50,10 @@ test('build a street, see a completed trip, and undo the connection', async ({ p
   await page.screenshot({ path: 'artifacts/screens/meadow-joins.png' });
 
   await page.getByRole('button', { name: 'Undo road', exact: true }).click();
-  await expect.poll(editor).toMatchObject({ roadCount: 0, connected: false });
+  await expect.poll(editor, { timeout: 30_000 }).toMatchObject({ roadCount: 0, connected: false });
   const stats = await page.evaluate(() => window.__towns?.stats());
-  expect(stats?.active).toBe(0);
+  expect(stats?.completed).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => window.__towns?.stats()?.active), { timeout: 15_000 }).toBe(0);
   expect(stats?.tick).toBeGreaterThan(0);
   expect(errors).toEqual([]);
 });
@@ -81,4 +82,34 @@ test.describe('touch controls', () => {
     await page.getByRole('button', { name: 'Undo road', exact: true }).tap();
     await expect.poll(editor).toMatchObject({ roadCount: 1, connected: false });
   });
+});
+
+test('cancel a deferred undo without removing the road or its traffic', async ({ page }) => {
+  await page.goto('/?speed=0&x=0&y=0&mpp=0.5');
+  const editor = () => page.evaluate(() => window.__towns?.editor());
+  await expect.poll(editor).toMatchObject({ pending: false });
+  const box = await page.locator('#map').boundingBox();
+  if (!box) throw new Error('Missing map');
+  const [west, east] = meadowTips([]);
+  const move = (tip: typeof west) => page.mouse.move(box.x + box.width / 2 + tip.x * 2, box.y + box.height / 2 - tip.y * 2);
+  await move(west);
+  await page.mouse.down();
+  await move(east);
+  await page.mouse.up();
+  await expect.poll(editor).toMatchObject({ connected: true });
+  await page.keyboard.press('4');
+  await expect.poll(() => stat('active')).toBeGreaterThan(1);
+  await page.getByRole('button', { name: 'Pause simulation' }).click();
+  const active = await stat('active');
+  await page.getByRole('button', { name: 'Undo road' }).click();
+  await expect(page.getByRole('button', { name: 'Resume traffic' })).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel edit' }).click();
+  await expect.poll(editor).toMatchObject({ pending: false, connected: true, roadCount: 1 });
+  expect(await stat('active')).toBe(active);
+  await page.keyboard.press('4');
+  await expect.poll(() => stat('completed'), { timeout: 20_000 }).toBeGreaterThan(0);
+
+  function stat(key: 'active' | 'completed') {
+    return page.evaluate((name) => window.__towns?.stats()?.[name] ?? 0, key);
+  }
 });

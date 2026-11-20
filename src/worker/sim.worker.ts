@@ -2,7 +2,7 @@
  * Owns the World and advances it on a fixed tick, independent of the frame rate.
  * Posts a compact snapshot whenever the simulation has advanced.
  */
-import { buildScenario } from '../sim/scenarios';
+import { buildScenario, type Scenario } from '../sim/scenarios';
 import { meadowScenario, planMeadowRoad, type MeadowRoad } from '../sim/scenarios/meadow';
 import { DT, World } from '../sim/world';
 import type { FromWorker, ToWorker } from './protocol';
@@ -12,7 +12,7 @@ const CAPACITY = 4096;
 const MAX_STEPS_PER_PUMP = 40;
 
 let roads: MeadowRoad[] = [];
-let seed = 1;
+let waiting: { roads: MeadowRoad[]; scenario: Scenario } | null = null;
 let world: World | null = null;
 let speed = 1;
 let accumulator = 0;
@@ -26,8 +26,8 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     case 'init': {
       const scenario = buildScenario(msg.scenario);
       roads = [];
-      seed = msg.seed;
-      world = new World(scenario, seed, CAPACITY);
+      waiting = null;
+      world = new World(scenario, msg.seed, CAPACITY);
       speed = msg.speed;
       accumulator = 0;
       last = performance.now();
@@ -41,27 +41,51 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
         post({ type: 'editRejected', reason: 'Open Meadow Vale to build a road.' });
         break;
       }
+      if (waiting) break;
+      let proposed: MeadowRoad[];
       if (msg.type === 'buildRoad') {
-        const plan = planMeadowRoad(roads, msg.start, msg.end);
+        const plan = planMeadowRoad(roads, msg.start, msg.end, msg.bend);
         if (!plan.ok) {
           post({ type: 'editRejected', reason: plan.reason });
           break;
         }
-        roads.push(plan.road);
+        proposed = [...roads, plan.road];
       } else {
-        roads.pop();
+        proposed = roads.slice(0, -1);
       }
-      const scenario = meadowScenario(roads);
-      world = new World(scenario, seed, CAPACITY, world.tick);
-      post({ type: 'roadsChanged', network: scenario.network, roads });
-      postFrame(world);
+      const edit = { roads: proposed, scenario: meadowScenario(proposed) };
+      if (!applyEdit(edit)) {
+        waiting = edit;
+        world.setAdmissions(false);
+        post({ type: 'editWaiting' });
+      }
       break;
     }
+    case 'cancelRoadEdit':
+      if (waiting) {
+        waiting = null;
+        world?.setAdmissions(true);
+        post({ type: 'editRejected', reason: 'Edit cancelled.' });
+      }
+      break;
     case 'setSpeed':
       speed = msg.speed;
       break;
   }
 };
+
+function applyEdit(edit: { roads: MeadowRoad[]; scenario: Scenario }): boolean {
+  if (!world) return false;
+  const result = world.editNetwork(edit.scenario);
+  if (!result.ok) return false;
+  world = result.world;
+  world.setAdmissions(true);
+  roads = edit.roads;
+  waiting = null;
+  post({ type: 'roadsChanged', network: edit.scenario.network, roads });
+  postFrame(world);
+  return true;
+}
 
 function postFrame(w: World): void {
   const positions = new Float32Array(w.vehicles.highWater * 3);
@@ -83,5 +107,8 @@ setInterval(() => {
     steps++;
   }
   if (steps === MAX_STEPS_PER_PUMP) accumulator = 0; // falling behind: drop time rather than spiral
-  if (steps > 0) postFrame(world);
+  if (steps > 0) {
+    if (waiting && (world.vehicles.count === 0 || Math.floor(world.tick / 20) !== Math.floor((world.tick - steps) / 20)) && applyEdit(waiting)) return;
+    postFrame(world);
+  }
 }, 1000 / 60);
