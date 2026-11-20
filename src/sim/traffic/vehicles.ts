@@ -38,6 +38,24 @@ export class Vehicles {
     this.freeTop = capacity;
   }
 
+  /** Copy every slot and the allocator, including recycled slots and the next id. */
+  copyFrom(source: Vehicles): void {
+    if (this.capacity !== source.capacity) throw new Error('Vehicle capacities must match');
+    this.alive.set(source.alive);
+    this.id.set(source.id);
+    this.lane.set(source.lane);
+    this.dest.set(source.dest);
+    this.s.set(source.s);
+    this.v.set(source.v);
+    this.acc.set(source.acc);
+    this.departTime.set(source.departTime);
+    this.freeSlots.set(source.freeSlots);
+    this.freeTop = source.freeTop;
+    this.nextId = source.nextId;
+    this.highWater = source.highWater;
+    this.count = source.count;
+  }
+
   /** Returns the slot, or -1 when full. */
   spawn(lane: number, s: number, v: number, dest: number, time: number): number {
     if (this.freeTop === 0) return -1;

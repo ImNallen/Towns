@@ -9,12 +9,14 @@ export type ToWorker =
   | { type: 'init'; scenario: ScenarioName; seed: number; speed: number }
   /** Simulation speed multiplier; 0 pauses. */
   | { type: 'setSpeed'; speed: number }
-  | { type: 'buildRoad'; start: Vec2; end: Vec2 }
-  | { type: 'undoRoad' };
+  | { type: 'buildRoad'; start: Vec2; end: Vec2; bend?: Vec2 }
+  | { type: 'undoRoad' }
+  | { type: 'cancelRoadEdit' };
 
 /** Simulation worker → main thread. */
 export type FromWorker =
   | { type: 'roadsChanged'; network: Network; roads: MeadowRoad[] }
+  | { type: 'editWaiting' }
   | { type: 'editRejected'; reason: string }
   | { type: 'ready'; scenario: Scenario; capacity: number }
   | {

@@ -8,9 +8,13 @@ pnpm exec playwright install chromium   # once, for screenshot tests
 pnpm dev
 ```
 
-Open the local address printed by Vite to play Meadow Vale. Drag from either marked street end to extend it. Release near the opposite marker to snap the streets together and start traffic in both directions. Follow the preview to build a gentle bend, or join the neighborhoods in one drag.
+Open the local address printed by Vite to play Meadow Vale. With **Road** selected, drag from a street end to extend it, or from the middle of a street to create a T-junction. Release on another street to connect. The preview shows the pavement and the space drivers need to turn.
 
-Choose **Pan** or right-drag to move the map. Scroll to zoom. **R** selects the road tool, **V** selects pan, **Escape** cancels a draft, and **Undo road** removes the last section. Undoing a completed connection clears its traffic so you can try a different route.
+For a winding road, select **Curve**, drag from the start to the end, then place a point on the bend. Move the pointer to preview the curve and click to build. On a touch screen, press and move to adjust the bend before lifting your finger.
+
+Cars travel between the two map entrances and follow the quickest available route by free-flow travel time. Connect the neighborhoods, then try building a shorter route while cars are moving. **Undo** removes the last section and restores the previous junctions. If a car still needs a removed section, new arrivals wait while traffic clears. Keep the simulation running to finish the edit or choose **Cancel edit**.
+
+**R** selects Road, **C** selects Curve, **V** selects Pan, and **Escape** cancels a draft. Right-drag to pan and scroll to zoom.
 
 **Space** pauses the simulation, **1–4** set speed, and **L** toggles the lane graph. The original traffic maps are available at `?scenario=roundabout` and `?scenario=straight`.
 

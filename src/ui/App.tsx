@@ -59,8 +59,10 @@ export function App({ game }: { game: Game }) {
         return;
       }
       if (e.altKey || e.repeat) return;
-      if (editor && e.key.toLowerCase() === 'r' && !editor.connected) {
+      if (editor && e.key.toLowerCase() === 'r') {
         changeTool('road');
+      } else if (editor && e.key.toLowerCase() === 'c') {
+        changeTool('curve');
       } else if (editor && e.key.toLowerCase() === 'v') {
         changeTool('pan');
       } else if (e.code === 'Space') {
@@ -80,9 +82,10 @@ export function App({ game }: { game: Game }) {
 
   const instruction = editor?.hint || (editor?.pending
     ? 'Updating roads…'
-    : editor?.tool === 'road'
-      ? 'Drag from a marked road end to build.'
-      : 'Drag the map to pan.');
+    : editor?.tool === 'pan' ? 'Drag the map to pan.'
+    : editor?.tool === 'curve' ? 'Drag between two points, then place the bend.'
+    : editor?.connected ? 'Drag from the side of a street to build a branch.'
+    : 'Drag from a street or a marked end to build.');
   const tripStatus = editor?.pending ? 'Updating roads' : speed === 0 ? 'Paused' : editor && !editor.connected ? 'Waiting for a connection' : 'Traffic running';
 
   return (
@@ -129,11 +132,16 @@ export function App({ game }: { game: Game }) {
       {editor && <section className="editor" aria-label="Road editor">
         <div className="placement-info panel">
           <p role="status" aria-live="polite">{instruction}</p>
-          <span className="mouse-help">{editor.tool === 'road' ? 'Esc cancels · ' : ''}Scroll to zoom · Right-drag to pan</span>
+          {editor.canCancel && editor.pending && speed === 0 && <button className="cancel-edit" onClick={() => changeSpeed(lastSpeed)}>Resume traffic</button>}
+          {editor.canCancel && <button className="cancel-edit" onClick={() => game.cancelRoadEdit()}>Cancel edit</button>}
+          <span className="mouse-help">{editor.tool !== 'pan' ? 'Esc cancels · ' : ''}Scroll to zoom · Right-drag to pan</span>
         </div>
         <div className="tool-bar panel" role="group" aria-label="Map tools">
-          <button aria-label="Build road" disabled={editor.connected} aria-pressed={editor.tool === 'road'} aria-keyshortcuts="R" className={editor.tool === 'road' ? 'active tool' : 'tool'} onClick={() => changeTool('road')} title="Build road (R)">
+          <button aria-label="Build road" aria-pressed={editor.tool === 'road'} aria-keyshortcuts="R" className={editor.tool === 'road' ? 'active tool' : 'tool'} onClick={() => changeTool('road')} title="Build road (R)">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 3-2 14m12-14 2 14M10 3v3m0 3v3m0 3v2" /></svg><span>Road</span><kbd>R</kbd>
+          </button>
+          <button aria-label="Build curved road" aria-pressed={editor.tool === 'curve'} aria-keyshortcuts="C" className={editor.tool === 'curve' ? 'active tool' : 'tool'} onClick={() => changeTool('curve')} title="Build curved road (C)">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2 16C13 16 5 4 18 4M2 12c7 0 1-12 16-12" /></svg><span>Curve</span><kbd>C</kbd>
           </button>
           <button aria-label="Pan" aria-pressed={editor.tool === 'pan'} aria-keyshortcuts="V" className={editor.tool === 'pan' ? 'active tool' : 'tool'} onClick={() => changeTool('pan')} title="Pan (V)">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v16M2 10h16M7 5l3-3 3 3M7 15l3 3 3-3M5 7l-3 3 3 3m10-6 3 3-3 3" /></svg><span>Pan</span><kbd>V</kbd>

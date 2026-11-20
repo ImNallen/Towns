@@ -24,6 +24,14 @@ export class Rng {
     for (let i = 0; i < 12; i++) this.nextU32();
   }
 
+  /** Continue precisely the same random stream without consuming a draw. */
+  copyFrom(source: Rng): void {
+    this.a = source.a;
+    this.b = source.b;
+    this.c = source.c;
+    this.d = source.d;
+  }
+
   nextU32(): number {
     let t = (this.a + this.b) | 0;
     this.a = this.b ^ (this.b >>> 9);

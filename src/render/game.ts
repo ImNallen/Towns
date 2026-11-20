@@ -25,6 +25,7 @@ export interface Game {
   editor(): EditorState | null;
   setTool(tool: MapTool): void;
   undoRoad(): void;
+  cancelRoadEdit(): void;
   stats(): SimStats | null;
   fps(): number;
   speed(): number;
@@ -82,7 +83,9 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   const worker = new Worker(new URL('../worker/sim.worker.ts', import.meta.url), { type: 'module' });
   const send = (msg: ToWorker): void => worker.postMessage(msg);
 
-  if (options.scenario === 'meadow') editor = new RoadEditor(canvas, mapCamera, scene, send);
+  if (options.scenario === 'meadow') editor = new RoadEditor(canvas, mapCamera, scene, send, (visible) => {
+    if (roadLayer) roadLayer.visible = visible;
+  });
 
   const drawNetwork = (network: Network): void => {
     if (roadLayer) disposeLayer(roadLayer);
@@ -113,6 +116,8 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     } else if (msg.type === 'roadsChanged') {
       drawNetwork(msg.network);
       editor?.accept(msg.roads, msg.network.surfaces[0]!.width);
+    } else if (msg.type === 'editWaiting') {
+      editor?.waitForTraffic();
     } else if (msg.type === 'editRejected') {
       editor?.reject(msg.reason);
     } else {
@@ -156,6 +161,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     editor: () => editor?.state() ?? null,
     setTool: (tool) => editor?.setTool(tool),
     undoRoad: () => editor?.undo(),
+    cancelRoadEdit: () => editor?.cancel(),
     stats: () => (ready ? latestStats : null),
     fps: () => fps,
     speed: () => speed,

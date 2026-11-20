@@ -55,8 +55,10 @@ export class World {
   readonly vehicles: Vehicles;
 
   private readonly lanes: Lane[];
+  private readonly yieldingMovements: number[][];
   private readonly rng: Rng;
   private _tick = 0;
+  private admissionsOpen = true;
 
   private readonly laneLen: Float64Array;
   private readonly laneSpeed: Float64Array;
@@ -85,6 +87,10 @@ export class World {
     this.scenario = scenario;
     this.network = scenario.network;
     this.lanes = scenario.network.lanes;
+    this.yieldingMovements = this.lanes.map(() => []);
+    for (const lane of this.lanes) {
+      for (const priority of lane.crossingYieldTo) this.yieldingMovements[priority]!.push(lane.id);
+    }
     this.routing = new Routing(this.network);
     this.vehicles = new Vehicles(capacity);
     this.rng = new Rng(seed);
@@ -127,6 +133,95 @@ export class World {
     this.integrate();
     this.spawn();
     this._tick++;
+  }
+
+  /** Pause new arrivals while existing trips drain before retrying a deferred edit. */
+  setAdmissions(open: boolean): void {
+    this.admissionsOpen = open;
+  }
+
+  /**
+   * Construct an independent world with new geometry, preserving all running trips.
+   * A removal or changed curve that cannot represent a car's current pose is deferred;
+   * close admissions, keep stepping this world, and retry when traffic has cleared.
+   */
+  editNetwork(scenario: Scenario): { ok: true; world: World } | { ok: false; reason: string } {
+    const edited = new World(scenario, 0, this.vehicles.capacity, this.tick);
+    const V = this.vehicles;
+    const destinations = this.routing.sinks.map((sink) => {
+      const oldEnd = endOf(this.lanes[sink]!.path);
+      return edited.routing.sinks.findIndex((candidate) => {
+        const end = endOf(edited.lanes[candidate]!.path);
+        return Math.hypot(end.x - oldEnd.x, end.y - oldEnd.y) <= 0.25
+          && end.hx * oldEnd.hx + end.hy * oldEnd.hy > 0.99;
+      });
+    });
+    const fail = (slot: number): { ok: false; reason: string } => ({
+      ok: false,
+      reason: `Vehicle ${V.id[slot]} still needs this road to reach its destination. Pause arrivals and let traffic clear before retrying.`,
+    });
+    edited.vehicles.copyFrom(V);
+    for (let slot = 0; slot < V.highWater; slot++) {
+      if (!V.alive[slot]) continue;
+      const dest = destinations[V.dest[slot]!]!;
+      if (dest < 0) return fail(slot);
+      const pose = sampleAt(this.lanes[V.lane[slot]!]!.path, V.s[slot]!, { x: 0, y: 0, hx: 0, hy: 0 });
+      let best: { lane: number; s: number; error: number } | undefined;
+      for (const lane of edited.lanes) {
+        if (!edited.routing.canReach(dest, lane.id)) continue;
+        const { pts, cum } = lane.path;
+        for (let k = 0; k < cum.length - 1; k++) {
+          const dx = pts[k * 2 + 2]! - pts[k * 2]!;
+          const dy = pts[k * 2 + 3]! - pts[k * 2 + 1]!;
+          const length = cum[k + 1]! - cum[k]!;
+          if (length <= 0 || (dx * pose.hx + dy * pose.hy) / length < 1 - 1e-6) continue;
+          const t = Math.max(0, Math.min(1, ((pose.x - pts[k * 2]!) * dx + (pose.y - pts[k * 2 + 1]!) * dy) / (length * length)));
+          const s = cum[k]! + t * length;
+          // sampleAt resolves a vertex's heading to the following segment, just as rendering does.
+          const projected = sampleAt(lane.path, s, { x: 0, y: 0, hx: 0, hy: 0 });
+          if (projected.hx * pose.hx + projected.hy * pose.hy < 1 - 1e-6) continue;
+          const error = Math.hypot(projected.x - pose.x, projected.y - pose.y);
+          if (error > 1e-4 || (best && best.error <= error)) continue;
+          best = { lane: lane.id, s, error };
+        }
+      }
+      if (!best) return fail(slot);
+      edited.vehicles.lane[slot] = best.lane;
+      edited.vehicles.s[slot] = best.s;
+      edited.vehicles.dest[slot] = dest;
+      edited.laneMinS[best.lane] = Math.min(edited.laneMinS[best.lane]!, best.s);
+    }
+
+    // A split can put two cars on opposite sides of a lane boundary. Check spacing
+    // along each driver's new route, rather than only inside individual lanes.
+    edited.buildBuckets();
+    for (let slot = 0; slot < V.highWater; slot++) {
+      if (!V.alive[slot]) continue;
+      const lane = edited.vehicles.lane[slot]!;
+      const s = edited.vehicles.s[slot]!;
+      const rank = edited.rank[slot]!;
+      if (rank > 0) {
+        const leader = edited.order[edited.bucketStart[lane]! + rank - 1]!;
+        if (edited.vehicles.s[leader]! - s < VEHICLE_LENGTH - 1e-4) return fail(slot);
+      }
+      let distance = edited.laneLen[lane]! - s;
+      let next = edited.routing.nextHop(edited.vehicles.dest[slot]!, lane);
+      while (next >= 0 && distance < VEHICLE_LENGTH) {
+        if (edited.bucketCount[next]! > 0
+          && distance + edited.vehicles.s[edited.tail(next)]! < VEHICLE_LENGTH - 1e-4) return fail(slot);
+        distance += edited.laneLen[next]!;
+        next = edited.routing.nextHop(edited.vehicles.dest[slot]!, next);
+      }
+    }
+    edited.rng.copyFrom(this.rng);
+    edited.admissionsOpen = this.admissionsOpen;
+    edited.spawned = this.spawned;
+    edited.completed = this.completed;
+    edited.lost = this.lost;
+    edited.tripTimeSum = this.tripTimeSum;
+    edited.completedPerSecond.set(this.completedPerSecond);
+    edited.lastSecond = this.lastSecond;
+    return { ok: true, world: edited };
   }
 
   // --- Spatial index ----------------------------------------------------------
@@ -200,6 +295,10 @@ export class World {
       let cur = L;
       let nxt = this.routing.nextHop(d, cur);
       while (nxt >= 0 && dist < LOOKAHEAD) {
+        if ((this.lanes[nxt]!.crossingYieldTo.length || this.yieldingMovements[nxt]!.length) && dist < YIELD_ZONE
+          && dist >= COMMIT_DISTANCE && this.junctionBlocked(nxt, dist, vi)) {
+          a = Math.min(a, idmAccel(vi, v0, dist, vi));
+        }
         const limit = this.laneSpeed[nxt]!;
         if (limit < vi) a = Math.min(a, (limit * limit - vi * vi) / (2 * Math.max(dist, 2)));
         if (!leaderFound) {
@@ -234,7 +333,8 @@ export class World {
       bestS = s[best]!;
     }
     for (const p of this.lanes[lane]!.prev) {
-      if (p === from || this.lanes[p]!.yieldTo.length === 0 || this.bucketCount[p]! === 0) continue;
+      if (p === from || (this.lanes[p]!.yieldTo.length === 0 && this.lanes[p]!.crossingYieldTo.length === 0)
+        || this.bucketCount[p]! === 0) continue;
       const j = this.order[this.bucketStart[p]!]!; // frontmost on the give-way lane
       const front = s[j]! - this.laneLen[p]!;
       if (front > -COMMIT_DISTANCE && front < bestS) {
@@ -250,6 +350,43 @@ export class World {
     if (dEnd < COMMIT_DISTANCE) return Infinity;
     if (!this.mergeBlocked(yieldLane, dEnd, v)) return Infinity;
     return idmAccel(v, v0, dEnd, v); // treat the merge point as a stopped obstacle
+  }
+
+  /** Reserve the conflict area before entry; vehicles already inside finish clearing it. */
+  private junctionBlocked(movement: number, distance: number, speed: number): boolean {
+    for (const committed of this.yieldingMovements[movement]!) {
+      if (this.bucketCount[committed]! > 0) return true;
+    }
+    const tEntry = distance / Math.max(speed, 2);
+    const clearTime = this.laneLen[movement]! / Math.max(Math.min(speed, this.laneSpeed[movement]!), 3);
+    for (const priority of this.lanes[movement]!.crossingYieldTo) {
+      if (this.bucketCount[priority]! > 0) return true;
+      if (this.junctionApproachArrives(priority, priority, 0, tEntry + clearTime + CONFLICT_AFTER, 0)) return true;
+    }
+    return false;
+  }
+
+  private junctionApproachArrives(
+    lane: number, movement: number, offset: number, latest: number, depth: number,
+  ): boolean {
+    if (depth >= 6 || offset > PRIORITY_SCAN) return false;
+    const V = this.vehicles;
+    for (const upstream of this.lanes[lane]!.prev) {
+      const start = this.bucketStart[upstream]!;
+      const count = this.bucketCount[upstream]!;
+      for (let q = 0; q < count; q++) {
+        const j = this.order[start + q]!;
+        if (this.routing.nextHop(V.dest[j]!, upstream) !== lane) continue;
+        // Also verify the eventual movement when looking beyond the immediate approach.
+        let next = lane;
+        for (let step = 0; step < depth && next !== movement; step++) next = this.routing.nextHop(V.dest[j]!, next);
+        if (next !== movement) continue;
+        const remaining = offset + this.laneLen[upstream]! - V.s[j]!;
+        if (remaining <= PRIORITY_SCAN && remaining / Math.max(V.v[j]!, 1) < latest) return true;
+      }
+      if (this.junctionApproachArrives(upstream, movement, offset + this.laneLen[upstream]!, latest, depth + 1)) return true;
+    }
+    return false;
   }
 
   private mergeBlocked(yieldLane: number, dEnd: number, v: number): boolean {
@@ -324,6 +461,7 @@ export class World {
       // Always draw both numbers so the random stream does not depend on traffic state.
       const arrival = this.rng.next();
       const pick = this.rng.next();
+      if (!this.admissionsOpen) continue;
       if (arrival >= sp.rate * DT || sp.destinations.length === 0) continue;
       if (this.laneMinS[sp.lane]! < minSpacing) continue;
       const dest = sp.destinations[Math.floor(pick * sp.destinations.length)]!;
