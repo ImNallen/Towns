@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { offsetPolyline, polyline, slicePolyline, type Polyline } from '../sim/math/polyline';
-import { add, scale, distance, dot, type Vec2 } from '../sim/math/vec';
-import { MEADOW_BUILD_BOUNDS, MEADOW_ROAD_WIDTH, meadowConnected, meadowRoadSections, meadowScenario, snapToMeadowStreet, meadowStreets, meadowTips, planMeadowRoad, type MeadowRoad } from '../sim/scenarios/meadow';
+import { add, scale, distance, dot, projectOntoSegment, type Vec2 } from '../sim/math/vec';
+import { MEADOW_BUILD_BOUNDS, MEADOW_ROAD_WIDTH, meadowLayout, meadowRoadSections, meadowScenario, snapToMeadowStreet, planMeadowRoad, type MeadowEdit } from '../sim/scenarios/meadow';
 import { angleGuide, crossingAngleGuide, fitGuideToStreet, squareStreetGuide, type StreetPoint, type AngleGuide } from '../sim/network/angleSnap';
 import { JUNCTION_MOUTH } from '../sim/network/streets';
 import type { ToWorker } from '../worker/protocol';
@@ -11,7 +11,7 @@ import { FlatMesh } from './flat';
 import { PALETTE } from './palette';
 import { buildRoads } from './roads';
 
-export type MapTool = 'road' | 'curve' | 'pan';
+export type MapTool = 'road' | 'curve' | 'bulldoze' | 'pan';
 export interface EditorState {
   tool: MapTool;
   roadCount: number;
@@ -19,12 +19,14 @@ export interface EditorState {
   hint: string;
   pending: boolean;
   canCancel: boolean;
+  canUndo: boolean;
   angleSnapping: boolean;
 }
 
 type EditPhase =
   | { kind: 'idle' }
   | { kind: 'drawing'; id: number; host: StreetPoint | undefined; start: Vec2; press: Vec2; pointer: PointerEvent }
+  | { kind: 'removing'; id: number; segment: number; press: Vec2 }
   | { kind: 'bending'; start: Vec2; end: Vec2; id: number | null }
   | { kind: 'pending' | 'waiting' };
 
@@ -60,14 +62,16 @@ function buildBoundary(): THREE.Mesh {
 }
 
 export class RoadEditor {
-  private roads: readonly MeadowRoad[] = [];
+  private edits: readonly MeadowEdit[] = [];
+  private segments: readonly (readonly Vec2[])[] = [];
+  private highlightedSegment: number | null = null;
+  private roadCount = 0;
   private connected = false;
   private angleSnapping = true;
   private streets: Vec2[][] = [];
   private phase: EditPhase = { kind: 'pending' };
   private tool: MapTool = 'road';
   private hint = '';
-  private width = MEADOW_ROAD_WIDTH;
   private readonly abort = new AbortController();
   private readonly handles = new THREE.Group();
   private readonly boundary = buildBoundary();
@@ -88,7 +92,11 @@ export class RoadEditor {
     scene.add(this.handles, this.hover, this.boundary);
     canvas.addEventListener('pointerdown', (e) => this.begin(e), { signal });
     canvas.addEventListener('pointermove', (e) => { if (e.isPrimary) this.move = e; }, { signal });
-    canvas.addEventListener('pointerleave', () => { this.hover.visible = false; this.move = null; }, { signal });
+    canvas.addEventListener('pointerleave', () => {
+      this.hover.visible = false;
+      this.move = null;
+      if (this.tool === 'bulldoze' && this.phase.kind === 'idle') this.highlight(null);
+    }, { signal });
     canvas.addEventListener('pointerup', (e) => this.point(e, true), { signal });
     canvas.addEventListener('lostpointercapture', (e) => this.cancelPointer(e), { signal });
     canvas.addEventListener('pointercancel', (e) => this.cancelPointer(e), { signal });
@@ -101,15 +109,16 @@ export class RoadEditor {
   state(): EditorState {
     const kind = this.phase.kind;
     return {
-      tool: this.tool, hint: this.hint, roadCount: this.roads.length, connected: this.connected,
+      tool: this.tool, hint: this.hint, roadCount: this.roadCount, connected: this.connected,
       angleSnapping: this.angleSnapping,
       pending: kind === 'pending' || kind === 'waiting',
       canCancel: kind === 'bending' || kind === 'waiting',
+      canUndo: this.edits.length > 0,
     };
   }
 
   canPan(e: PointerEvent): boolean {
-    return this.phase.kind !== 'drawing' && (this.tool === 'pan' || e.button !== 0);
+    return this.phase.kind !== 'drawing' && this.phase.kind !== 'removing' && (this.tool === 'pan' || e.button !== 0);
   }
 
   setAngleSnapping(enabled: boolean): void {
@@ -121,18 +130,23 @@ export class RoadEditor {
     this.cancelDraft();
     this.tool = tool;
     this.canvas.dataset.tool = tool;
-    this.handles.visible = tool !== 'pan';
+    this.handles.visible = tool === 'road' || tool === 'curve';
     this.boundary.visible = tool !== 'pan';
   }
 
-  accept(roads: readonly MeadowRoad[], width: number): void {
-    this.roads = roads;
-    this.streets = meadowStreets(roads);
-    this.width = width;
-    this.connected = meadowConnected(roads);
+  accept(edits: readonly MeadowEdit[]): void {
+    const latest = edits.at(-1);
+    const removed = edits.length > this.edits.length && latest && 'remove' in latest;
+    this.edits = edits;
+    this.roadCount = edits.filter((edit) => 'points' in edit).length;
+    const layout = meadowLayout(edits);
+    this.streets = layout.streets;
+    this.segments = layout.segments;
+    this.connected = layout.connected;
     this.finish();
+    if (removed) this.hint = 'Segment removed. Undo to restore it.';
     for (const handle of [...this.handles.children]) disposeLayer(handle);
-    for (const tip of meadowTips(roads)) {
+    for (const tip of layout.tips) {
       const marker = roadMarker();
       marker.position.set(tip.x, 0, -tip.y);
       this.handles.add(marker);
@@ -162,7 +176,7 @@ export class RoadEditor {
   }
 
   undo(): void {
-    if (this.state().pending || this.roads.length === 0) return;
+    if (this.state().pending || this.edits.length === 0) return;
     this.finish();
     this.phase = { kind: 'pending' };
     this.send({ type: 'undoRoad' });
@@ -190,10 +204,32 @@ export class RoadEditor {
     return snapToMeadowStreet(this.streets, p, Math.min(10, Math.max(3, 18 * this.camera.mpp)) + extraReach);
   }
 
+  private segmentAt(cursor: Vec2): number | null {
+    let reach = MEADOW_ROAD_WIDTH / 2 + Math.min(2, 4 * this.camera.mpp);
+    let nearest: number | null = null;
+    for (const [index, points] of this.segments.entries()) {
+      for (let i = 1; i < points.length; i++) {
+        const gap = distance(cursor, projectOntoSegment(cursor, points[i - 1]!, points[i]!));
+        if (gap >= reach) continue;
+        nearest = index;
+        reach = gap;
+      }
+    }
+    return nearest;
+  }
+
+  private highlight(segment: number | null): void {
+    if (segment === this.highlightedSegment) return;
+    this.clearPreview();
+    this.highlightedSegment = segment;
+    this.hint = segment === null ? '' : 'Click to remove this segment.';
+    if (segment !== null) this.guide(polyline(this.segments[segment]!), PALETTE.editorInvalid, MEADOW_ROAD_WIDTH);
+  }
+
   private roadGuide(host: StreetPoint | undefined, start: Vec2, cursor: Vec2, snap: StreetPoint | undefined): AngleGuide | undefined {
     if (this.tool !== 'road' || !this.angleSnapping) return undefined;
-    if (host && host.kind !== 'junction') {
-      const target = snap ?? this.snap(cursor, this.width / 2);
+    if (host?.kind === 'tip' || host?.kind === 'street') {
+      const target = snap ?? this.snap(cursor, MEADOW_ROAD_WIDTH / 2);
       const square = target && squareStreetGuide(host, target);
       if (square) {
         const landing = snapToMeadowStreet(this.streets, square.end, 1e-6);
@@ -205,8 +241,11 @@ export class RoadEditor {
     if (guide && snap) {
       guide = fitGuideToStreet(guide, start, snap, Math.min(8, 14 * this.camera.mpp));
       if (guide && !host) {
-        const heading = dot(guide.direction, snap.tangent);
-        const straightArrival = snap.kind === 'street' ? Math.abs(heading) <= Math.SQRT1_2 + 1e-6 : heading < -1 + 1e-6;
+        const { direction } = guide;
+        const heading = dot(direction, snap.tangent);
+        const straightArrival = snap.kind === 'street' ? Math.abs(heading) <= Math.SQRT1_2 + 1e-6
+          : snap.kind === 'corner' ? snap.tangents.some((arm) => dot(direction, arm) > 1 - 1e-6)
+          : heading < -1 + 1e-6;
         if (!straightArrival) guide = undefined;
       }
       if (guide && !snapToMeadowStreet(this.streets, guide.end, 1e-6)) guide = undefined;
@@ -230,6 +269,15 @@ export class RoadEditor {
     }
     if (this.phase.kind !== 'idle') return;
     const cursor = this.world(e);
+    if (this.tool === 'bulldoze') {
+      const segment = this.segmentAt(cursor);
+      this.highlight(segment);
+      if (segment !== null) {
+        this.phase = { kind: 'removing', id: e.pointerId, segment, press: { x: e.clientX, y: e.clientY } };
+        this.canvas.setPointerCapture(e.pointerId);
+      }
+      return;
+    }
     const host = this.snap(cursor);
     if (!host && this.tool !== 'road') {
       this.hint = 'Start on a street or a marked road end.';
@@ -247,8 +295,20 @@ export class RoadEditor {
     if (release) this.move = null;
     const phase = this.phase;
     const cursor = this.world(e);
+    if (phase.kind === 'removing') {
+      if (phase.id !== e.pointerId) return;
+      if (Math.hypot(e.clientX - phase.press.x, e.clientY - phase.press.y) > 6 || this.segmentAt(cursor) !== phase.segment) {
+        this.finish();
+      } else if (release) {
+        this.phase = { kind: 'pending' };
+        this.hint = 'Removing segment…';
+        this.send({ type: 'bulldozeRoad', segment: phase.segment, editCount: this.edits.length });
+      }
+      return;
+    }
     if (phase.kind === 'idle') {
-      this.mark(this.snap(cursor)?.point);
+      if (this.tool === 'bulldoze') this.highlight(this.segmentAt(cursor));
+      else this.mark(this.snap(cursor)?.point);
       return;
     }
     if (phase.kind === 'bending') {
@@ -284,12 +344,12 @@ export class RoadEditor {
   }
 
   private place(start: Vec2, end: Vec2, bend: Vec2 | undefined, release: boolean, hint: string, alignment?: AngleGuide): void {
-    const plan = planMeadowRoad(this.roads, start, end, bend);
+    const plan = planMeadowRoad(this.edits, start, end, bend);
     this.clearPreview();
     if (!plan.ok) {
       if (release && this.phase.kind !== 'bending') this.finish();
       else if (distance(start, end) > 0.1) {
-        this.guide(polyline(plan.points ?? (bend ? [start, bend, end] : [start, end])), PALETTE.editorInvalid, plan.points ? this.width : 0);
+        this.guide(polyline(plan.points ?? (bend ? [start, bend, end] : [start, end])), PALETTE.editorInvalid, plan.points ? MEADOW_ROAD_WIDTH : 0);
       }
       if (release && this.phase.kind === 'bending') this.phase.id = null;
       this.hint = !release && this.phase.kind === 'drawing' && this.tool === 'curve' ? hint : plan.reason;
@@ -308,7 +368,7 @@ export class RoadEditor {
       hint = `Release to build ${count}.`;
     }
     this.hint = alignment ? `${alignment.label} · ${hint}` : hint;
-    const preview = buildRoads(meadowScenario([...this.roads, plan.road]).network, 'dashed');
+    const preview = buildRoads(meadowScenario([...this.edits, plan.road]).network, 'dashed');
     const edges = new FlatMesh(0.19);
     const atJunction = (p: Vec2) => fourWays.some(({ point }) => distance(point, p) < 1e-6)
       || (alignment?.label === '90° at both ends' && (distance(p, start) < 1e-6 || distance(p, end) < 1e-6))
@@ -319,7 +379,7 @@ export class RoadEditor {
       const to = path.length - (atJunction(points[points.length - 1]!) ? JUNCTION_MOUTH : 0);
       if (to <= from) continue;
       const visible = from > 0 || to < path.length ? slicePolyline(path, from, to) : path;
-      for (const side of [-1, 1]) edges.ribbon(offsetPolyline(visible, side * (this.width / 2 - 0.35)), 0.35);
+      for (const side of [-1, 1]) edges.ribbon(offsetPolyline(visible, side * (MEADOW_ROAD_WIDTH / 2 - 0.35)), 0.35);
     }
     preview.add(new THREE.Mesh(edges.build(), new THREE.MeshBasicMaterial({ color: PALETTE.editorHandle })));
     if (alignment) this.drawAngle(preview, start, alignment);
@@ -330,7 +390,7 @@ export class RoadEditor {
 
   private drawAngle(preview: THREE.Group, roadStart: Vec2, guide: AngleGuide): void {
     const start = guide.origin;
-    const size = Math.min(distance(roadStart, guide.end) / 3, Math.max(this.width / 2 + 8 * this.camera.mpp, 16 * this.camera.mpp));
+    const size = Math.min(distance(roadStart, guide.end) / 3, Math.max(MEADOW_ROAD_WIDTH / 2 + 8 * this.camera.mpp, 16 * this.camera.mpp));
     const marks = new FlatMesh(0.45);
     const width = Math.max(0.14, 1.7 * this.camera.mpp);
     const along = scale(guide.reference, size);
@@ -370,12 +430,13 @@ export class RoadEditor {
   private clearPreview(): void {
     if (this.preview) disposeLayer(this.preview);
     this.preview = null;
+    this.highlightedSegment = null;
     this.setRoadVisibility(true);
   }
 
   private cancelPointer(e: PointerEvent): void {
     const phase = this.phase;
-    if ((phase.kind === 'drawing' || phase.kind === 'bending') && phase.id === e.pointerId) this.cancelDraft();
+    if ((phase.kind === 'drawing' || phase.kind === 'bending' || phase.kind === 'removing') && phase.id === e.pointerId) this.cancelDraft();
   }
 
   private cancelDraft(): void {
@@ -385,7 +446,7 @@ export class RoadEditor {
   private finish(): void {
     const phase = this.phase;
     this.phase = { kind: 'idle' };
-    if ((phase.kind === 'drawing' || phase.kind === 'bending') && phase.id !== null && this.canvas.hasPointerCapture(phase.id)) {
+    if ((phase.kind === 'drawing' || phase.kind === 'bending' || phase.kind === 'removing') && phase.id !== null && this.canvas.hasPointerCapture(phase.id)) {
       this.canvas.releasePointerCapture(phase.id);
     }
     this.move = null;

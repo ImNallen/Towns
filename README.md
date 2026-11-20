@@ -20,9 +20,11 @@ With **Road** selected, drag from one end marker onto another. Release when the 
 
 For a winding road, select **Curve**, drag from the start to the end, then place a point on the bend. Move the pointer to preview the curve and click to build. On a touch screen, press and move to adjust the bend before lifting your finger.
 
-Cars travel between the two map entrances and follow the quickest available route by free-flow travel time. Connect the neighborhoods, then try building a shorter route while cars are moving. **Undo** removes the last section and restores the previous junctions. If a car still needs a removed section, new arrivals wait while traffic clears. Keep the simulation running to finish the edit or choose **Cancel edit**.
+Select **Bulldoze** and point at a street. The red highlight shows the segment that a click or tap will remove. You can remove one arm of an intersection or an older bend while keeping the streets you built afterward. **Undo** restores the segment and its junctions. The short approaches at the map entrances stay in place.
 
-**R** selects Road, **C** selects Curve, **V** selects Pan, and **Escape** cancels a draft. Right-drag to pan and scroll to zoom.
+Cars travel between the two map entrances and follow the quickest available route by free-flow travel time. If a car still needs a street you want to remove, new arrivals wait while traffic clears. Keep the simulation running to finish the edit or choose **Cancel edit**.
+
+**R** selects Road, **C** selects Curve, **B** selects Bulldoze, and **V** selects Pan. **Escape** cancels a draft. Right-drag to pan and scroll to zoom.
 
 **Space** pauses the simulation, **1–4** set speed, and **L** toggles the lane graph. The original traffic maps are available at `?scenario=roundabout` and `?scenario=straight`.
 

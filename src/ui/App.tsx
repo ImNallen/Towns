@@ -54,7 +54,7 @@ export function App({ game }: { game: Game }) {
       if (e.metaKey || e.ctrlKey) {
         if (editor && e.key.toLowerCase() === 'z' && !e.shiftKey) {
           e.preventDefault();
-          if (editor.roadCount > 0 && !editor.pending) undo();
+          if (editor.canUndo && !editor.pending) undo();
         }
         return;
       }
@@ -63,6 +63,8 @@ export function App({ game }: { game: Game }) {
         changeTool('road');
       } else if (editor && e.key.toLowerCase() === 'c') {
         changeTool('curve');
+      } else if (editor && e.key.toLowerCase() === 'b') {
+        changeTool('bulldoze');
       } else if (editor && e.key.toLowerCase() === 'v') {
         changeTool('pan');
       } else if (e.code === 'Space') {
@@ -83,6 +85,7 @@ export function App({ game }: { game: Game }) {
   const instruction = editor?.hint || (editor?.pending
     ? 'Updating roads…'
     : editor?.tool === 'pan' ? 'Drag the map to pan.'
+    : editor?.tool === 'bulldoze' ? 'Select a street segment to remove.'
     : editor?.tool === 'curve' ? 'Drag between two points, then place the bend.'
     : editor?.connected ? 'Drag across a street for a crossing, or from its side for a branch.'
     : 'Drag from one marked road end to the other to connect them.');
@@ -149,11 +152,14 @@ export function App({ game }: { game: Game }) {
           <button aria-label="Build curved road" aria-pressed={editor.tool === 'curve'} aria-keyshortcuts="C" className={editor.tool === 'curve' ? 'active tool' : 'tool'} onClick={() => changeTool('curve')} title="Build curved road (C)">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2 16C13 16 5 4 18 4M2 12c7 0 1-12 16-12" /></svg><span>Curve</span><kbd>C</kbd>
           </button>
+          <button aria-label="Bulldoze road" aria-pressed={editor.tool === 'bulldoze'} aria-keyshortcuts="B" className={editor.tool === 'bulldoze' ? 'active tool bulldoze' : 'tool bulldoze'} onClick={() => changeTool('bulldoze')} title="Bulldoze road (B)">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 12V8h6l2 4M5 8V5h4l1 3m2 5 3 1m1-6v6l2 2h-3l-1-3"/><rect x="2" y="12" width="10" height="4" rx="2"/></svg><span>Bulldoze</span><kbd>B</kbd>
+          </button>
           <button aria-label="Pan" aria-pressed={editor.tool === 'pan'} aria-keyshortcuts="V" className={editor.tool === 'pan' ? 'active tool' : 'tool'} onClick={() => changeTool('pan')} title="Pan (V)">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v16M2 10h16M7 5l3-3 3 3M7 15l3 3 3-3M5 7l-3 3 3 3m10-6 3 3-3 3" /></svg><span>Pan</span><kbd>V</kbd>
           </button>
           <span className="tool-divider" />
-          <button aria-label="Undo road" aria-keyshortcuts="Control+Z Meta+Z" className="tool undo" onClick={undo} disabled={editor.roadCount === 0 || editor.pending} title="Undo road (Ctrl / ⌘ Z)">
+          <button aria-label="Undo road" aria-keyshortcuts="Control+Z Meta+Z" className="tool undo" onClick={undo} disabled={!editor.canUndo || editor.pending} title="Undo road (Ctrl / ⌘ Z)">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4 3 8l4 4M3 8h8a5 5 0 0 1 0 10" /></svg><span>Undo</span>
           </button>
         </div>

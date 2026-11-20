@@ -3,7 +3,7 @@
  * Posts a compact snapshot whenever the simulation has advanced.
  */
 import { buildScenario, type Scenario } from '../sim/scenarios';
-import { meadowScenario, planMeadowRoad, type MeadowRoad } from '../sim/scenarios/meadow';
+import { meadowScenario, meadowSegments, planMeadowRoad, type MeadowEdit } from '../sim/scenarios/meadow';
 import { DT, World } from '../sim/world';
 import type { FromWorker, ToWorker } from './protocol';
 
@@ -11,8 +11,8 @@ const CAPACITY = 4096;
 /** Cap catch-up work per pump so a slow frame cannot snowball. */
 const MAX_STEPS_PER_PUMP = 40;
 
-let roads: MeadowRoad[] = [];
-let waiting: { roads: MeadowRoad[]; scenario: Scenario } | null = null;
+let edits: MeadowEdit[] = [];
+let waiting: { edits: MeadowEdit[]; scenario: Scenario } | null = null;
 let world: World | null = null;
 let speed = 1;
 let accumulator = 0;
@@ -25,7 +25,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
   switch (msg.type) {
     case 'init': {
       const scenario = buildScenario(msg.scenario);
-      roads = [];
+      edits = [];
       waiting = null;
       world = new World(scenario, msg.seed, CAPACITY);
       speed = msg.speed;
@@ -35,6 +35,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       postFrame(world);
       break;
     }
+    case 'bulldozeRoad':
     case 'buildRoad':
     case 'undoRoad': {
       if (world?.scenario.name !== 'meadow') {
@@ -42,18 +43,24 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
         break;
       }
       if (waiting) break;
-      let proposed: MeadowRoad[];
+      let proposed: MeadowEdit[];
       if (msg.type === 'buildRoad') {
-        const plan = planMeadowRoad(roads, msg.start, msg.end, msg.bend);
+        const plan = planMeadowRoad(edits, msg.start, msg.end, msg.bend);
         if (!plan.ok) {
           post({ type: 'editRejected', reason: plan.reason });
           break;
         }
-        proposed = [...roads, plan.road];
+        proposed = [...edits, plan.road];
+      } else if (msg.type === 'bulldozeRoad') {
+        if (msg.editCount !== edits.length || !Number.isInteger(msg.segment) || !meadowSegments(edits)[msg.segment]) {
+          post({ type: 'editRejected', reason: 'Select a street segment to remove.' });
+          break;
+        }
+        proposed = [...edits, { remove: msg.segment }];
       } else {
-        proposed = roads.slice(0, -1);
+        proposed = edits.slice(0, -1);
       }
-      const edit = { roads: proposed, scenario: meadowScenario(proposed) };
+      const edit = { edits: proposed, scenario: meadowScenario(proposed) };
       if (!applyEdit(edit)) {
         waiting = edit;
         world.setAdmissions(false);
@@ -74,15 +81,15 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
   }
 };
 
-function applyEdit(edit: { roads: MeadowRoad[]; scenario: Scenario }): boolean {
+function applyEdit(edit: { edits: MeadowEdit[]; scenario: Scenario }): boolean {
   if (!world) return false;
   const result = world.editNetwork(edit.scenario);
   if (!result.ok) return false;
   world = result.world;
   world.setAdmissions(true);
-  roads = edit.roads;
+  edits = edit.edits;
   waiting = null;
-  post({ type: 'roadsChanged', network: edit.scenario.network, roads });
+  post({ type: 'roadsChanged', network: edit.scenario.network, edits });
   postFrame(world);
   return true;
 }
