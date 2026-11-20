@@ -175,7 +175,7 @@ export class RoadEditor {
 
   private roadGuide(host: StreetPoint | undefined, start: Vec2, cursor: Vec2, snap: StreetPoint | undefined): AngleGuide | undefined {
     if (this.tool !== 'road' || !this.angleSnapping) return undefined;
-    if (host?.kind === 'street') {
+    if (host && host.kind !== 'junction') {
       const target = snap ?? this.snap(cursor, this.width / 2);
       const square = target && squareStreetGuide(host, target);
       if (square) {
@@ -259,8 +259,9 @@ export class RoadEditor {
       this.hint = 'Place a point on the bend. Click or tap to build.';
       return;
     }
+    const joinedSide = guide?.label === '90° at both ends' || guide?.label === '90° at junction';
     const hint = this.tool === 'curve' ? 'Release to set the end, then place the bend.'
-      : snap || guide?.label === '90° at both ends' ? 'Release to connect the streets.' : 'Release to extend the street.';
+      : snap || joinedSide ? 'Release to connect the streets.' : 'Release to extend the street.';
     this.place(start, end, undefined, release, hint, guide);
   }
 
@@ -292,7 +293,8 @@ export class RoadEditor {
     const preview = buildRoads(meadowScenario([...this.roads, plan.road]).network, 'dashed');
     const edges = new FlatMesh(0.19);
     const atJunction = (p: Vec2) => fourWays.some(({ point }) => distance(point, p) < 1e-6)
-      || (alignment?.label === '90° at both ends' && (distance(p, start) < 1e-6 || distance(p, end) < 1e-6));
+      || (alignment?.label === '90° at both ends' && (distance(p, start) < 1e-6 || distance(p, end) < 1e-6))
+      || (alignment?.label === '90° at junction' && distance(p, end) < 1e-6);
     for (const points of meadowRoadSections(plan.road)) {
       const path = polyline(points);
       const from = atJunction(points[0]!) ? JUNCTION_MOUTH : 0;
@@ -315,7 +317,7 @@ export class RoadEditor {
     const width = Math.max(0.14, 1.7 * this.camera.mpp);
     const along = scale(guide.reference, size);
     const out = scale(guide.direction, size);
-    if (guide.label === '90°' || guide.label === '90° at both ends') {
+    if (guide.label === '90°' || guide.label === '90° at both ends' || guide.label === '90° at junction') {
       marks.ribbon(polyline([add(start, along), add(add(start, along), out), add(start, out)]), width);
       if (guide.label === '90° at both ends') {
         const inward = scale(out, -1);

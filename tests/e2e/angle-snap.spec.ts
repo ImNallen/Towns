@@ -103,3 +103,38 @@ test('slide the cross street into alignment at both ends and run traffic through
   await page.getByRole('button', { name: '8× speed' }).click();
   await expect.poll(() => page.evaluate(() => window.__towns?.stats()?.completed ?? 0), { timeout: 30_000 }).toBeGreaterThan(0);
 });
+
+test('drag from a road end to a parallel street or its marked end', async ({ page }) => {
+  await page.goto('/?speed=0&x=0&y=40&mpp=0.24');
+  const editor = () => page.evaluate(() => window.__towns?.editor());
+  await expect.poll(editor).toMatchObject({ pending: false });
+  const box = await page.locator('#map').boundingBox();
+  if (!box) throw new Error('Missing map');
+  const move = (x: number, y: number) => page.mouse.move(
+    box.x + box.width / 2 + x / 0.24, box.y + box.height / 2 - (y - 40) / 0.24,
+  );
+  const drag = async (x: number, y: number, endX: number, endY: number) => {
+    await move(x, y);
+    await page.mouse.down();
+    await move(endX, endY);
+  };
+  await drag(-65, -8, -65, 35);
+  await page.mouse.up();
+  await expect.poll(editor).toMatchObject({ roadCount: 1 });
+  await drag(65, 8, 65, 86);
+  await page.mouse.up();
+  await expect.poll(editor).toMatchObject({ roadCount: 2 });
+  await drag(-65, 35, 65, 38);
+  await expect(page.getByRole('status')).toHaveText('90° at junction · Release to connect the streets.');
+  await page.mouse.up();
+  await expect.poll(editor).toMatchObject({ roadCount: 3, connected: true });
+  await page.getByRole('button', { name: 'Undo road' }).click();
+  await expect.poll(editor).toMatchObject({ roadCount: 2, connected: false });
+  await drag(-65, 35, 65, 86);
+  await expect(page.getByRole('status')).toHaveText('Release to connect the streets.');
+  await page.screenshot({ path: 'artifacts/screens/meadow-end-connection.png' });
+  await page.mouse.up();
+  await expect.poll(editor).toMatchObject({ roadCount: 3, connected: true });
+  await page.getByRole('button', { name: '8× speed' }).click();
+  await expect.poll(() => page.evaluate(() => window.__towns?.stats()?.completed ?? 0), { timeout: 30_000 }).toBeGreaterThan(0);
+});

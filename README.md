@@ -16,6 +16,8 @@ Drag across an existing street to build a four-way intersection. You can start t
 
 To connect parallel streets, drag from the side of one toward the side of the other. With **Angle snap** on, the far end slides along the target street until the connector meets both streets at 90°. A square at each end shows the two junctions. Turn off **Angle snap** to place the far end yourself.
 
+Drag between two marked road ends to connect them. The road follows both end headings and can form a rounded corner, a U-bend, or an S-bend when there is room. You can also drag from a marked end toward the side of a parallel street. With **Angle snap** on, the landing slides along that street to leave room for the turn and meets it at a right angle.
+
 For a winding road, select **Curve**, drag from the start to the end, then place a point on the bend. Move the pointer to preview the curve and click to build. On a touch screen, press and move to adjust the bend before lifting your finger.
 
 Cars travel between the two map entrances and follow the quickest available route by free-flow travel time. Connect the neighborhoods, then try building a shorter route while cars are moving. **Undo** removes the last section and restores the previous junctions. If a car still needs a removed section, new arrivals wait while traffic clears. Keep the simulation running to finish the edit or choose **Cancel edit**.

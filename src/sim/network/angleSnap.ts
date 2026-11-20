@@ -1,4 +1,5 @@
 import { add, cross, distance, dot, normalize, perp, projectOntoSegment, scale, sub, type Vec2 } from '../math/vec';
+import { END_TURN_RUN } from './endConnection';
 import { segmentCrossings, segmentIntersection } from './junctions';
 
 type Street = readonly Vec2[];
@@ -28,7 +29,7 @@ function nearestPoint(street: Street, cursor: Vec2): TangentPoint | undefined {
 }
 
 export interface AngleGuide {
-  label: 'Straight' | '45°' | '90°' | '90° at both ends' | 'Parallel';
+  label: 'Straight' | '45°' | '90°' | '90° at both ends' | '90° at junction' | 'Parallel';
   end: Vec2;
   direction: Vec2;
   reference: Vec2;
@@ -100,17 +101,25 @@ export function angleGuide(streets: readonly Street[], host: StreetPoint, cursor
 }
 
 export function squareStreetGuide(host: StreetPoint, target: StreetPoint): AngleGuide | undefined {
-  if (host.kind !== 'street' || target.kind !== 'street') return undefined;
-  const step = dot(sub(host.point, target.point), target.tangent) >= 0 ? 1 : -1;
+  if (host.kind === 'junction' || target.kind !== 'street') return undefined;
+  if (Math.abs(cross(host.tangent, target.tangent)) > 1e-6) return undefined;
+  const fromTip = host.kind === 'tip';
+  const offset = dot(sub(target.point, host.point), host.tangent);
+  const anchor = fromTip ? add(host.point, scale(host.tangent, Math.max(END_TURN_RUN, offset))) : host.point;
+  const step = dot(sub(anchor, target.point), target.tangent) >= 0 ? 1 : -1;
   for (let i = target.segmentEnd; i > 0 && i < target.street.length; i += step) {
     const a = target.street[i - 1]!;
     const b = target.street[i]!;
     const tangent = normalize(sub(b, a));
     if (Math.abs(cross(host.tangent, tangent)) > 1e-6 || dot(tangent, target.tangent) <= 0) break;
-    const end = projectOntoSegment(host.point, a, b);
-    const across = sub(end, host.point);
-    if (distance(end, host.point) < 1e-6) return undefined;
+    const end = projectOntoSegment(anchor, a, b);
+    const across = sub(end, anchor);
+    if (distance(end, anchor) < 1e-6) return undefined;
     if (Math.abs(dot(across, tangent)) > 1e-6) continue;
+    if (fromTip) {
+      if (distance(end, anchor) < END_TURN_RUN) return undefined;
+      return { label: '90° at junction', origin: end, end, direction: normalize(scale(across, -1)), reference: tangent };
+    }
     return { label: '90° at both ends', origin: host.point, end, direction: normalize(across), reference: host.tangent };
   }
   return undefined;
