@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "e2e": "playwright test",
     "sim": "tsx scripts/sim.ts",
-    "check": "pnpm typecheck && pnpm test"
+    "check": "pnpm typecheck && pnpm test",
+    "edits": "tsx scripts/edits.ts"
   },
   "dependencies": {
     "react": "19.3.1",

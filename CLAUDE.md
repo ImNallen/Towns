@@ -12,6 +12,7 @@ pnpm check          # typecheck + unit tests. Run before saying anything is done
 pnpm test           # vitest: sim tests + architecture guard (fast, headless)
 pnpm sim            # headless sim run, prints stats + state hash
 pnpm sim --scenario straight --ticks 2400 --seed 7 --every 600
+pnpm edits          # Meadow Vale edit sequence under traffic, prints cars cleared per edit
 pnpm e2e            # Playwright: boots the app, saves screenshots to artifacts/screens/
 ```
 
@@ -37,7 +38,7 @@ tests/          vitest (tests/**/*.test.ts) and Playwright (tests/e2e)
 Data flow: `main.tsx` → `createGame` starts the worker → worker builds the scenario and `World`, posts `ready`
 (the scenario, for drawing) and then a `frame` (positions, ids, stats) after each batch of ticks → the renderer
 interpolates between the last two frames. On Meadow Vale the worker also owns the ordered list of road edits.
-The editor previews a placement with the same planner the worker uses to accept it. Each edit rebuilds the local lane network and maps active vehicles to their positions and destinations. If a trip cannot continue safely, the worker pauses new arrivals and retries as traffic clears.
+The editor previews a placement with the same planner the worker uses to accept it. Each edit applies at once: it rebuilds the local lane network and maps active vehicles to their positions and destinations. Cars the new roads cannot carry are cleared and counted in `SimStats.cleared`.
 
 ## Rules (enforced by tests/architecture.test.ts where possible)
 

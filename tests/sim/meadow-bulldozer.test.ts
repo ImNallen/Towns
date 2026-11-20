@@ -94,7 +94,7 @@ describe('meadow bulldozer history', () => {
 
     edits.push({ remove: meadowSegments(edits).length - 1 });
     const migration = world.editNetwork({ ...meadowScenario(edits), demand: [] });
-    if (!migration.ok) throw new Error(migration.reason);
+    expect(migration.stats().cleared).toBe(0);
     const crossAt = (simulation: World): number => {
       let y = NaN;
       for (let i = 0; i < 100 / DT && simulation.vehicles.alive[car]; i++) {
@@ -107,7 +107,7 @@ describe('meadow bulldozer history', () => {
       return y;
     };
     expect(crossAt(world)).toBeLessThan(40);
-    expect(crossAt(migration.world)).toBeGreaterThan(75);
+    expect(crossAt(migration)).toBeGreaterThan(75);
   });
 
   it('opens and rebuilds a loop without losing its remaining island', () => {

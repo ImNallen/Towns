@@ -15,9 +15,8 @@ it('keeps live trips and sends new traffic both ways along a player-built shortc
   const original = new World(meadowScenario(roads), 7);
   for (let i = 0; i < 8 / DT; i++) original.step();
   expect(original.stats().active).toBeGreaterThan(0);
-  const edited = original.editNetwork(meadowScenario([...roads, bypass.road]));
-  if (!edited.ok) throw new Error(edited.reason);
-  const world = edited.world;
+  const bypassed = meadowScenario([...roads, bypass.road]);
+  let world = original.editNetwork(bypassed);
   expect(world.stats()).toEqual(original.stats());
   const firstNewId = Math.max(...original.vehicles.id.subarray(0, original.vehicles.highWater)) + 1;
   const directions = new Set<number>();
@@ -32,8 +31,8 @@ it('keeps live trips and sends new traffic both ways along a player-built shortc
     }
   }
   expect(directions).toEqual(new Set([-1, 1]));
-  world.setAdmissions(false);
+  world = world.editNetwork({ ...bypassed, demand: [] });
   for (let i = 0; i < 100 / DT && world.stats().active; i++) world.step();
   expect(world.stats().lost).toBe(0);
-  expect(world.stats().completed).toBe(world.stats().spawned);
+  expect(world.stats()).toMatchObject({ cleared: 0, active: 0, completed: world.stats().spawned });
 });

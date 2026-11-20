@@ -117,8 +117,6 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     } else if (msg.type === 'roadsChanged') {
       drawNetwork(msg.network);
       editor?.accept(msg.edits);
-    } else if (msg.type === 'editWaiting') {
-      editor?.waitForTraffic();
     } else if (msg.type === 'editRejected') {
       editor?.reject(msg.reason);
     } else {

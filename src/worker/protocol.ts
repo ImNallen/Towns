@@ -11,13 +11,11 @@ export type ToWorker =
   | { type: 'setSpeed'; speed: number }
   | { type: 'buildRoad'; start: Vec2; end: Vec2; bend?: Vec2 }
   | { type: 'bulldozeRoad'; segment: number; editCount: number }
-  | { type: 'undoRoad' }
-  | { type: 'cancelRoadEdit' };
+  | { type: 'undoRoad' };
 
 /** Simulation worker → main thread. */
 export type FromWorker =
   | { type: 'roadsChanged'; network: Network; edits: MeadowEdit[] }
-  | { type: 'editWaiting' }
   | { type: 'editRejected'; reason: string }
   | { type: 'ready'; scenario: Scenario; capacity: number }
   | {

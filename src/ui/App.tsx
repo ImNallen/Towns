@@ -126,6 +126,7 @@ export function App({ game }: { game: Game }) {
             <dt>Avg speed</dt><dd>{stats ? `${(stats.meanSpeed * 3.6).toFixed(0)} km/h` : '–'}</dd>
             <dt>Stopped</dt><dd>{stats ? `${(stats.stoppedShare * 100).toFixed(0)}%` : '–'}</dd>
             <dt>Avg trip</dt><dd>{stats ? `${stats.meanTripTime.toFixed(0)} s` : '–'}</dd>
+            <dt>Cleared by edits</dt><dd>{stats?.cleared ?? 0}</dd>
           </dl>
           <label className="toggle"><input type="checkbox" checked={lanes} onChange={toggleLanes} />Lane graph <kbd>L</kbd></label>
           <div className="performance">{fps.toFixed(0)} fps</div>
@@ -135,7 +136,6 @@ export function App({ game }: { game: Game }) {
       {editor && <section className="editor" aria-label="Road editor">
         <div className="placement-info panel">
           <p role="status" aria-live="polite">{instruction}</p>
-          {editor.canCancel && editor.pending && speed === 0 && <button className="cancel-edit" onClick={() => changeSpeed(lastSpeed)}>Resume traffic</button>}
           {editor.canCancel && <button className="cancel-edit" onClick={() => game.cancelRoadEdit()}>Cancel edit</button>}
           {editor.chaining && <button className="cancel-edit" onClick={() => {
             game.cancelRoadEdit();
