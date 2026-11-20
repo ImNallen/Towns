@@ -83,6 +83,15 @@ test('residents commute, a household card opens on click, and a new road sends t
   await page.waitForTimeout(1500);
   await page.screenshot({ path: 'artifacts/screens/town-cross-commute.png' });
 
+  const upgraded = (await town())!.households.find((h) => h.level > 1);
+  if (upgraded) {
+    await click(scenario.decor.houses[upgraded.home]!);
+    const at = screen(scenario.decor.houses[upgraded.home]!);
+    await page.mouse.move(at.x, at.y);
+    await page.mouse.wheel(0, -500);
+    await page.screenshot({ path: 'artifacts/screens/town-upgraded-house.png' });
+  }
+
   expect((await page.evaluate(() => window.__towns?.stats()))?.lost).toBe(0);
   expect(errors).toEqual([]);
 });

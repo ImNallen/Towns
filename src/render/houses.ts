@@ -22,10 +22,10 @@ interface Block {
  */
 const LEVELS: readonly (readonly Block[])[] = [
   [{ minX: -5, maxX: 5, depth: 7.5, wall: 3.2, roof: 2.8, ridge: 'x' }],
-  [{ minX: -7, maxX: 4, depth: 9, wall: 4.2, roof: 3.2, ridge: 'x' }],
+  [{ minX: -8, maxX: 4, depth: 10, wall: 4.2, roof: 3.4, ridge: 'x' }],
   [
-    { minX: -7, maxX: 4, depth: 9, wall: 6.4, roof: 3.2, ridge: 'x' },
-    { minX: -6, maxX: -1.5, depth: 13, wall: 6.4, roof: 2.6, ridge: 'z' },
+    { minX: -8, maxX: 4, depth: 10, wall: 6.4, roof: 3.4, ridge: 'x' },
+    { minX: -7, maxX: -2, depth: 14, wall: 6.4, roof: 2.8, ridge: 'z' },
   ],
 ];
 const OVERHANG = 0.5;
