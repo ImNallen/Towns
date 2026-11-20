@@ -120,7 +120,7 @@ describe('meadow starter map', () => {
     [{ x: -45, y: -8 }, { x: -65, y: 12 }],
     [{ x: -45, y: -8 }, { x: 300, y: 0 }],
     [{ x: -45, y: -8 }, { x: NaN, y: 0 }],
-    [{ x: 0, y: 0 }, { x: 30, y: 0 }],
+    [{ x: 0, y: 0 }, { x: 8, y: 0 }],
     [{ x: -45, y: -8 }, { x: 120, y: 29 }],
     [{ x: -45, y: -8 }, { x: 111, y: -78 }],
   ])('rejects invalid placement from %j to %j', (start, end) => {

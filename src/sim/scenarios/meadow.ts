@@ -434,7 +434,6 @@ function checkRoad(
   const intersections = streetCrossings(points, chains);
   if (!intersections.ok) return intersections;
   const { crossings } = intersections;
-  if (!source && target?.kind !== 'junction' && target?.kind !== 'corner' && !crossings.length) return fail('Drag across an existing street to build a crossing.');
   for (const { point } of crossings) {
     const nearEndpoint = distance(point, start) < (startsAtNode ? MIN_JUNCTION_SPACING : MIN_LENGTH)
       || distance(point, end) < (endsAtNode ? MIN_JUNCTION_SPACING : MIN_LENGTH);
