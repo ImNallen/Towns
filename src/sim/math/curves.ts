@@ -21,11 +21,11 @@ export function cubicPoints(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, step = 1.5):
 }
 
 /**
- * Sample a circular arc counter-clockwise from angle `a0` to `a1` (a1 > a0).
+ * Sample a circular arc in the direction of the signed angle from `a0` to `a1`.
  * With `includeEnd = false` the end point is omitted (useful for closed loops).
  */
 export function arcPoints(c: Vec2, r: number, a0: number, a1: number, step = 1.5, includeEnd = true): Vec2[] {
-  const n = Math.max(2, Math.ceil(((a1 - a0) * r) / step));
+  const n = Math.max(2, Math.ceil((Math.abs(a1 - a0) * r) / step));
   const out: Vec2[] = [];
   const last = includeEnd ? n : n - 1;
   for (let i = 0; i <= last; i++) {

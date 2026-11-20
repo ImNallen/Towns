@@ -85,7 +85,7 @@ export function App({ game }: { game: Game }) {
     : editor?.tool === 'pan' ? 'Drag the map to pan.'
     : editor?.tool === 'curve' ? 'Drag between two points, then place the bend.'
     : editor?.connected ? 'Drag across a street for a crossing, or from its side for a branch.'
-    : 'Drag from a street or a marked end to build.');
+    : 'Drag from one marked road end to the other to connect them.');
   const tripStatus = editor?.pending ? 'Updating roads' : speed === 0 ? 'Paused' : editor && !editor.connected ? 'Waiting for a connection' : 'Traffic running';
 
   return (
