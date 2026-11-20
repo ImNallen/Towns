@@ -20,6 +20,12 @@ const PRIORITY_SCAN = 60;
 /** Priority vehicles arriving within [tMe - BEFORE, tMe + AFTER] of us block the merge (s). */
 const CONFLICT_BEFORE = 1.5;
 const CONFLICT_AFTER = 2.5;
+/**
+ * A road edit may move a car this far onto a reshaped lane (m), e.g. into the mouth connectors of a
+ * new junction, and turn it by up to 30°. That is under half a road width and a fraction of a car length.
+ */
+const EDIT_SNAP = 2;
+const EDIT_SNAP_COS = 0.866;
 
 export interface SimStats {
   tick: number;
@@ -182,10 +188,14 @@ export class World {
     return edited;
   }
 
-  /** The lane position that shows `pose` exactly and can still reach `dest`. Ties go to the lowest lane id. */
+  /**
+   * Where a car at `pose` continues towards `dest`: the lane position that shows it exactly, or
+   * else the nearest point on a lane within EDIT_SNAP metres and 30° of it. Ties go to the lowest lane id.
+   */
   private locate(pose: PathSample, dest: number): { lane: number; s: number } | undefined {
     const at: PathSample = { x: 0, y: 0, hx: 0, hy: 0 };
-    let best: { lane: number; s: number; error: number } | undefined;
+    let exact: { lane: number; s: number; error: number } | undefined;
+    let near: { lane: number; s: number; error: number } | undefined;
     for (const lane of this.lanes) {
       if (!this.routing.canReach(dest, lane.id)) continue;
       const { pts, cum } = lane.path;
@@ -193,20 +203,24 @@ export class World {
         const dx = pts[k * 2 + 2]! - pts[k * 2]!;
         const dy = pts[k * 2 + 3]! - pts[k * 2 + 1]!;
         const length = cum[k + 1]! - cum[k]!;
-        if (length <= 0 || (dx * pose.hx + dy * pose.hy) / length < 1 - 1e-6) continue;
+        const along = length > 0 ? (dx * pose.hx + dy * pose.hy) / length : -1;
+        if (along < EDIT_SNAP_COS) continue;
         const t = Math.max(0, Math.min(1, ((pose.x - pts[k * 2]!) * dx + (pose.y - pts[k * 2 + 1]!) * dy) / (length * length)));
         const s = cum[k]! + t * length;
         // sampleAt resolves a vertex's heading to the following segment, just as rendering does.
         sampleAt(lane.path, s, at);
-        if (at.hx * pose.hx + at.hy * pose.hy < 1 - 1e-6) continue;
+        const heading = at.hx * pose.hx + at.hy * pose.hy;
+        if (heading < EDIT_SNAP_COS) continue;
         const ex = at.x - pose.x;
         const ey = at.y - pose.y;
         const error = ex * ex + ey * ey;
-        if (error > 1e-8 || (best && best.error <= error)) continue;
-        best = { lane: lane.id, s, error };
+        if (along >= 1 - 1e-6 && heading >= 1 - 1e-6 && error <= 1e-8 && !(exact && exact.error <= error)) {
+          exact = { lane: lane.id, s, error };
+        }
+        if (error <= EDIT_SNAP * EDIT_SNAP && !(near && near.error <= error)) near = { lane: lane.id, s, error };
       }
     }
-    return best;
+    return exact ?? near;
   }
 
   /**

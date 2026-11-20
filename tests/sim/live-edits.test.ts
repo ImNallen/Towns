@@ -139,6 +139,21 @@ describe('live network migration', () => {
     expect(original.stats().active).toBe(1);
   });
 
+  it('moves a car onto a lane reshaped within two metres and keeps its trip', () => {
+    const original = new World(street(false, true, 0), 1);
+    const car = original.vehicles.spawn(0, 100, 8, 0, 0);
+    const b = new NetworkBuilder();
+    const reshaped = b.addLane('road', polyline([{ x: 0, y: 0 }, { x: 100, y: 1.5 }, { x: 200, y: 0 }]), 10);
+    b.addLane('road', polyline([{ x: 200, y: 3.5 }, { x: 0, y: 3.5 }]), 10);
+    const edited = original.editNetwork({ ...street(), network: b.build(), demand: [] });
+    expect(edited.stats()).toMatchObject({ active: 1, cleared: 0 });
+    expect(edited.vehicles.lane[car]).toBe(reshaped);
+    const [before, after] = [original, edited].map((world) => snapshot(world).positions.slice(car * 3, car * 3 + 2));
+    expect(Math.hypot(after![0]! - before![0]!, after![1]! - before![1]!)).toBeLessThan(1.5);
+    run(edited, 600);
+    expect(edited.stats()).toMatchObject({ completed: 1, lost: 0 });
+  });
+
   it('clears the follower when a split puts two cars closer than a car length along a new route', () => {
     const original = new World(street(false, true, 0), 1);
     original.vehicles.spawn(0, 88, 0, 0, 0);

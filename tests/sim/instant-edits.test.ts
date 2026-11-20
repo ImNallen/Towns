@@ -13,7 +13,10 @@ describe('road edits under live traffic', () => {
     expect(rows.slice(1).every((row) => row.active > 5)).toBe(true);
     expect(rows.every((row) => row.overlaps === 0)).toBe(true);
     expect(rows.find((row) => row.edit === 'bulldoze a bypass segment')!.cleared).toBeGreaterThan(0);
-    expect(rows.find((row) => row.edit === 'four-way across the bypass')!.cleared).toBe(0);
+    const cleared = Object.fromEntries(rows.map((row) => [row.edit, row.cleared]));
+    expect(cleared).toMatchObject({
+      'T junction on the arch': 0, 'bypass across the arch': 0, 'four-way across the bypass': 0, 'undo the bulldozing': 0,
+    });
     expect(world.stats().cleared).toBe(rows.reduce((sum, row) => sum + row.cleared, 0));
     expect(world.stats().lost).toBe(0);
   });
