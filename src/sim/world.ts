@@ -372,19 +372,18 @@ export class World {
     if (depth >= 6 || offset > PRIORITY_SCAN) return false;
     const V = this.vehicles;
     for (const upstream of this.lanes[lane]!.prev) {
-      const start = this.bucketStart[upstream]!;
-      const count = this.bucketCount[upstream]!;
-      for (let q = 0; q < count; q++) {
-        const j = this.order[start + q]!;
-        if (this.routing.nextHop(V.dest[j]!, upstream) !== lane) continue;
-        // Also verify the eventual movement when looking beyond the immediate approach.
-        let next = lane;
-        for (let step = 0; step < depth && next !== movement; step++) next = this.routing.nextHop(V.dest[j]!, next);
-        if (next !== movement) continue;
-        const remaining = offset + this.laneLen[upstream]! - V.s[j]!;
-        if (remaining <= PRIORITY_SCAN && remaining / Math.max(V.v[j]!, 1) < latest) return true;
+      if (this.bucketCount[upstream]! === 0) {
+        if (this.junctionApproachArrives(upstream, movement, offset + this.laneLen[upstream]!, latest, depth + 1)) return true;
+        continue;
       }
-      if (this.junctionApproachArrives(upstream, movement, offset + this.laneLen[upstream]!, latest, depth + 1)) return true;
+      const first = this.order[this.bucketStart[upstream]!]!;
+      const dest = V.dest[first]!;
+      if (this.routing.nextHop(dest, upstream) !== lane) continue;
+      let next = lane;
+      for (let step = 0; step < depth && next !== movement; step++) next = this.routing.nextHop(dest, next);
+      if (next !== movement) continue;
+      const remaining = offset + this.laneLen[upstream]! - V.s[first]!;
+      if (remaining <= PRIORITY_SCAN && remaining / Math.max(V.v[first]!, 1) < latest) return true;
     }
     return false;
   }

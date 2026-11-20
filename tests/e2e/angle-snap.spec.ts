@@ -35,7 +35,7 @@ test('the snapped and free previews build at their respective endpoints', async 
 
     await move(snapping ? -59 : -65, 67);
     await page.mouse.down();
-    await expect(status).toHaveText('Start on a street or a marked road end.');
+    await expect(status).toHaveText('Drag across an existing street to build a crossing.');
     await page.mouse.up();
     await move(snapping ? -65 : -59, 67);
     await page.mouse.down();

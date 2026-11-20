@@ -1,8 +1,9 @@
 import * as THREE from 'three';
-import { offsetPolyline, polyline, type Polyline } from '../sim/math/polyline';
-import { add, scale, distance, type Vec2 } from '../sim/math/vec';
-import { meadowConnected, meadowScenario, snapToMeadowStreet, meadowStreets, meadowTips, planMeadowRoad, type MeadowRoad } from '../sim/scenarios/meadow';
-import { angleGuide, fitGuideToStreet, type StreetPoint, type AngleGuide } from '../sim/network/angleSnap';
+import { offsetPolyline, polyline, slicePolyline, type Polyline } from '../sim/math/polyline';
+import { add, scale, distance, dot, type Vec2 } from '../sim/math/vec';
+import { meadowConnected, meadowRoadSections, meadowScenario, snapToMeadowStreet, meadowStreets, meadowTips, planMeadowRoad, type MeadowRoad } from '../sim/scenarios/meadow';
+import { angleGuide, crossingAngleGuide, fitGuideToStreet, type StreetPoint, type AngleGuide } from '../sim/network/angleSnap';
+import { JUNCTION_MOUTH } from '../sim/network/streets';
 import type { ToWorker } from '../worker/protocol';
 import type { MapCamera } from './camera';
 import { disposeLayer } from './dispose';
@@ -23,7 +24,7 @@ export interface EditorState {
 
 type EditPhase =
   | { kind: 'idle' }
-  | { kind: 'drawing'; id: number; host: StreetPoint; press: Vec2; pointer: PointerEvent }
+  | { kind: 'drawing'; id: number; host: StreetPoint | undefined; start: Vec2; press: Vec2; pointer: PointerEvent }
   | { kind: 'bending'; start: Vec2; end: Vec2; id: number | null }
   | { kind: 'pending' | 'waiting' };
 
@@ -187,14 +188,16 @@ export class RoadEditor {
       return;
     }
     if (this.phase.kind !== 'idle') return;
-    const host = this.snap(this.world(e));
-    if (!host) {
+    const cursor = this.world(e);
+    const host = this.snap(cursor);
+    if (!host && this.tool !== 'road') {
       this.hint = 'Start on a street or a marked road end.';
       return;
     }
-    this.mark(host.point);
-    this.phase = { kind: 'drawing', host, id: e.pointerId, pointer: e, press: { x: e.clientX, y: e.clientY } };
-    this.hint = 'Drag to the other end of your new road.';
+    const start = host?.point ?? cursor;
+    this.mark(start);
+    this.phase = { kind: 'drawing', host, start, id: e.pointerId, pointer: e, press: { x: e.clientX, y: e.clientY } };
+    this.hint = host ? 'Drag to the other end of your new road.' : 'Drag across an existing street to build a crossing.';
     this.canvas.setPointerCapture(e.pointerId);
   }
 
@@ -214,18 +217,24 @@ export class RoadEditor {
     }
     if (phase.kind !== 'drawing' || e.pointerId !== phase.id) return;
     phase.pointer = e;
-    const { host, press } = phase;
-    const start = host.point;
+    const { host, press, start } = phase;
     if (Math.hypot(e.clientX - press.x, e.clientY - press.y) < 3) {
       this.clearPreview();
       if (release) this.finish();
       return;
     }
     const snap = this.snap(cursor);
-    let guide = this.tool === 'road' && this.angleSnapping
-      ? angleGuide(this.streets, host, cursor) : undefined;
+    let guide: AngleGuide | undefined;
+    if (this.tool === 'road' && this.angleSnapping) {
+      guide = host ? angleGuide(this.streets, host, cursor) : crossingAngleGuide(this.streets, start, cursor);
+    }
     if (guide && snap) {
       guide = fitGuideToStreet(guide, start, snap, Math.min(8, 14 * this.camera.mpp));
+      if (guide && !host) {
+        const heading = dot(guide.direction, snap.tangent);
+        const straightArrival = snap.kind === 'street' ? Math.abs(heading) <= Math.SQRT1_2 + 1e-6 : heading < -1 + 1e-6;
+        if (!straightArrival) guide = undefined;
+      }
       if (guide && !snapToMeadowStreet(this.streets, guide.end, 1e-6)) guide = undefined;
     }
     const end = guide?.end ?? snap?.point ?? cursor;
@@ -240,7 +249,7 @@ export class RoadEditor {
     }
     const hint = this.tool === 'curve' ? 'Release to set the end, then place the bend.'
       : snap ? 'Release to connect the streets.' : 'Release to extend the street.';
-    this.place(start, end, undefined, release, guide ? `${guide.label} · ${hint}` : hint, guide);
+    this.place(start, end, undefined, release, hint, guide);
   }
 
   private place(start: Vec2, end: Vec2, bend: Vec2 | undefined, release: boolean, hint: string, alignment?: AngleGuide): void {
@@ -261,10 +270,24 @@ export class RoadEditor {
       this.send({ type: 'buildRoad', start, end, bend });
       return;
     }
-    this.hint = hint;
+    const fourWays = plan.road.fourWays ?? [];
+    const placingBendEnd = this.tool === 'curve' && this.phase.kind === 'drawing';
+    if (fourWays.length && !placingBendEnd) {
+      const count = fourWays.length === 1 ? 'a four-way intersection' : `${fourWays.length} four-way intersections`;
+      hint = `Release to build ${count}.`;
+    }
+    this.hint = alignment ? `${alignment.label} · ${hint}` : hint;
     const preview = buildRoads(meadowScenario([...this.roads, plan.road]).network, 'dashed');
     const edges = new FlatMesh(0.19);
-    for (const side of [-1, 1]) edges.ribbon(offsetPolyline(plan.path, side * (this.width / 2 - 0.35)), 0.35);
+    const atCrossing = (p: Vec2) => fourWays.some(({ point }) => distance(point, p) < 1e-6);
+    for (const points of meadowRoadSections(plan.road)) {
+      const path = polyline(points);
+      const from = atCrossing(points[0]!) ? JUNCTION_MOUTH : 0;
+      const to = path.length - (atCrossing(points[points.length - 1]!) ? JUNCTION_MOUTH : 0);
+      if (to <= from) continue;
+      const visible = from > 0 || to < path.length ? slicePolyline(path, from, to) : path;
+      for (const side of [-1, 1]) edges.ribbon(offsetPolyline(visible, side * (this.width / 2 - 0.35)), 0.35);
+    }
     preview.add(new THREE.Mesh(edges.build(), new THREE.MeshBasicMaterial({ color: PALETTE.editorHandle })));
     if (alignment) this.drawAngle(preview, start, alignment);
     this.setRoadVisibility(false);
@@ -272,8 +295,9 @@ export class RoadEditor {
     this.preview = preview;
   }
 
-  private drawAngle(preview: THREE.Group, start: Vec2, guide: AngleGuide): void {
-    const size = Math.min(distance(start, guide.end) / 3, Math.max(this.width / 2 + 8 * this.camera.mpp, 16 * this.camera.mpp));
+  private drawAngle(preview: THREE.Group, roadStart: Vec2, guide: AngleGuide): void {
+    const start = guide.origin;
+    const size = Math.min(distance(roadStart, guide.end) / 3, Math.max(this.width / 2 + 8 * this.camera.mpp, 16 * this.camera.mpp));
     const marks = new FlatMesh(0.45);
     const width = Math.max(0.14, 1.7 * this.camera.mpp);
     const along = scale(guide.reference, size);

@@ -114,3 +114,12 @@ export function offsetPolyline(pl: Polyline, d: number): Polyline {
   }
   return polyline(out, pl.closed);
 }
+
+export function slicePolyline(path: Polyline, from: number, to: number): Polyline {
+  const points: Vec2[] = [sampleAt(path, from, { x: 0, y: 0, hx: 0, hy: 0 })];
+  for (let i = 1; i < path.cum.length - 1; i++) {
+    if (path.cum[i]! > from && path.cum[i]! < to) points.push({ x: path.pts[i * 2]!, y: path.pts[i * 2 + 1]! });
+  }
+  points.push(sampleAt(path, to, { x: 0, y: 0, hx: 0, hy: 0 }));
+  return polyline(points);
+}

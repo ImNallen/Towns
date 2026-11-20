@@ -3,17 +3,20 @@ import { polyline, type Polyline } from '../math/polyline';
 import { add, distance, dot, normalize, projectOntoSegment, scale, sub, type Vec2 } from '../math/vec';
 import type { StreetPoint } from '../network/angleSnap';
 import { NetworkBuilder } from '../network/builder';
+import { streetCrossings, throughArms, type StreetCrossing } from '../network/junctions';
 import { buildStreetNetwork } from '../network/streets';
 import type { Bounds, Decor, House, Scenario } from './types';
 
 export interface MeadowRoad {
   readonly points: readonly Vec2[];
+  readonly fourWays?: readonly StreetCrossing[];
 }
 
 type Plan = { ok: true; road: MeadowRoad; path: Polyline } | { ok: false; reason: string };
 const WIDTH = 8;
 const TANGENT_LEAD = 0.25;
 const MIN_LENGTH = 12;
+const MIN_JUNCTION_SPACING = 23;
 const MIN_RADIUS = 18;
 const BOUNDS: Bounds = { minX: -180, maxX: 180, minY: -115, maxY: 115 };
 
@@ -45,6 +48,26 @@ const tip = (chain: readonly Vec2[]): Vec2 => chain[chain.length - 1]!;
 const PORTALS: readonly Vec2[] = [{ x: -185, y: -8 }, { x: 185, y: 8 }];
 const isPortal = (p: Vec2): boolean => PORTALS.some((portal) => same(p, portal));
 
+function splitAt(original: Vec2[], node: Vec2): Vec2[][] {
+  const chain = original.map((p) => same(p, node) ? node : p);
+  if (same(chain[0]!, node) || same(tip(chain), node)) return [chain];
+  for (let i = 1; i < chain.length; i++) {
+    if (pointSegmentDistance(node, chain[i - 1]!, chain[i]!) >= 1e-6) continue;
+    const before = chain.slice(0, i);
+    const after = chain.slice(i);
+    if (!same(tip(before), node)) before.push(node);
+    if (!same(after[0]!, node)) after.unshift(node);
+    return [before, after];
+  }
+  return [chain];
+}
+
+export function meadowRoadSections(road: MeadowRoad): Vec2[][] {
+  let sections = [[...road.points]];
+  for (const { point } of road.fourWays ?? []) sections = sections.flatMap((section) => splitAt(section, point));
+  return sections;
+}
+
 /** Replay into maximal chains whose endpoints are dead ends, portals or junctions. */
 export function meadowStreets(roads: readonly MeadowRoad[]): Vec2[][] {
   let chains: Vec2[][] = [
@@ -52,30 +75,11 @@ export function meadowStreets(roads: readonly MeadowRoad[]): Vec2[][] {
     [PORTALS[1]!, { x: 45, y: 8 }],
   ];
   for (const road of roads) {
-    for (const endpoint of [road.points[0]!, tip(road.points)]) {
-      const split: Vec2[][] = [];
-      for (const original of chains) {
-        const chain = original.map((p) => same(p, endpoint) ? endpoint : p);
-        let cut = false;
-        if (!same(endpoint, chain[0]!) && !same(endpoint, tip(chain))) {
-          for (let i = 1; i < chain.length; i++) {
-            if (pointSegmentDistance(endpoint, chain[i - 1]!, chain[i]!) < 1e-6) {
-              const before = chain.slice(0, i);
-              const after = chain.slice(i);
-              if (!same(tip(before), endpoint)) before.push(endpoint);
-              if (!same(after[0]!, endpoint)) after.unshift(endpoint);
-              split.push(before, after);
-              cut = true;
-              break;
-            }
-          }
-        }
-        if (!cut) split.push(chain);
-      }
-      chains = split;
-    }
-    chains.push([...road.points]);
-    for (const endpoint of [road.points[0]!, tip(road.points)]) {
+    const endpoints = [road.points[0]!, tip(road.points)];
+    for (const node of endpoints) chains = chains.flatMap((chain) => splitAt(chain, node));
+    for (const { point } of road.fourWays ?? []) chains = chains.flatMap((chain) => splitAt(chain, point));
+    chains.push(...meadowRoadSections(road));
+    for (const endpoint of endpoints) {
       const incident = chains.flatMap((c, i) => [c[0]!, tip(c)].filter((p) => same(p, endpoint)).map(() => i));
       if (incident.length !== 2 || incident[0] === incident[1]) continue;
       const [i, j] = incident;
@@ -123,7 +127,17 @@ export function snapToMeadowStreet(chains: readonly (readonly Vec2[])[], point: 
   let reach = radius;
   for (const end of ends) {
     const d = distance(end.p, point);
-    if (end.degree === 1 && !isPortal(end.p) && d <= reach) {
+    if (d > reach || isPortal(end.p)) continue;
+    if (end.degree === 3) {
+      const arms = ends.filter((arm) => same(arm.p, end.p)).map((arm) => ({
+        street: arm.street,
+        tangent: normalize(sub(arm.street[arm.i === 0 ? 1 : arm.i - 1]!, arm.p)),
+      }));
+      const main = throughArms(arms);
+      const side = arms.find((arm) => !main.includes(arm))!;
+      best = { kind: 'junction', street: side.street, point: end.p, tangent: scale(side.tangent, -1), priorityAxis: main[0]!.tangent };
+      reach = d;
+    } else if (end.degree === 1) {
       const adjacent = end.i === 0 ? 1 : end.i - 1;
       best = { kind: 'tip', street: end.street, point: end.p, tangent: normalize(sub(end.p, end.street[adjacent]!)) };
       reach = d;
@@ -135,7 +149,7 @@ export function snapToMeadowStreet(chains: readonly (readonly Vec2[])[], point: 
       const p = projectOntoSegment(point, chain[i - 1]!, chain[i]!);
       const d = distance(p, point);
       if (d > reach || !insideMeadow(p)) continue;
-      if (ends.some((end) => distance(p, end.p) < (end.degree >= 3 ? 23 : 12))) continue;
+      if (ends.some((end) => distance(p, end.p) < (end.degree >= 3 ? MIN_JUNCTION_SPACING : MIN_LENGTH))) continue;
       const j = i > 1 && same(p, chain[i - 1]!) ? i - 1 : i;
       best = { kind: 'street', street: chain, point: p, tangent: normalize(sub(chain[j]!, chain[j - 1]!)) };
       reach = d;
@@ -145,7 +159,7 @@ export function snapToMeadowStreet(chains: readonly (readonly Vec2[])[], point: 
 }
 
 export function meadowScenario(roads: readonly MeadowRoad[] = []): Scenario {
-  const { network, demand } = buildStreetNetwork(new NetworkBuilder(), meadowStreets(roads), PORTALS);
+  const { network, demand } = buildStreetNetwork(new NetworkBuilder(), meadowStreets(roads), PORTALS, roads.flatMap((road) => road.fourWays ?? []));
   const decor = scenery();
   const driveways = new NetworkBuilder();
   for (const house of decor.houses) {
@@ -163,6 +177,10 @@ export function meadowScenario(roads: readonly MeadowRoad[] = []): Scenario {
 
 function pointSegmentDistance(p: Vec2, a: Vec2, b: Vec2): number {
   return distance(p, projectOntoSegment(p, a, b));
+}
+
+function containsPoint(chain: readonly Vec2[], p: Vec2): boolean {
+  return chain.some((b, i) => i > 0 && pointSegmentDistance(p, chain[i - 1]!, b) < 1e-6);
 }
 
 function blockedByScenery(p: Vec2, decor: Decor): boolean {
@@ -184,28 +202,14 @@ function insideMeadow(p: Vec2): boolean {
     && p.y >= BOUNDS.minY + margin && p.y <= BOUNDS.maxY - margin;
 }
 
-type Attachment = { kind: 'tip'; direction: Vec2 } | { kind: 'street'; direction: Vec2 };
-
-function attachment(chains: Vec2[][], p: Vec2, toward: Vec2): Attachment | undefined {
-  if (isPortal(p) || degree(chains, p) >= 3) return undefined;
-  for (const c of chains) {
-    if (same(tip(c), p)) return { kind: 'tip', direction: normalize(sub(p, c[c.length - 2]!)) };
-    if (same(c[0]!, p)) return { kind: 'tip', direction: normalize(sub(p, c[1]!)) };
-  }
-  for (const c of chains) {
-    for (let i = 1; i < c.length; i++) {
-      if (pointSegmentDistance(p, c[i - 1]!, c[i]!) > 1e-6) continue;
-      if (chains.some((chain) => [chain[0]!, tip(chain)].some((end) =>
-        distance(p, end) < (degree(chains, end) >= 3 ? 23 : 12)))) return undefined;
-      const along = normalize(sub(c[i]!, c[i - 1]!));
-      const normal = { x: -along.y, y: along.x };
-      const outward = dot(normal, toward) >= 0 ? normal : scale(normal, -1);
-      const direction = Math.abs(dot(along, toward)) <= Math.SQRT1_2
-        ? toward : normalize(add(outward, scale(along, Math.sign(dot(along, toward)))));
-      return { kind: 'street', direction };
-    }
-  }
-  return undefined;
+function departure(snap: StreetPoint | undefined, toward: Vec2): Vec2 {
+  if (!snap) return toward;
+  if (snap.kind !== 'street') return snap.tangent;
+  const along = snap.tangent;
+  if (Math.abs(dot(along, toward)) <= Math.SQRT1_2) return toward;
+  const normal = { x: -along.y, y: along.x };
+  const outward = dot(normal, toward) >= 0 ? normal : scale(normal, -1);
+  return normalize(add(outward, scale(along, Math.sign(dot(along, toward)))));
 }
 
 function curve(start: Vec2, end: Vec2, incoming: Vec2, outgoing: Vec2): Vec2[] {
@@ -222,23 +226,25 @@ export function planMeadowRoad(roads: readonly MeadowRoad[], start: Vec2, end: V
   if (!insideMeadow(start) || !insideMeadow(end) || (bend && !insideMeadow(bend))) return fail('Keep the whole street inside the meadow.');
   const chains = meadowStreets(roads);
   const chord = normalize(sub(end, start));
-  const source = attachment(chains, start, normalize(sub(bend ?? end, start)));
-  if (!source) return fail('Start at a street tip or an open stretch of street.');
-  const target = attachment(chains, end, normalize(sub(bend ?? start, end)));
-  const endOnStreet = chains.some((c) => c.slice(1).some((b, i) => pointSegmentDistance(end, c[i]!, b) < 1e-6));
-  if (endOnStreet && !target) return fail('Leave room between junctions and street ends.');
-  if (source.kind === 'street' && target?.kind === 'street' && distance(start, end) < 23) return fail('Leave room between junctions and street ends.');
-  if (!target && distance(start, end) < MIN_LENGTH) return fail('Build at least 12 metres of street.');
-  const outgoing = target ? scale(target.direction, -1) : normalize(sub(end, bend ?? start));
+  const source = snapToMeadowStreet(chains, start, 1e-6);
+  const target = snapToMeadowStreet(chains, end, 1e-6);
+  const onStreet = (p: Vec2) => chains.some((chain) => containsPoint(chain, p));
+  if ((!source && onStreet(start)) || (!target && onStreet(end))) return fail('Leave room between junctions and street ends.');
+  const startsAtJunction = source && source.kind !== 'tip';
+  const endsAtJunction = target && target.kind !== 'tip';
+  if (startsAtJunction && endsAtJunction && distance(start, end) < MIN_JUNCTION_SPACING) return fail('Leave room between junctions and street ends.');
+  if ((!target || !source) && distance(start, end) < MIN_LENGTH) return fail('Build at least 12 metres of street.');
   const firstChord = normalize(sub(bend ?? end, start));
   const lastChord = normalize(sub(end, bend ?? start));
-  if (dot(firstChord, source.direction) < (source.kind === 'tip' ? 0.45 : Math.SQRT1_2)
-    || dot(lastChord, outgoing) < (target?.kind === 'street' ? Math.SQRT1_2 : 0.45)) return fail('Extend the road in its direction of travel.');
+  const incoming = departure(source, firstChord);
+  const outgoing = scale(departure(target, scale(lastChord, -1)), -1);
+  if (dot(firstChord, incoming) < (source?.kind === 'tip' ? 0.45 : Math.SQRT1_2)
+    || dot(lastChord, outgoing) < (target?.kind === 'tip' ? 0.45 : Math.SQRT1_2)) return fail('Extend the road in its direction of travel.');
   if (bend && (distance(start, bend) < MIN_LENGTH || distance(end, bend) < MIN_LENGTH)) return fail('Give the curve more room.');
   const bendHeading = chord;
   const points = bend
-    ? [...curve(start, bend, source.direction, bendHeading), ...curve(bend, end, bendHeading, outgoing).slice(1)]
-    : curve(start, end, source.direction, outgoing);
+    ? [...curve(start, bend, incoming, bendHeading), ...curve(bend, end, bendHeading, outgoing).slice(1)]
+    : curve(start, end, incoming, outgoing);
   const path = polyline(points);
   for (let i = 1; i < points.length - 1; i++) {
     const a = sub(points[i]!, points[i - 1]!);
@@ -247,14 +253,31 @@ export function planMeadowRoad(roads: readonly MeadowRoad[], start: Vec2, end: V
     if (turn > (distance(points[i - 1]!, points[i + 1]!) / 2) / MIN_RADIUS) return fail('That bend is too tight. Try a longer, gentler curve.');
   }
   const decor = scenery();
-  const joins = target ? [start, end] : [start];
   for (const p of points) {
     if (!insideMeadow(p)) return fail('Keep the whole street inside the meadow.');
     if (blockedByScenery(p, decor)) return fail('Leave room around buildings, water and hills.');
-    for (const chain of chains) {
+  }
+  const intersections = streetCrossings(points, chains);
+  if (!intersections.ok) return intersections;
+  const { crossings } = intersections;
+  if (!source && target?.kind !== 'junction' && !crossings.length) return fail('Drag across an existing street to build a crossing.');
+  for (const { point } of crossings) {
+    const nearEndpoint = distance(point, start) < (startsAtJunction ? MIN_JUNCTION_SPACING : MIN_LENGTH)
+      || distance(point, end) < (endsAtJunction ? MIN_JUNCTION_SPACING : MIN_LENGTH);
+    const nearOldNode = chains.some((chain) => [chain[0]!, tip(chain)].some((p) =>
+      distance(point, p) < (degree(chains, p) >= 3 ? MIN_JUNCTION_SPACING : MIN_LENGTH)));
+    const nearOtherCrossing = crossings.some((other) => other.point !== point && distance(point, other.point) < MIN_JUNCTION_SPACING);
+    if (nearEndpoint || nearOldNode || nearOtherCrossing) {
+      return fail('Leave room between crossings, junctions and street ends.');
+    }
+  }
+  const joins = [...(source ? [start] : []), ...(target ? [end] : []), ...crossings.map((c) => c.point)];
+  for (const chain of chains) {
+    const attached = joins.filter((join) => containsPoint(chain, join));
+    for (const p of points) {
       for (let j = 1; j < chain.length; j++) {
         const closest = projectOntoSegment(p, chain[j - 1]!, chain[j]!);
-        const joining = joins.some((join) =>
+        const joining = attached.some((join) =>
           distance(closest, join) <= 12 && distance(p, join) <= 16);
         if (!joining && distance(p, closest) < WIDTH + 1) return fail('Leave space between streets or snap to the street.');
       }
@@ -266,5 +289,9 @@ export function planMeadowRoad(roads: readonly MeadowRoad[], start: Vec2, end: V
       if (lengths[j]! - lengths[i]! > 24 && distance(points[i]!, points[j]!) < WIDTH + 1) return fail('Leave space between streets.');
     }
   }
-  return { ok: true, road: { points }, path };
+  const fourWays = [...crossings];
+  for (const snap of [source, target]) {
+    if (snap?.kind === 'junction') fourWays.push({ point: snap.point, priorityAxis: snap.priorityAxis });
+  }
+  return { ok: true, road: fourWays.length ? { points, fourWays } : { points }, path };
 }
