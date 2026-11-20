@@ -113,11 +113,9 @@ it.each([false, true])('joins angled marked ends on clear ground and carries tra
   expect(world.stats()).toMatchObject({ active: 0, completed: 2, lost: 0 });
 });
 
-it('returns the rejected curve when even the minimum bend leaves the meadow', () => {
-  const roads: MeadowRoad[] = [];
-  const a = vec2(-65, 101), b = vec2(65, 101);
-  extend(roads, vec2(-65, -8), a);
-  extend(roads, vec2(65, 8), b);
+it('returns the rejected curve when even the minimum bend leaves the meadow and square corners sit too close', () => {
+  const a = vec2(-65, 101), b = vec2(-45, 101);
+  const roads: MeadowRoad[] = [{ points: [vec2(a.x, 60), a] }, { points: [vec2(b.x, 60), b] }];
   const rejected = planMeadowRoad(roads, a, b);
   expect(rejected).toMatchObject({ ok: false,
     reason: expect.stringContaining('leave the meadow'), points: expect.any(Array) });
