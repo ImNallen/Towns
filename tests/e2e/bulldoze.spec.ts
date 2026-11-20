@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { meadowTips } from '../../src/sim/scenarios/meadow';
 
 test('bulldoze one crossing arm, preserve the opposite arm, and undo the removal', async ({ page }) => {
   await page.goto('/?speed=0&x=-35&y=0&mpp=0.2');
@@ -96,7 +97,7 @@ test('remove a bypass while traffic follows the remaining bend, then restore it'
   await expect(page.getByRole('status')).toHaveText('Click to remove this segment.');
   await page.mouse.down();
   await page.mouse.up();
-  await expect.poll(editor, { timeout: 20_000 }).toMatchObject({ connected: true, pending: false });
+  await expect.poll(editor).toMatchObject({ connected: true, pending: false });
   const arrived = (await stats())?.completed ?? 0;
   await expect.poll(async () => (await stats())?.completed ?? 0, { timeout: 30_000 }).toBeGreaterThan(arrived);
   await move(0, 28);
@@ -104,7 +105,7 @@ test('remove a bypass while traffic follows the remaining bend, then restore it'
   await page.screenshot({ path: 'artifacts/screens/meadow-bulldoze-live-bypass.png' });
   await page.getByRole('button', { name: 'Build road', exact: true }).click();
   await drag(-47.27, 27.85, 52.30, 27.74);
-  await expect.poll(editor, { timeout: 20_000 }).toMatchObject({ roadCount: 3, connected: true, pending: false });
+  await expect.poll(editor).toMatchObject({ roadCount: 3, connected: true, pending: false });
   await page.keyboard.press('b');
   await move(0, 27.8);
   await expect(page.getByRole('status')).toHaveText('Click to remove this segment.');
@@ -112,14 +113,50 @@ test('remove a bypass while traffic follows the remaining bend, then restore it'
   await expect.poll(async () => (await stats())?.completed ?? 0, { timeout: 30_000 }).toBeGreaterThan(afterRebuild);
   await page.screenshot({ path: 'artifacts/screens/meadow-bulldoze-rebuilt-bypass.png' });
   await page.getByRole('button', { name: 'Undo road' }).click();
-  await expect.poll(editor, { timeout: 20_000 }).toMatchObject({ roadCount: 2, connected: true, pending: false });
+  await expect.poll(editor).toMatchObject({ roadCount: 2, connected: true, pending: false });
   await move(0, 28);
   await expect(page.getByRole('status')).not.toHaveText('Click to remove this segment.');
   await page.getByRole('button', { name: 'Undo road' }).click();
-  await expect.poll(editor, { timeout: 20_000 }).toMatchObject({ connected: true, pending: false });
+  await expect.poll(editor).toMatchObject({ connected: true, pending: false });
   await move(0, 27.8);
   await expect(page.getByRole('status')).toHaveText('Click to remove this segment.');
   expect((await stats())?.lost).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test('bulldoze a segment under running traffic and see it go at once', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto('/?speed=0&x=0&y=0&mpp=0.5');
+  const editor = () => page.evaluate(() => window.__towns?.editor());
+  const stats = () => page.evaluate(() => window.__towns?.stats());
+  await expect.poll(editor).toMatchObject({ pending: false });
+  const box = await page.locator('#map').boundingBox();
+  if (!box) throw new Error('Missing map');
+  const move = (p: { x: number; y: number }) => page.mouse.move(box.x + box.width / 2 + p.x * 2, box.y + box.height / 2 - p.y * 2);
+  const [west, east] = meadowTips([]);
+  await move(west);
+  await page.mouse.down();
+  await move(east);
+  await page.mouse.up();
+  await expect.poll(editor).toMatchObject({ connected: true, pending: false });
+  await page.getByRole('button', { name: '1× speed' }).click();
+  await expect.poll(async () => (await stats())?.active ?? 0, { timeout: 20_000 }).toBeGreaterThan(3);
+  await page.keyboard.press('b');
+  await move({ x: 0, y: 0 });
+  const status = page.getByRole('status');
+  await expect(status).toHaveText('Click to remove this segment.');
+  await page.mouse.down();
+  await page.mouse.up();
+  await expect.poll(editor, { timeout: 500 }).toMatchObject({ connected: false, pending: false, canUndo: true });
+  await expect(status).toHaveText('Segment removed. Undo to restore it.');
+  await expect(page.getByRole('button', { name: 'Cancel edit' })).toHaveCount(0);
+  const after = (await stats())!;
+  expect(after.cleared).toBeGreaterThan(0);
+  expect(after.lost).toBe(0);
+  await page.getByText('Traffic details').click();
+  await expect(page.locator('dt', { hasText: 'Cleared by edits' }).locator('+ dd')).toHaveText(String(after.cleared));
+  await page.screenshot({ path: 'artifacts/screens/meadow-bulldoze-instant.png' });
   expect(errors).toEqual([]);
 });
 
