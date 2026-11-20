@@ -12,6 +12,7 @@ pnpm check          # typecheck + unit tests. Run before saying anything is done
 pnpm test           # vitest: sim tests + architecture guard (fast, headless)
 pnpm sim            # headless sim run, prints stats + state hash
 pnpm sim --scenario straight --ticks 2400 --seed 7 --every 600
+pnpm edits          # Meadow Vale edit sequence under traffic, prints cars cleared per edit
 pnpm e2e            # Playwright: boots the app, saves screenshots to artifacts/screens/
 ```
 
