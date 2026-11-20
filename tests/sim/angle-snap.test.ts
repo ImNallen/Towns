@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { add, distance, dot, fromAngle, normalize, perp, scale, sub, vec2 } from '../../src/sim/math/vec';
-import { angleGuide, crossingAngleGuide, fitGuideToStreet } from '../../src/sim/network/angleSnap';
+import { angleGuide, crossingAngleGuide, fitGuideToStreet, squareStreetGuide } from '../../src/sim/network/angleSnap';
 import { meadowStreets, planMeadowRoad, snapToMeadowStreet } from '../../src/sim/scenarios/meadow';
 
 const streets = meadowStreets([]);
@@ -91,4 +91,41 @@ it('places the right-angle guide on the actual junction when crossing a curved s
   const junction = plan.road.fourWays![0]!;
   expect(distance(junction.point, guide.origin)).toBeLessThan(1e-8);
   expect(dot(junction.priorityAxis, guide.direction)).toBeCloseTo(0, 8);
+});
+
+it('slides the far endpoint across sampled segments of a rotated street, in either drag direction', () => {
+  const along = fromAngle(0.7);
+  const across = perp(along);
+  const point = (s: number, t: number) => add(scale(along, s), scale(across, t));
+  const sides = [
+    [point(-70, 0), point(70, 0)],
+    [70, 30, 10, 0, -15, -70].map((s) => point(s, 40)),
+  ];
+  for (const [from, to] of [[0, 40], [40, 0]] as const) {
+    const start = snapToMeadowStreet(sides, point(-7, from), 0.01)!;
+    const target = snapToMeadowStreet(sides, point(36, to), 0.01)!;
+    const square = squareStreetGuide(start, target)!;
+    expect(square.label).toBe('90° at both ends');
+    expect(distance(square.origin, start.point)).toBeLessThan(1e-8);
+    expect(distance(square.end, point(-7, to))).toBeLessThan(1e-8);
+    expect(dot(square.direction, start.tangent)).toBeCloseTo(0, 8);
+    expect(dot(square.direction, target.tangent)).toBeCloseTo(0, 8);
+  }
+});
+
+it('keeps the connection on the selected straight stretch and preserves endpoint joins', () => {
+  const road = [vec2(-80, 0), vec2(80, 0)];
+  const source = snapToMeadowStreet([road], vec2(-25, 0), 0)!;
+  const targets = [
+    [vec2(-10, 40), vec2(80, 40)],
+    [vec2(-80, 40), vec2(-5, 40), vec2(5, 43), vec2(15, 40), vec2(80, 40)],
+    [vec2(-80, 38), vec2(80, 42)],
+  ];
+  for (const street of targets) {
+    const target = snapToMeadowStreet([street], vec2(35, 40), 3)!;
+    expect(squareStreetGuide(source, target)).toBeUndefined();
+  }
+  const tip = snapToMeadowStreet([road], road[0]!, 1)!;
+  expect(squareStreetGuide(source, tip)).toBeUndefined();
+  expect(squareStreetGuide(tip, source)).toBeUndefined();
 });

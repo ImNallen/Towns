@@ -151,7 +151,7 @@ export function snapToMeadowStreet(chains: readonly (readonly Vec2[])[], point: 
       if (d > reach || !insideMeadow(p)) continue;
       if (ends.some((end) => distance(p, end.p) < (end.degree >= 3 ? MIN_JUNCTION_SPACING : MIN_LENGTH))) continue;
       const j = i > 1 && same(p, chain[i - 1]!) ? i - 1 : i;
-      best = { kind: 'street', street: chain, point: p, tangent: normalize(sub(chain[j]!, chain[j - 1]!)) };
+      best = { kind: 'street', segmentEnd: j, street: chain, point: p, tangent: normalize(sub(chain[j]!, chain[j - 1]!)) };
       reach = d;
     }
   }

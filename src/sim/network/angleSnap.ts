@@ -2,7 +2,7 @@ import { add, cross, distance, dot, normalize, perp, projectOntoSegment, scale, 
 import { segmentCrossings, segmentIntersection } from './junctions';
 
 type Street = readonly Vec2[];
-type StreetReference = { kind: 'tip' | 'street' } | { kind: 'junction'; priorityAxis: Vec2 };
+type StreetReference = { kind: 'tip' } | { kind: 'street'; segmentEnd: number } | { kind: 'junction'; priorityAxis: Vec2 };
 export type StreetPoint = StreetReference & {
   street: Street;
   point: Vec2;
@@ -28,7 +28,7 @@ function nearestPoint(street: Street, cursor: Vec2): TangentPoint | undefined {
 }
 
 export interface AngleGuide {
-  label: 'Straight' | '45°' | '90°' | 'Parallel';
+  label: 'Straight' | '45°' | '90°' | '90° at both ends' | 'Parallel';
   end: Vec2;
   direction: Vec2;
   reference: Vec2;
@@ -97,6 +97,23 @@ export function angleGuide(streets: readonly Street[], host: StreetPoint, cursor
     }
   }
   return parallel;
+}
+
+export function squareStreetGuide(host: StreetPoint, target: StreetPoint): AngleGuide | undefined {
+  if (host.kind !== 'street' || target.kind !== 'street') return undefined;
+  const step = dot(sub(host.point, target.point), target.tangent) >= 0 ? 1 : -1;
+  for (let i = target.segmentEnd; i > 0 && i < target.street.length; i += step) {
+    const a = target.street[i - 1]!;
+    const b = target.street[i]!;
+    const tangent = normalize(sub(b, a));
+    if (Math.abs(cross(host.tangent, tangent)) > 1e-6 || dot(tangent, target.tangent) <= 0) break;
+    const end = projectOntoSegment(host.point, a, b);
+    const across = sub(end, host.point);
+    if (distance(end, host.point) < 1e-6) return undefined;
+    if (Math.abs(dot(across, tangent)) > 1e-6) continue;
+    return { label: '90° at both ends', origin: host.point, end, direction: normalize(across), reference: host.tangent };
+  }
+  return undefined;
 }
 
 /** Keep an endpoint connection exact. On a street interior, intersect the guide with

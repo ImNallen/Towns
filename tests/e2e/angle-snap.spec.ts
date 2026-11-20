@@ -46,7 +46,7 @@ test('the snapped and free previews build at their respective endpoints', async 
   }
 });
 
-test('connect the neighborhoods with three square streets and run traffic through the turns', async ({ page }) => {
+test('slide the cross street into alignment at both ends and run traffic through the turns', async ({ page }) => {
   await page.goto('/?speed=0&x=0&y=40&mpp=0.24');
   const editor = () => page.evaluate(() => window.__towns?.editor());
   await expect.poll(editor).toMatchObject({ pending: false });
@@ -72,12 +72,34 @@ test('connect the neighborhoods with three square streets and run traffic throug
   await page.mouse.up();
   await expect.poll(editor).toMatchObject({ roadCount: 2 });
 
+  await move(-65, 28);
+  await page.mouse.down();
+  await move(65, 61);
+  await expect(status).toHaveText('Release to connect the streets.');
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+
   await move(-65, 46);
   await page.mouse.down();
-  await move(66, 49);
-  await expect(status).toHaveText('90° · Release to connect the streets.');
+  await move(58, 66);
+  const squareHint = '90° at both ends · Release to connect the streets.';
+  await expect(status).toHaveText(squareHint);
+  await move(65, 66);
+  await page.getByRole('checkbox', { name: 'Angle snap' }).focus();
+  await page.keyboard.press('Space');
+  await expect(status).toHaveText('Release to connect the streets.');
+  await page.keyboard.press('Space');
+  await expect(status).toHaveText(squareHint);
+  await page.screenshot({ path: 'artifacts/screens/meadow-side-connection.png' });
   await page.mouse.up();
   await expect.poll(editor).toMatchObject({ roadCount: 3, connected: true });
+
+  await move(65, 46);
+  await page.mouse.down();
+  await move(100, 46);
+  await expect(status).toHaveText('Straight · Release to build a four-way intersection.');
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
   await page.getByRole('button', { name: '8× speed' }).click();
   await expect.poll(() => page.evaluate(() => window.__towns?.stats()?.completed ?? 0), { timeout: 30_000 }).toBeGreaterThan(0);
 });
