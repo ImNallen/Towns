@@ -37,10 +37,12 @@ test('the snapped and free previews build at their respective endpoints', async 
     await page.mouse.down();
     await expect(status).toHaveText('Drag across an existing street to build a crossing.');
     await page.mouse.up();
+    await page.keyboard.press('Escape');
     await move(snapping ? -65 : -59, 67);
     await page.mouse.down();
     await expect(status).toHaveText('Drag to the other end of your new road.');
     await page.mouse.up();
+    await page.keyboard.press('Escape');
     await page.getByRole('button', { name: 'Undo road' }).click();
     await expect.poll(editor).toMatchObject({ roadCount: 0, pending: false });
   }
