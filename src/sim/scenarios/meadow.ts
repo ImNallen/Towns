@@ -1,6 +1,6 @@
 import { cubicPoints } from '../math/curves';
 import { polyline, type Polyline } from '../math/polyline';
-import { add, distance, dot, normalize, perp, projectOntoSegment, scale, sub, type Vec2 } from '../math/vec';
+import { add, distance, dot, fromAngle, normalize, perp, projectOntoSegment, scale, sub, type Vec2 } from '../math/vec';
 import type { StreetPoint } from '../network/angleSnap';
 import { compactEndConnection, roundedJunctionCorner } from '../network/endConnection';
 import { NetworkBuilder } from '../network/builder';
@@ -331,30 +331,91 @@ function endJoin(source: StreetPoint | undefined, target: StreetPoint | undefine
   return roundedJunctionCorner(source.point, target.point, incoming, outgoing, MIN_RADIUS);
 }
 
-function curve(start: Vec2, end: Vec2, incoming: Vec2, outgoing: Vec2): Vec2[] {
-  const handle = distance(start, end) / 3;
+function curve(
+  start: Vec2, end: Vec2, incoming: Vec2, outgoing: Vec2, first = distance(start, end) / 3, last = first, step = 0.6,
+): Vec2[] {
   return [start, ...cubicPoints(
-    add(start, scale(incoming, TANGENT_LEAD)), add(start, scale(incoming, handle)),
-    sub(end, scale(outgoing, handle)), sub(end, scale(outgoing, TANGENT_LEAD)), 0.6,
+    add(start, scale(incoming, TANGENT_LEAD)), add(start, scale(incoming, first)),
+    sub(end, scale(outgoing, last)), sub(end, scale(outgoing, TANGENT_LEAD)), step,
   ), end];
 }
 
-function hasTightBend(points: readonly Vec2[]): boolean {
+function minRadius(points: readonly Vec2[]): number {
+  let radius = Infinity;
   for (let i = 1; i < points.length - 1; i++) {
-    const a = sub(points[i]!, points[i - 1]!);
-    const b = sub(points[i + 1]!, points[i]!);
-    const turn = Math.acos(Math.max(-1, Math.min(1, dot(normalize(a), normalize(b)))));
-    if (turn > (distance(points[i - 1]!, points[i + 1]!) / 2) / MIN_RADIUS) return true;
+    const p = points[i - 1]!, q = points[i]!, r = points[i + 1]!;
+    const ax = q.x - p.x, ay = q.y - p.y, bx = r.x - q.x, by = r.y - q.y;
+    const lengths = Math.sqrt((ax * ax + ay * ay) * (bx * bx + by * by));
+    const turn = Math.acos(Math.max(-1, Math.min(1, lengths > 0 ? (ax * bx + ay * by) / lengths : 0)));
+    const cx = r.x - p.x, cy = r.y - p.y;
+    radius = Math.min(radius, Math.sqrt(cx * cx + cy * cy) / 2 / turn);
   }
-  return false;
+  return radius;
 }
 
-/** Headings the road may take at one end. A free tip can also leave along the drag as a sharp
- * corner node (`tipHeading` points along the old street into the node); the network gives it a mouth connector. */
-function endHeadings(drag: Vec2, smooth: Vec2, threshold: number, tipHeading?: Vec2): Vec2[] {
-  const headings = dot(drag, smooth) >= threshold ? [smooth] : [];
-  const turn = tipHeading ? dot(tipHeading, drag) : 1;
-  if (turn >= MAX_CORNER_TURN && turn < SMOOTH_NODE) headings.push(drag);
+const hasTightBend = (points: readonly Vec2[]): boolean => minRadius(points) < MIN_RADIUS;
+
+/** Handle lengths as fractions of the chord. A third suits gentle turns; wide arcs need longer handles. */
+const HANDLES = [0.25, 0.4, 0.55, 0.7];
+const BEND_TURNS = [0, -20, 20, -40, 40].map((degrees) => fromAngle(degrees * Math.PI / 180));
+const GENTLE_TRIES = 3;
+/** Candidates are ranked on a coarse sampling; only the few that get checked are sampled finely. */
+const ROUGH_STEP = 2;
+
+type Cubic = { start: Vec2; end: Vec2; incoming: Vec2; outgoing: Vec2; first: number; last: number };
+
+const rotate = (v: Vec2, by: Vec2): Vec2 => ({ x: v.x * by.x - v.y * by.y, y: v.x * by.y + v.y * by.x });
+
+function sampleCubics(parts: readonly Cubic[], step?: number): Vec2[] {
+  return parts.flatMap((c, i) => curve(c.start, c.end, c.incoming, c.outgoing, c.first, c.last, step).slice(i ? 1 : 0));
+}
+
+function handleVariants(start: Vec2, end: Vec2, incoming: Vec2, outgoing: Vec2): Cubic[] {
+  const chord = distance(start, end);
+  return HANDLES.flatMap((first) => HANDLES.map((last) => ({ start, end, incoming, outgoing, first: first * chord, last: last * chord })));
+}
+
+function widest(options: readonly (readonly Cubic[])[]): { parts: readonly Cubic[]; radius: number }[] {
+  return options.map((parts) => ({ parts, radius: minRadius(sampleCubics(parts, ROUGH_STEP)) }))
+    .sort((a, b) => b.radius - a.radius);
+}
+
+/** The default cubic first, so existing geometry is unchanged. Only when it bends too tightly, the
+ * widest few of longer-handled alternatives (and, through a bend point, other headings there). */
+function* curveShapes(start: Vec2, end: Vec2, bend: Vec2 | undefined, incoming: Vec2, outgoing: Vec2): Generator<Vec2[]> {
+  const chord = normalize(sub(end, start));
+  const preferred = bend
+    ? [...curve(start, bend, incoming, chord), ...curve(bend, end, chord, outgoing).slice(1)]
+    : curve(start, end, incoming, outgoing);
+  yield preferred;
+  if (!hasTightBend(preferred)) return;
+  const options = bend
+    ? BEND_TURNS.map((turn) => {
+      const heading = rotate(chord, turn);
+      const halves = [handleVariants(start, bend, incoming, heading), handleVariants(bend, end, heading, outgoing)];
+      return halves.map((variants) => widest(variants.map((c) => [c]))[0]!.parts[0]!);
+    })
+    : handleVariants(start, end, incoming, outgoing).map((c) => [c]);
+  for (const { parts, radius } of widest(options).slice(0, GENTLE_TRIES)) {
+    if (radius >= MIN_RADIUS) yield sampleCubics(parts);
+  }
+}
+
+type Heading = { heading: Vec2; corner: boolean };
+
+/** Headings the road may take at one end, in the road's direction of travel, preferred first.
+ * A free tip can also leave along the drag as a sharp corner node (the network gives it a mouth
+ * connector). A steep branch off a street side can also leave square, which keeps wide loops round. */
+function endHeadings(snap: StreetPoint | undefined, tipHeading: Vec2, drag: Vec2, smooth: Vec2): Heading[] {
+  const fromTip = snap?.kind === 'tip';
+  const headings = dot(drag, smooth) >= (fromTip ? 0.45 : Math.SQRT1_2) ? [{ heading: smooth, corner: false }] : [];
+  const turn = dot(tipHeading, drag);
+  if (fromTip && turn >= MAX_CORNER_TURN && turn < SMOOTH_NODE) headings.push({ heading: drag, corner: true });
+  if (snap?.kind === 'street' && Math.abs(dot(snap.tangent, drag)) <= Math.SQRT1_2) {
+    const normal = perp(snap.tangent);
+    const square = dot(normal, drag) >= 0 ? normal : scale(normal, -1);
+    if (dot(square, smooth) < 1 - 1e-9) headings.push({ heading: square, corner: false });
+  }
   return headings;
 }
 
@@ -370,24 +431,20 @@ function* roadShapes(
   const lastChord = normalize(sub(end, bend ?? start));
   const departing = departure(source, firstChord, removedArms);
   const arriving = scale(departure(target, scale(lastChord, -1), removedArms), -1);
+  const starts = endHeadings(source, source?.tangent ?? firstChord, firstChord, departing);
+  const ends = endHeadings(target, target ? scale(target.tangent, -1) : lastChord, lastChord, arriving);
   const fromTip = source?.kind === 'tip';
   const toTip = target?.kind === 'tip';
-  const starts = endHeadings(firstChord, departing, fromTip ? 0.45 : Math.SQRT1_2, fromTip ? source.tangent : undefined);
-  const ends = endHeadings(lastChord, arriving, toTip ? 0.45 : Math.SQRT1_2, toTip ? scale(target.tangent, -1) : undefined);
   if (!starts.length || !ends.length) {
     const corner = (!starts.length && fromTip) || (!ends.length && toTip);
     yield { reason: fromTip && toTip
       ? 'Leave more room between the road ends for a rounded turn.'
       : corner ? 'That corner is too sharp. Turn by at most 120°.' : 'Extend the road in its direction of travel.' };
   }
-  const bendHeading = normalize(sub(end, start));
   for (const incoming of starts) {
     for (const outgoing of ends) {
-      const corners = [incoming !== departing, outgoing !== arriving] as const;
-      const points = bend
-        ? [...curve(start, bend, incoming, bendHeading), ...curve(bend, end, bendHeading, outgoing).slice(1)]
-        : curve(start, end, incoming, outgoing);
-      yield { points, rounded: false, corners };
+      const corners = [incoming.corner, outgoing.corner] as const;
+      for (const points of curveShapes(start, end, bend, incoming.heading, outgoing.heading)) yield { points, rounded: false, corners };
     }
   }
 }
