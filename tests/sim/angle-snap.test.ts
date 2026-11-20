@@ -44,6 +44,20 @@ it('extends a tip in its outward direction for either street orientation', () =>
   }
 });
 
+it('snaps a square corner to either side of a tip and builds it straight', () => {
+  const tip = snapToMeadowStreet(streets, vec2(-45, -8), 0)!;
+  for (const side of [1, -1]) {
+    const guide = angleGuide(streets, tip, add(tip.point, atAngle(side * (90 - 4.9), 40)))!;
+    expect(guide.label).toBe('90°');
+    expect(dot(guide.direction, vec2(0, side))).toBeCloseTo(1, 10);
+    const plan = planMeadowRoad([], tip.point, guide.end);
+    if (!plan.ok) throw new Error(plan.reason);
+    for (const p of plan.road.points) expect(p.x).toBeCloseTo(tip.point.x, 9);
+    expect(angleGuide(streets, tip, add(tip.point, atAngle(side * (90 + 5.1), 40)))).toBeUndefined();
+  }
+  expect(angleGuide(streets, tip, add(tip.point, atAngle(45, 40)))).toBeUndefined();
+});
+
 it('aligns with the closest nearby parallel street', () => {
   const ref = [vec2(-58, -1), add(vec2(-58, -1), atAngle(65, 60))];
   const farther = ref.map((p) => add(p, vec2(17, 0)));
