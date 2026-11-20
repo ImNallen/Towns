@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Game } from '../render/game';
+import { dayClock, TownPanel } from './town';
 
 const SPEEDS = [1, 2, 4, 8] as const;
 type Editor = ReturnType<Game['editor']>;
@@ -14,6 +15,7 @@ function clock(seconds: number): string {
 
 export function App({ game }: { game: Game }) {
   const [stats, setStats] = useState(game.stats());
+  const [town, setTown] = useState(game.town());
   const [editor, setEditor] = useState<Editor>(() => game.editor());
   const [fps, setFps] = useState(0);
   const [speed, setSpeed] = useState(game.speed());
@@ -23,6 +25,7 @@ export function App({ game }: { game: Game }) {
   useEffect(() => {
     const timer = setInterval(() => {
       setStats(game.stats());
+      setTown(game.town());
       setEditor(game.editor());
       setFps(game.fps());
     }, 100);
@@ -93,6 +96,7 @@ export function App({ game }: { game: Game }) {
 
   return (
     <aside className="hud" aria-label="Map controls">
+      <div className="hud-column left">
       <section className="map-info panel" aria-label="Map objective">
         <header className="map-heading">
           <span className="wordmark">Towns</span>
@@ -107,9 +111,11 @@ export function App({ game }: { game: Game }) {
           <span className="traffic-status"><i className={speed > 0 && (!editor || editor.connected) && !editor?.pending ? 'running' : ''} aria-hidden="true" />{tripStatus}</span>
         </div>
       </section>
+      {town && <TownPanel town={town} />}
+      </div>
 
       <section className="simulation panel" aria-label="Simulation">
-        <div className="simulation-heading"><span>Simulation</span><time className="clock">{stats ? clock(stats.time) : '00:00:00'}</time></div>
+        <div className="simulation-heading"><span>Simulation</span><time className="clock">{town ? dayClock(town) : stats ? clock(stats.time) : '00:00:00'}</time></div>
         <div className="controls" role="group" aria-label="Simulation speed">
           <button className={speed === 0 ? 'active pause' : 'pause'} onClick={() => changeSpeed(speed === 0 ? lastSpeed : 0)} aria-label={speed === 0 ? 'Resume simulation' : 'Pause simulation'} title="Pause / resume (Space)" aria-pressed={speed === 0}>
             <span aria-hidden="true">{speed === 0 ? '▶' : 'Ⅱ'}</span>

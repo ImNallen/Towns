@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Network } from '../sim/network/types';
 import type { ScenarioName } from '../sim/scenarios';
+import type { TownView } from '../sim/town/town';
 import type { SimStats } from '../sim/world';
 import type { FromWorker, ToWorker } from '../worker/protocol';
 import { MapCamera } from './camera';
@@ -29,6 +30,8 @@ export interface Game {
   undoRoad(): void;
   cancelRoadEdit(): void;
   stats(): SimStats | null;
+  /** Residents and the town clock; null on maps without a town. */
+  town(): TownView | null;
   fps(): number;
   speed(): number;
   setSpeed(speed: number): void;
@@ -82,6 +85,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   let showLanes = options.showLanes;
   let speed = options.speed;
   let latestStats: SimStats | null = null;
+  let latestTown: TownView | null = null;
 
   const worker = new Worker(new URL('../worker/sim.worker.ts', import.meta.url), { type: 'module' });
   const send = (msg: ToWorker): void => worker.postMessage(msg);
@@ -126,6 +130,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     } else if (msg.type === 'editRejected') {
       editor?.reject(msg.reason);
     } else if (msg.type === 'town') {
+      latestTown = msg.view;
       for (const household of msg.view.households) houses?.setLevel(household.home, household.level);
     } else if (msg.type === 'frame') {
       vehicles?.push(msg, performance.now());
@@ -171,6 +176,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     undoRoad: () => editor?.undo(),
     cancelRoadEdit: () => editor?.cancel(),
     stats: () => (ready ? latestStats : null),
+    town: () => latestTown,
     fps: () => fps,
     speed: () => speed,
     setSpeed(next) {
