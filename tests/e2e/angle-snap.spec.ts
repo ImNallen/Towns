@@ -81,10 +81,24 @@ test('slide the cross street into alignment at both ends and run traffic through
 
   await move(-65, 46);
   await page.mouse.down();
-  await move(58, 66);
+  await move(58, 50);
   const squareHint = '90° at both ends · Release to connect the streets.';
   await expect(status).toHaveText(squareHint);
   await move(65, 66);
+  await expect(status).toHaveText('Release to connect the streets.');
+  await page.mouse.up();
+  await expect.poll(editor).toMatchObject({ roadCount: 3, connected: true });
+  await move(65, 66);
+  await page.mouse.down();
+  await move(100, 72);
+  await expect(status).toContainText('four-way intersection');
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  await page.getByRole('button', { name: 'Undo road' }).click();
+  await expect.poll(editor).toMatchObject({ roadCount: 2, connected: false });
+  await move(-65, 46);
+  await page.mouse.down();
+  await move(65, 50);
   await page.getByRole('checkbox', { name: 'Angle snap' }).focus();
   await page.keyboard.press('Space');
   await expect(status).toHaveText('Release to connect the streets.');
@@ -131,10 +145,55 @@ test('drag from a road end to a parallel street or its marked end', async ({ pag
   await page.getByRole('button', { name: 'Undo road' }).click();
   await expect.poll(editor).toMatchObject({ roadCount: 2, connected: false });
   await drag(-65, 35, 65, 86);
-  await expect(page.getByRole('status')).toHaveText('Release to connect the streets.');
+  await expect(page.getByRole('status')).toHaveText('Release to connect the road ends.');
   await page.screenshot({ path: 'artifacts/screens/meadow-end-connection.png' });
   await page.mouse.up();
   await expect.poll(editor).toMatchObject({ roadCount: 3, connected: true });
   await page.getByRole('button', { name: '8× speed' }).click();
   await expect.poll(() => page.evaluate(() => window.__towns?.stats()?.completed ?? 0), { timeout: 30_000 }).toBeGreaterThan(0);
+});
+
+test('drag directly between angled road ends and fit a tight turn near the meadow edge', async ({ page }) => {
+  await page.goto('/?speed=0&x=0&y=42&mpp=0.27');
+  const editor = () => page.evaluate(() => window.__towns?.editor());
+  await expect.poll(editor).toMatchObject({ pending: false });
+  const box = await page.locator('#map').boundingBox();
+  if (!box) throw new Error('Missing map');
+  const move = (x: number, y: number, steps = 1) => page.mouse.move(
+    box.x + box.width / 2 + x / 0.27, box.y + box.height / 2 - (y - 42) / 0.27, { steps },
+  );
+  const drag = async (x: number, y: number, endX: number, endY: number) => {
+    await move(x, y);
+    await page.mouse.down();
+    await move(endX, endY, 6);
+  };
+  const status = page.getByRole('status');
+  for (const [ax, ay, bx, by] of [[-65, 35, 50, 58], [-65, 96, 65, 96]] as const) {
+    await drag(-65, -8, ax, ay);
+    await page.mouse.up();
+    await expect.poll(editor).toMatchObject({ roadCount: 1 });
+    await drag(65, 8, bx, by);
+    await page.mouse.up();
+    await expect.poll(editor).toMatchObject({ roadCount: 2 });
+    await drag(ax, ay, bx + 1, by - 1);
+    await expect(status).toHaveText('Release to connect the road ends.');
+    if (ay === 96) await page.screenshot({ path: 'artifacts/screens/meadow-compact-end-turn.png' });
+    await page.mouse.up();
+    await expect.poll(editor).toMatchObject({ roadCount: 3, connected: true, pending: false });
+    for (const roadCount of [2, 1, 0]) {
+      await page.getByRole('button', { name: 'Undo road' }).click();
+      await expect.poll(editor).toMatchObject({ roadCount, connected: false, pending: false });
+    }
+  }
+  await drag(-65, -8, -65, 101);
+  await page.mouse.up();
+  await expect.poll(editor).toMatchObject({ roadCount: 1 });
+  await drag(65, 8, 65, 101);
+  await page.mouse.up();
+  await expect.poll(editor).toMatchObject({ roadCount: 2 });
+  await drag(-65, 101, 65, 101);
+  await expect(status).toContainText('This bend would leave the meadow.');
+  await page.screenshot({ path: 'artifacts/screens/meadow-end-turn-outside.png' });
+  await page.mouse.up();
+  await expect.poll(editor).toMatchObject({ roadCount: 2, connected: false, pending: false });
 });

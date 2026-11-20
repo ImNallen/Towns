@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { offsetPolyline, polyline, slicePolyline, type Polyline } from '../sim/math/polyline';
 import { add, scale, distance, dot, type Vec2 } from '../sim/math/vec';
-import { meadowConnected, meadowRoadSections, meadowScenario, snapToMeadowStreet, meadowStreets, meadowTips, planMeadowRoad, type MeadowRoad } from '../sim/scenarios/meadow';
+import { MEADOW_BUILD_BOUNDS, MEADOW_ROAD_WIDTH, meadowConnected, meadowRoadSections, meadowScenario, snapToMeadowStreet, meadowStreets, meadowTips, planMeadowRoad, type MeadowRoad } from '../sim/scenarios/meadow';
 import { angleGuide, crossingAngleGuide, fitGuideToStreet, squareStreetGuide, type StreetPoint, type AngleGuide } from '../sim/network/angleSnap';
 import { JUNCTION_MOUTH } from '../sim/network/streets';
 import type { ToWorker } from '../worker/protocol';
@@ -45,6 +45,20 @@ function roadMarker(): THREE.Group {
   return marker;
 }
 
+function buildBoundary(): THREE.Mesh {
+  const { minX, maxX, minY, maxY } = MEADOW_BUILD_BOUNDS;
+  const curb = MEADOW_ROAD_WIDTH / 2;
+  const corners = [
+    { x: minX - curb, y: minY - curb }, { x: maxX + curb, y: minY - curb },
+    { x: maxX + curb, y: maxY + curb }, { x: minX - curb, y: maxY + curb },
+  ];
+  const dashes = new FlatMesh(0.025);
+  for (const [i, corner] of corners.entries()) {
+    dashes.dashes(polyline([corner, corners[(i + 1) % corners.length]!]), 0.35, 2, 4);
+  }
+  return new THREE.Mesh(dashes.build(), new THREE.MeshBasicMaterial({ color: PALETTE.buildBoundary }));
+}
+
 export class RoadEditor {
   private roads: readonly MeadowRoad[] = [];
   private connected = false;
@@ -53,9 +67,10 @@ export class RoadEditor {
   private phase: EditPhase = { kind: 'pending' };
   private tool: MapTool = 'road';
   private hint = '';
-  private width = 8;
+  private width = MEADOW_ROAD_WIDTH;
   private readonly abort = new AbortController();
   private readonly handles = new THREE.Group();
+  private readonly boundary = buildBoundary();
   private readonly hover = roadMarker();
   private preview: THREE.Group | null = null;
   private move: PointerEvent | null = null;
@@ -70,7 +85,7 @@ export class RoadEditor {
     const { signal } = this.abort;
     canvas.dataset.tool = this.tool;
     this.hover.visible = false;
-    scene.add(this.handles, this.hover);
+    scene.add(this.handles, this.hover, this.boundary);
     canvas.addEventListener('pointerdown', (e) => this.begin(e), { signal });
     canvas.addEventListener('pointermove', (e) => { if (e.isPrimary) this.move = e; }, { signal });
     canvas.addEventListener('pointerleave', () => { this.hover.visible = false; this.move = null; }, { signal });
@@ -107,6 +122,7 @@ export class RoadEditor {
     this.tool = tool;
     this.canvas.dataset.tool = tool;
     this.handles.visible = tool !== 'pan';
+    this.boundary.visible = tool !== 'pan';
   }
 
   accept(roads: readonly MeadowRoad[], width: number): void {
@@ -162,6 +178,7 @@ export class RoadEditor {
     this.finish();
     disposeLayer(this.handles);
     disposeLayer(this.hover);
+    disposeLayer(this.boundary);
   }
 
   private world(e: PointerEvent): Vec2 {
@@ -261,6 +278,7 @@ export class RoadEditor {
     }
     const joinedSide = guide?.label === '90° at both ends' || guide?.label === '90° at junction';
     const hint = this.tool === 'curve' ? 'Release to set the end, then place the bend.'
+      : host?.kind === 'tip' && snap?.kind === 'tip' ? 'Release to connect the road ends.'
       : snap || joinedSide ? 'Release to connect the streets.' : 'Release to extend the street.';
     this.place(start, end, undefined, release, hint, guide);
   }
@@ -271,7 +289,7 @@ export class RoadEditor {
     if (!plan.ok) {
       if (release && this.phase.kind !== 'bending') this.finish();
       else if (distance(start, end) > 0.1) {
-        this.guide(polyline(bend ? [start, bend, end] : [start, end]), PALETTE.editorInvalid);
+        this.guide(polyline(plan.points ?? (bend ? [start, bend, end] : [start, end])), PALETTE.editorInvalid, plan.points ? this.width : 0);
       }
       if (release && this.phase.kind === 'bending') this.phase.id = null;
       this.hint = !release && this.phase.kind === 'drawing' && this.tool === 'curve' ? hint : plan.reason;
@@ -335,10 +353,15 @@ export class RoadEditor {
     preview.add(new THREE.Mesh(marks.build(), new THREE.MeshBasicMaterial({ color: PALETTE.editorHandle })));
   }
 
-  private guide(path: Polyline, color: string): void {
+  private guide(path: Polyline, color: string, pavementWidth = 0): void {
     const geometry = new FlatMesh(0.35);
     geometry.ribbon(path, Math.max(0.35, this.camera.mpp * 2));
     const group = new THREE.Group();
+    if (pavementWidth) {
+      const pavement = new FlatMesh(0.34);
+      pavement.ribbon(path, pavementWidth);
+      group.add(new THREE.Mesh(pavement.build(), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.28 })));
+    }
     group.add(new THREE.Mesh(geometry.build(), new THREE.MeshBasicMaterial({ color })));
     this.scene.add(group);
     this.preview = group;

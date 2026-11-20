@@ -14,9 +14,9 @@ Drag across an existing street to build a four-way intersection. You can start t
 
 **Angle snap** is on by default. Drag near a right angle or a 45° diagonal to align a branch with the street under your pointer. On a curve, the angle follows the street at the point where you start. You can also extend a road end straight ahead or align a branch parallel to a nearby street. The preview marks the active guide. Drag away from it or turn off **Angle snap** to choose your own angle.
 
-To connect parallel streets, drag from the side of one toward the side of the other. With **Angle snap** on, the far end slides along the target street until the connector meets both streets at 90°. A square at each end shows the two junctions. Turn off **Angle snap** to place the far end yourself.
+To connect parallel streets, drag from the side of one toward the side of the other. Aim nearly straight across for a 90° junction at both ends. To place a diagonal connector, keep dragging along the far street until the square guides disappear.
 
-Drag between two marked road ends to connect them. The road follows both end headings and can form a rounded corner, a U-bend, or an S-bend when there is room. You can also drag from a marked end toward the side of a parallel street. With **Angle snap** on, the landing slides along that street to leave room for the turn and meets it at a right angle.
+With **Road** selected, drag from one end marker onto another. Release when the preview says “Release to connect the road ends.” The road follows both ends smoothly, including when they point in different directions. Near the dashed build boundary, the tool tries a tighter turn. If the bend still crosses the boundary, its red preview shows where it runs out of room. You can also drag from a marked end toward the side of a parallel street. With **Angle snap** on, the landing slides along that street to leave room for the turn and meets it at a right angle.
 
 For a winding road, select **Curve**, drag from the start to the end, then place a point on the bend. Move the pointer to preview the curve and click to build. On a touch screen, press and move to adjust the bend before lifting your finger.
 

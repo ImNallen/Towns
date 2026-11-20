@@ -23,8 +23,8 @@ test('build a street, see a completed trip, and undo the connection', async ({ p
   await page.mouse.move(west.x, west.y);
   await page.mouse.down();
   await page.mouse.move(east.x, east.y, { steps: 8 });
-  await expect.poll(editor).toMatchObject({ hint: 'Release to connect the streets.' });
-  await expect(page.getByRole('status')).toHaveText('Release to connect the streets.');
+  await expect.poll(editor).toMatchObject({ hint: 'Release to connect the road ends.' });
+  await expect(page.getByRole('status')).toHaveText('Release to connect the road ends.');
   await page.screenshot({ path: 'artifacts/screens/meadow-preview.png' });
   await page.keyboard.press('Escape');
   await page.mouse.up();

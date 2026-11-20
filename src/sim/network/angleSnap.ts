@@ -104,7 +104,9 @@ export function squareStreetGuide(host: StreetPoint, target: StreetPoint): Angle
   if (host.kind === 'junction' || target.kind !== 'street') return undefined;
   if (Math.abs(cross(host.tangent, target.tangent)) > 1e-6) return undefined;
   const fromTip = host.kind === 'tip';
-  const offset = dot(sub(target.point, host.point), host.tangent);
+  const drag = sub(target.point, host.point);
+  if (!fromTip && Math.abs(cross(normalize(drag), host.tangent)) < MIN_ALIGNMENT) return undefined;
+  const offset = dot(drag, host.tangent);
   const anchor = fromTip ? add(host.point, scale(host.tangent, Math.max(END_TURN_RUN, offset))) : host.point;
   const step = dot(sub(anchor, target.point), target.tangent) >= 0 ? 1 : -1;
   for (let i = target.segmentEnd; i > 0 && i < target.street.length; i += step) {

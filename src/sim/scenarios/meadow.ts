@@ -2,7 +2,7 @@ import { cubicPoints } from '../math/curves';
 import { polyline, type Polyline } from '../math/polyline';
 import { add, distance, dot, normalize, perp, projectOntoSegment, scale, sub, type Vec2 } from '../math/vec';
 import type { StreetPoint } from '../network/angleSnap';
-import { roundedEndConnection } from '../network/endConnection';
+import { compactEndConnection, roundedJunctionCorner } from '../network/endConnection';
 import { NetworkBuilder } from '../network/builder';
 import { streetCrossings, throughArms, type StreetCrossing } from '../network/junctions';
 import { buildStreetNetwork } from '../network/streets';
@@ -13,13 +13,19 @@ export interface MeadowRoad {
   readonly fourWays?: readonly StreetCrossing[];
 }
 
-type Plan = { ok: true; road: MeadowRoad; path: Polyline } | { ok: false; reason: string };
+type Plan = { ok: true; road: MeadowRoad; path: Polyline } | { ok: false; reason: string; points?: readonly Vec2[] };
 const WIDTH = 8;
+export { WIDTH as MEADOW_ROAD_WIDTH };
 const TANGENT_LEAD = 0.25;
 const MIN_LENGTH = 12;
 const MIN_JUNCTION_SPACING = 23;
 const MIN_RADIUS = 18;
 const BOUNDS: Bounds = { minX: -180, maxX: 180, minY: -115, maxY: 115 };
+const BUILD_MARGIN = WIDTH / 2 + 2;
+export const MEADOW_BUILD_BOUNDS: Bounds = {
+  minX: BOUNDS.minX + BUILD_MARGIN, maxX: BOUNDS.maxX - BUILD_MARGIN,
+  minY: BOUNDS.minY + BUILD_MARGIN, maxY: BOUNDS.maxY - BUILD_MARGIN,
+};
 
 function gardenHouse(x: number, y: number, variant: number): House {
   const roadY = x < 0 ? -8 : 8;
@@ -198,9 +204,8 @@ function blockedByScenery(p: Vec2, decor: Decor): boolean {
 }
 
 function insideMeadow(p: Vec2): boolean {
-  const margin = WIDTH / 2 + 2;
-  return p.x >= BOUNDS.minX + margin && p.x <= BOUNDS.maxX - margin
-    && p.y >= BOUNDS.minY + margin && p.y <= BOUNDS.maxY - margin;
+  return p.x >= MEADOW_BUILD_BOUNDS.minX && p.x <= MEADOW_BUILD_BOUNDS.maxX
+    && p.y >= MEADOW_BUILD_BOUNDS.minY && p.y <= MEADOW_BUILD_BOUNDS.maxY;
 }
 
 function departure(snap: StreetPoint | undefined, toward: Vec2): Vec2 {
@@ -213,10 +218,23 @@ function departure(snap: StreetPoint | undefined, toward: Vec2): Vec2 {
   return normalize(add(outward, scale(along, Math.sign(dot(along, toward)))));
 }
 
-function endJoin(source: StreetPoint | undefined, target: StreetPoint | undefined, chord: Vec2): Vec2[] | undefined {
+function endJoin(source: StreetPoint | undefined, target: StreetPoint | undefined, chord: Vec2, decor: Decor): Vec2[] | undefined {
   if (!source || !target) return undefined;
   if (source.kind === 'tip' && target.kind === 'tip') {
-    return roundedEndConnection(source.point, target.point, source.tangent, scale(target.tangent, -1), MIN_RADIUS);
+    const outgoing = scale(target.tangent, -1);
+    const fits = (points: Vec2[]) => points.every((p) => insideMeadow(p) && !blockedByScenery(p, decor));
+    if (dot(source.tangent, chord) >= 0.45 && dot(outgoing, chord) >= 0.45) {
+      const straight = dot(source.tangent, chord) > 1 - 1e-10 && dot(outgoing, chord) > 1 - 1e-10;
+      const count = Math.max(1, Math.ceil(distance(source.point, target.point) / 0.6));
+      const gentle = straight
+        ? Array.from({ length: count + 1 }, (_, i) => add(source.point, scale(sub(target.point, source.point), i / count)))
+        : curve(source.point, target.point, source.tangent, outgoing);
+      if (!hasTightBend(gentle) && fits(gentle)) return gentle;
+    }
+    const preferred = compactEndConnection(source.point, target.point, source.tangent, outgoing);
+    if (preferred && fits(preferred)) return preferred;
+    const minimum = compactEndConnection(source.point, target.point, source.tangent, outgoing, 10);
+    return minimum ?? preferred;
   }
   const tipFirst = source.kind === 'tip' && target.kind === 'street';
   if (!tipFirst && !(source.kind === 'street' && target.kind === 'tip')) return undefined;
@@ -227,7 +245,7 @@ function endJoin(source: StreetPoint | undefined, target: StreetPoint | undefine
   const across = dot(chord, normal) >= 0 ? normal : scale(normal, -1);
   const incoming = tipFirst ? tip.tangent : across;
   const outgoing = tipFirst ? across : scale(tip.tangent, -1);
-  return roundedEndConnection(source.point, target.point, incoming, outgoing, MIN_RADIUS);
+  return roundedJunctionCorner(source.point, target.point, incoming, outgoing, MIN_RADIUS);
 }
 
 function curve(start: Vec2, end: Vec2, incoming: Vec2, outgoing: Vec2): Vec2[] {
@@ -266,7 +284,8 @@ export function planMeadowRoad(roads: readonly MeadowRoad[], start: Vec2, end: V
   const lastChord = normalize(sub(end, bend ?? start));
   const incoming = departure(source, firstChord);
   const outgoing = scale(departure(target, scale(lastChord, -1)), -1);
-  const rounded = bend ? undefined : endJoin(source, target, chord);
+  const decor = scenery();
+  const rounded = bend ? undefined : endJoin(source, target, chord, decor);
   if (!rounded && (dot(firstChord, incoming) < (source?.kind === 'tip' ? 0.45 : Math.SQRT1_2)
     || dot(lastChord, outgoing) < (target?.kind === 'tip' ? 0.45 : Math.SQRT1_2))) {
     return fail(source?.kind === 'tip' && target?.kind === 'tip'
@@ -279,9 +298,9 @@ export function planMeadowRoad(roads: readonly MeadowRoad[], start: Vec2, end: V
     : curve(start, end, incoming, outgoing));
   const path = polyline(points);
   if (!rounded && hasTightBend(points)) return fail('That bend is too tight. Try a longer, gentler curve.');
-  const decor = scenery();
   for (const p of points) {
-    if (!insideMeadow(p)) return fail('Keep the whole street inside the meadow.');
+    if (!insideMeadow(p)) return { ok: false, points, reason: source?.kind === 'tip' && target?.kind === 'tip'
+      ? 'This bend would leave the meadow. Move the road ends farther from the edge.' : 'Keep the whole street inside the meadow.' };
     if (blockedByScenery(p, decor)) return fail('Leave room around buildings, water and hills.');
   }
   const intersections = streetCrossings(points, chains);

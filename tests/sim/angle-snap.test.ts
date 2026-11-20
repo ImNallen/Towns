@@ -102,14 +102,18 @@ it('slides the far endpoint across sampled segments of a rotated street, in eith
     [70, 30, 10, 0, -15, -70].map((s) => point(s, 40)),
   ];
   for (const [from, to] of [[0, 40], [40, 0]] as const) {
-    const start = snapToMeadowStreet(sides, point(-7, from), 0.01)!;
-    const target = snapToMeadowStreet(sides, point(36, to), 0.01)!;
+    const start = snapToMeadowStreet(sides, point(-1, from), 0.01)!;
+    const target = snapToMeadowStreet(sides, point(2, to), 0.01)!;
     const square = squareStreetGuide(start, target)!;
     expect(square.label).toBe('90° at both ends');
     expect(distance(square.origin, start.point)).toBeLessThan(1e-8);
-    expect(distance(square.end, point(-7, to))).toBeLessThan(1e-8);
+    expect(distance(square.end, point(-1, to))).toBeLessThan(1e-8);
     expect(dot(square.direction, start.tangent)).toBeCloseTo(0, 8);
     expect(dot(square.direction, target.tangent)).toBeCloseTo(0, 8);
+    for (const station of [-5, 3]) {
+      const diagonal = snapToMeadowStreet(sides, point(station, to), 0.01)!;
+      expect(squareStreetGuide(start, diagonal)).toBeUndefined();
+    }
   }
 });
 
