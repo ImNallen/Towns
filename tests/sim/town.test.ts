@@ -103,7 +103,14 @@ describe('Meadow Vale residents', () => {
     live(world, 1440);
     const after = jobs(view(world));
     expect(before.some((job, i) => job === 'Westbrook' && after[i] === 'Eastford')).toBe(true);
-    expect(view(world).events).toContainEqual(expect.objectContaining({ kind: 'changedJob', region: 'Eastford' }));
+    const town = view(world);
+    const moves = town.events.flatMap((e) => (e.kind === 'changedJob' ? [e] : []));
+    expect(moves.length).toBeGreaterThan(0);
+    for (const move of moves) {
+      // Each job event names the member of that household who now works there.
+      const member = town.households[move.household]!.members.find((m) => m.id === move.person);
+      expect(member?.job).toBe(move.region);
+    }
     expect(world.stats().lost).toBe(0);
   });
 
