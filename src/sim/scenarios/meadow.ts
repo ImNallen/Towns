@@ -23,6 +23,10 @@ const TANGENT_LEAD = 0.25;
 const MIN_LENGTH = 12;
 const MIN_JUNCTION_SPACING = 23;
 const MIN_RADIUS = 18;
+/** cos 120°, nudged so a drag snapped to exactly 120° still counts. */
+const MAX_CORNER_TURN = -0.5 - 1e-9;
+/** Matches the coalescing threshold: a gentler corner would merge into one kinked street without a connector. */
+const SMOOTH_NODE = 0.95;
 const BOUNDS: Bounds = { minX: -180, maxX: 180, minY: -115, maxY: 115 };
 const BUILD_MARGIN = WIDTH / 2 + 2;
 export const MEADOW_BUILD_BOUNDS: Bounds = {
@@ -345,37 +349,81 @@ function hasTightBend(points: readonly Vec2[]): boolean {
   return false;
 }
 
+/** Headings the road may take at one end. A free tip can also leave along the drag as a sharp
+ * corner node (`tipHeading` points along the old street into the node); the network gives it a mouth connector. */
+function endHeadings(drag: Vec2, smooth: Vec2, threshold: number, tipHeading?: Vec2): Vec2[] {
+  const headings = dot(drag, smooth) >= threshold ? [smooth] : [];
+  const turn = tipHeading ? dot(tipHeading, drag) : 1;
+  if (turn >= MAX_CORNER_TURN && turn < SMOOTH_NODE) headings.push(drag);
+  return headings;
+}
+
+type Shape = { points: Vec2[]; rounded: boolean; corners: readonly [boolean, boolean] } | { reason: string };
+
+function* roadShapes(
+  source: StreetPoint | undefined, target: StreetPoint | undefined, start: Vec2, end: Vec2, bend: Vec2 | undefined,
+  removedArms: readonly RemovedArm[], decor: Decor,
+): Generator<Shape> {
+  const rounded = bend ? undefined : endJoin(source, target, normalize(sub(end, start)), decor);
+  if (rounded) yield { points: rounded, rounded: true, corners: [false, false] };
+  const firstChord = normalize(sub(bend ?? end, start));
+  const lastChord = normalize(sub(end, bend ?? start));
+  const departing = departure(source, firstChord, removedArms);
+  const arriving = scale(departure(target, scale(lastChord, -1), removedArms), -1);
+  const fromTip = source?.kind === 'tip';
+  const toTip = target?.kind === 'tip';
+  const starts = endHeadings(firstChord, departing, fromTip ? 0.45 : Math.SQRT1_2, fromTip ? source.tangent : undefined);
+  const ends = endHeadings(lastChord, arriving, toTip ? 0.45 : Math.SQRT1_2, toTip ? scale(target.tangent, -1) : undefined);
+  if (!starts.length || !ends.length) {
+    const corner = (!starts.length && fromTip) || (!ends.length && toTip);
+    yield { reason: fromTip && toTip
+      ? 'Leave more room between the road ends for a rounded turn.'
+      : corner ? 'That corner is too sharp. Turn by at most 120°.' : 'Extend the road in its direction of travel.' };
+  }
+  const bendHeading = normalize(sub(end, start));
+  for (const incoming of starts) {
+    for (const outgoing of ends) {
+      const corners = [incoming !== departing, outgoing !== arriving] as const;
+      const points = bend
+        ? [...curve(start, bend, incoming, bendHeading), ...curve(bend, end, bendHeading, outgoing).slice(1)]
+        : curve(start, end, incoming, outgoing);
+      yield { points, rounded: false, corners };
+    }
+  }
+}
+
 export function planMeadowRoad(roads: readonly MeadowEdit[], start: Vec2, end: Vec2, bend?: Vec2): Plan {
   const fail = (reason: string): Plan => ({ ok: false, reason });
   if (![start, end, ...(bend ? [bend] : [])].every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))) return fail('Choose a point inside the meadow.');
   if (!insideMeadow(start) || !insideMeadow(end) || (bend && !insideMeadow(bend))) return fail('Keep the whole street inside the meadow.');
   const replay = replayMeadow(roads);
   const chains = coalesceStreets(replay.chains);
-  const chord = normalize(sub(end, start));
   const source = snapToMeadowStreet(chains, start, 1e-6);
   const target = snapToMeadowStreet(chains, end, 1e-6);
   const onStreet = (p: Vec2) => chains.some((chain) => containsPoint(chain, p));
   if ((!source && onStreet(start)) || (!target && onStreet(end))) return fail('Leave room between junctions and street ends.');
-  const startsAtJunction = source && source.kind !== 'tip';
-  const endsAtJunction = target && target.kind !== 'tip';
-  if (startsAtJunction && endsAtJunction && distance(start, end) < MIN_JUNCTION_SPACING) return fail('Leave room between junctions and street ends.');
   if ((!target || !source) && distance(start, end) < MIN_LENGTH) return fail('Build at least 12 metres of street.');
-  const firstChord = normalize(sub(bend ?? end, start));
-  const lastChord = normalize(sub(end, bend ?? start));
-  const incoming = departure(source, firstChord, replay.removedArms);
-  const outgoing = scale(departure(target, scale(lastChord, -1), replay.removedArms), -1);
-  const decor = scenery();
-  const rounded = bend ? undefined : endJoin(source, target, chord, decor);
-  if (!rounded && (dot(firstChord, incoming) < (source?.kind === 'tip' ? 0.45 : Math.SQRT1_2)
-    || dot(lastChord, outgoing) < (target?.kind === 'tip' ? 0.45 : Math.SQRT1_2))) {
-    return fail(source?.kind === 'tip' && target?.kind === 'tip'
-      ? 'Leave more room between the road ends for a rounded turn.' : 'Extend the road in its direction of travel.');
-  }
   if (bend && (distance(start, bend) < MIN_LENGTH || distance(end, bend) < MIN_LENGTH)) return fail('Give the curve more room.');
-  const bendHeading = chord;
-  const points = rounded ?? (bend
-    ? [...curve(start, bend, incoming, bendHeading), ...curve(bend, end, bendHeading, outgoing).slice(1)]
-    : curve(start, end, incoming, outgoing));
+  const decor = scenery();
+  let rejected: Plan | undefined;
+  for (const shape of roadShapes(source, target, start, end, bend, replay.removedArms, decor)) {
+    const plan = 'reason' in shape ? fail(shape.reason) : checkRoad(chains, source, target, shape, decor);
+    if (plan.ok) return plan;
+    rejected ??= plan;
+  }
+  return rejected!;
+}
+
+function checkRoad(
+  chains: Vec2[][], source: StreetPoint | undefined, target: StreetPoint | undefined,
+  { points, rounded, corners }: Extract<Shape, { points: Vec2[] }>, decor: Decor,
+): Plan {
+  const fail = (reason: string): Plan => ({ ok: false, reason });
+  const start = points[0]!;
+  const end = tip(points);
+  const startsAtNode = (source && source.kind !== 'tip') || corners[0];
+  const endsAtNode = (target && target.kind !== 'tip') || corners[1];
+  if (startsAtNode && endsAtNode && distance(start, end) < MIN_JUNCTION_SPACING) return fail('Leave room between junctions and street ends.');
   const path = polyline(points);
   if (!rounded && hasTightBend(points)) return fail('That bend is too tight. Try a longer, gentler curve.');
   for (const p of points) {
@@ -388,8 +436,8 @@ export function planMeadowRoad(roads: readonly MeadowEdit[], start: Vec2, end: V
   const { crossings } = intersections;
   if (!source && target?.kind !== 'junction' && target?.kind !== 'corner' && !crossings.length) return fail('Drag across an existing street to build a crossing.');
   for (const { point } of crossings) {
-    const nearEndpoint = distance(point, start) < (startsAtJunction ? MIN_JUNCTION_SPACING : MIN_LENGTH)
-      || distance(point, end) < (endsAtJunction ? MIN_JUNCTION_SPACING : MIN_LENGTH);
+    const nearEndpoint = distance(point, start) < (startsAtNode ? MIN_JUNCTION_SPACING : MIN_LENGTH)
+      || distance(point, end) < (endsAtNode ? MIN_JUNCTION_SPACING : MIN_LENGTH);
     const nearOldNode = chains.some((chain) => [chain[0]!, tip(chain)].some((p) =>
       distance(point, p) < (degree(chains, p) >= 3 ? MIN_JUNCTION_SPACING : MIN_LENGTH)));
     const nearOtherCrossing = crossings.some((other) => other.point !== point && distance(point, other.point) < MIN_JUNCTION_SPACING);
