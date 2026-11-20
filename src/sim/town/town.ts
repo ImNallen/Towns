@@ -553,6 +553,11 @@ export class Town {
 
   // --- Output -------------------------------------------------------------------
 
+  /** Model of the cars in person `p`'s household (1 = oldest). */
+  carModelOf(p: number): number {
+    return this.carModel[this.household[p]!]!;
+  }
+
   hash(mix: (x: number) => void): void {
     for (let h = 0; h < this.spec.homes.length; h++) {
       mix(Math.round(this.funds[h]! * 100));

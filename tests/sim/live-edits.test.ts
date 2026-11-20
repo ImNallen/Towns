@@ -40,7 +40,7 @@ function run(world: World, ticks: number): void {
 function snapshot(world: World): { positions: Float32Array; ids: Int32Array } {
   const positions = new Float32Array(world.vehicles.capacity * 3);
   const ids = new Int32Array(world.vehicles.capacity);
-  world.writeSnapshot(positions, ids);
+  world.writeSnapshot(positions, ids, new Uint8Array(world.vehicles.capacity));
   return { positions, ids };
 }
 

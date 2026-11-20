@@ -588,10 +588,10 @@ export class World {
   }
 
   /**
-   * Write per-slot render data: positions as [x, y, heading] triples and ids (-1 = empty slot).
-   * Returns the number of slots written.
+   * Write per-slot render data: positions as [x, y, heading] triples, ids (-1 = empty slot) and
+   * the driver's household car model (0 = through traffic). Returns the number of slots written.
    */
-  writeSnapshot(positions: Float32Array, ids: Int32Array): number {
+  writeSnapshot(positions: Float32Array, ids: Int32Array, models: Uint8Array): number {
     const V = this.vehicles;
     const sample: PathSample = { x: 0, y: 0, hx: 0, hy: 0 };
     for (let i = 0; i < V.highWater; i++) {
@@ -604,6 +604,8 @@ export class World {
       positions[i * 3 + 1] = sample.y;
       positions[i * 3 + 2] = Math.atan2(sample.hy, sample.hx);
       ids[i] = V.id[i]!;
+      const owner = V.owner[i]!;
+      models[i] = owner >= 0 && this.town ? this.town.carModelOf(owner) : 0;
     }
     return V.highWater;
   }

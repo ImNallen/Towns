@@ -91,6 +91,26 @@ describe('Meadow Vale residents', () => {
     expect(world.stats().lost).toBe(0);
   });
 
+  it('reports each resident car with its household car model and through traffic as 0', () => {
+    const world = new World(meadowScenario(connected()), 1);
+    let checked = 0;
+    live(world, 3 * 1440, (town) => {
+      if (town.minuteOfDay % 30 !== 0) return;
+      const model = new Map(town.households.flatMap((h) => h.members.map((m) => [m.id, h.carModel] as const)));
+      const V = world.vehicles;
+      const ids = new Int32Array(V.highWater);
+      const models = new Uint8Array(V.highWater);
+      world.writeSnapshot(new Float32Array(V.highWater * 3), ids, models);
+      for (let slot = 0; slot < V.highWater; slot++) {
+        if (ids[slot]! < 0) continue;
+        const owner = V.owner[slot]!;
+        expect(models[slot]).toBe(owner >= 0 ? model.get(owner) : 0);
+        if (owner >= 0) checked++;
+      }
+    });
+    expect(checked).toBeGreaterThan(20);
+  });
+
   it('leaves Westbrook jobs for Eastford the night after the road is built', () => {
     let world = new World(meadowScenario(), 1);
     live(world, 1440 - 390 + 3 * 60);
