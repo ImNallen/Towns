@@ -19,7 +19,7 @@ function run(world: World, seconds: number): void {
 describe('meadow starter map', () => {
   it('registers two quiet disconnected streets and leaves the central field clear', () => {
     const scenario = buildScenario('meadow');
-    expect(scenario.network.surfaces).toHaveLength(2);
+    expect(scenario.network.surfaces.filter((s) => s.style === 'twoWay')).toHaveLength(2);
     expect(meadowTips([])).toEqual([{ x: -45, y: -8 }, { x: 45, y: 8 }]);
     expect(scenario.demand).toEqual([]);
     expect(scenario.decor.houses.every((h) => Math.abs(h.x) > 75)).toBe(true);
@@ -35,7 +35,7 @@ describe('meadow starter map', () => {
     place(roads, tips[0]!, tips[1]!);
     expect(meadowTips(roads)).toEqual([]);
     const scenario = meadowScenario(roads);
-    expect(scenario.network.surfaces).toHaveLength(1);
+    expect(scenario.network.surfaces.filter((s) => s.style === 'twoWay')).toHaveLength(1);
     expect(scenario.network.sources).toHaveLength(2);
     expect(scenario.network.sinks).toHaveLength(2);
     expect(scenario.demand).toHaveLength(2);

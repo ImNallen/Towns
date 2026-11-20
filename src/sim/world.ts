@@ -79,7 +79,9 @@ export class World {
   private readonly completedPerSecond = new Uint32Array(60);
   private lastSecond = 0;
 
-  constructor(scenario: Scenario, seed: number, capacity = 4096) {
+  constructor(scenario: Scenario, seed: number, capacity = 4096, initialTick = 0) {
+    this._tick = initialTick;
+    this.lastSecond = Math.floor(this.time);
     this.scenario = scenario;
     this.network = scenario.network;
     this.lanes = scenario.network.lanes;

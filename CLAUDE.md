@@ -15,7 +15,7 @@ pnpm sim --scenario straight --ticks 2400 --seed 7 --every 600
 pnpm e2e            # Playwright: boots the app, saves screenshots to artifacts/screens/
 ```
 
-URL params: `?scenario=roundabout|straight&seed=1&speed=0..8&lanes=1&x=0&y=0&mpp=0.14`
+URL params: `?scenario=meadow|roundabout|straight&seed=1&speed=0..8&lanes=1&x=0&y=0&mpp=0.14`
 (`x`,`y` = view centre in metres, `mpp` = metres per pixel; `lanes=1` shows the lane graph).
 
 ## Architecture
@@ -36,7 +36,9 @@ tests/          vitest (tests/**/*.test.ts) and Playwright (tests/e2e)
 
 Data flow: `main.tsx` → `createGame` starts the worker → worker builds the scenario and `World`, posts `ready`
 (the scenario, for drawing) and then a `frame` (positions, ids, stats) after each batch of ticks → the renderer
-interpolates between the last two frames.
+interpolates between the last two frames. On Meadow Vale the worker also owns the ordered list of road edits.
+The editor previews a placement with the same planner the worker uses to accept it. Each accepted edit or undo
+rebuilds the small network and starts a fresh traffic run at the current simulation time.
 
 ## Rules (enforced by tests/architecture.test.ts where possible)
 
@@ -75,7 +77,8 @@ interpolates between the last two frames.
 
 ## Roadmap (rough order)
 
-1. Road tool: draw/delete roads with the mouse; worker accepts edit commands; rebuild lanes and routing incrementally.
+1. Meadow Vale supports extending and joining street ends, previewing placements, and undoing the last section.
+   Future network tools can add arbitrary deletion and incremental routing for larger maps.
 2. Intersections: T and X junctions with priority rules, then traffic lights.
 3. Zoning + buildings as sim entities; trips generated from homes → jobs/shops instead of map edges.
 4. Congestion-aware routing (costs from measured lane speeds, recomputed across several ticks).

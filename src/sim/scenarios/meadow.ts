@@ -2,24 +2,33 @@ import { cubicPoints } from '../math/curves';
 import { polyline, type Polyline } from '../math/polyline';
 import { add, distance, dot, normalize, scale, sub, type Vec2 } from '../math/vec';
 import { NetworkBuilder } from '../network/builder';
-import type { Bounds, Decor, Scenario } from './types';
+import type { Bounds, Decor, House, Scenario } from './types';
 
-/** A committed, sampled road segment returned by planMeadowRoad. */
 export interface MeadowRoad {
   readonly points: readonly Vec2[];
 }
 
 type Plan = { ok: true; road: MeadowRoad; path: Polyline } | { ok: false; reason: string };
 const WIDTH = 8;
+const TANGENT_LEAD = 0.25;
 const MIN_LENGTH = 12;
 const MIN_RADIUS = 18;
 const BOUNDS: Bounds = { minX: -180, maxX: 180, minY: -115, maxY: 115 };
 
+function gardenHouse(x: number, y: number, variant: number): House {
+  const roadY = x < 0 ? -8 : 8;
+  const verge = roadY + Math.sign(y - roadY) * (WIDTH / 2 + 0.8);
+  const back = y + Math.sign(y - roadY) * 9;
+  return { x, y, angle: 0, variant, garden: {
+    minX: x - 11, maxX: x + 12, minY: Math.min(verge, back), maxY: Math.max(verge, back),
+  } };
+}
+
 function scenery(): Decor {
   return {
     houses: [-145, -118, -91, 91, 118, 145].flatMap((x, i) => [
-      { x, y: x < 0 ? -29 : 29, angle: 0, variant: i },
-      { x, y: x < 0 ? 15 : -15, angle: 0, variant: i + 2 },
+      gardenHouse(x, x < 0 ? -26 - i % 3 : 25 + i % 3, i),
+      gardenHouse(x + 4, x < 0 ? 12 + i % 3 : -12 - i % 3, i + 2),
     ]),
     lakes: [{ x: -105, y: 76, radius: 23, seed: 3 }],
     hills: [
@@ -33,11 +42,10 @@ const same = (a: Vec2, b: Vec2): boolean => a.x === b.x && a.y === b.y;
 const tip = (chain: readonly Vec2[]): Vec2 => chain[chain.length - 1]!;
 const heading = (chain: readonly Vec2[]): Vec2 => normalize(sub(tip(chain), chain[chain.length - 2]!));
 
-/** Chains run from the map edge toward their playable tip. A joined map has one chain. */
 function chainsFor(roads: readonly MeadowRoad[]): Vec2[][] {
   let chains: Vec2[][] = [
-    [{ x: -170, y: -8 }, { x: -45, y: -8 }],
-    [{ x: 170, y: 8 }, { x: 45, y: 8 }],
+    [{ x: -185, y: -8 }, { x: -45, y: -8 }],
+    [{ x: 185, y: 8 }, { x: 45, y: 8 }],
   ];
   for (const road of roads) {
     if (chains.length !== 2 || road.points.length < 2) throw new Error('Invalid meadow road history');
@@ -64,6 +72,16 @@ export function meadowScenario(roads: readonly MeadowRoad[] = []): Scenario {
   const lanes = chains.map((points) => builder.addTwoWayRoad(polyline(points), {
     width: WIDTH, laneWidth: 3.5, speedLimit: 11.1,
   }));
+  const decor = scenery();
+  for (const house of decor.houses) {
+    const streetY = house.x < 0 ? -8 : 8;
+    const side = Math.sign(house.y - streetY);
+    const x = house.x - 4;
+    builder.addSurface('driveway', polyline([
+      { x, y: streetY + side * (WIDTH / 2 - 0.5) },
+      { x, y: house.y - side * 3.5 },
+    ]), 2.6);
+  }
   const connected = chains.length === 1;
   return {
     name: 'meadow',
@@ -73,7 +91,7 @@ export function meadowScenario(roads: readonly MeadowRoad[] = []): Scenario {
       { lane: lanes[0]!.backward, rate: 0.16 },
     ] : [],
     bounds: { ...BOUNDS },
-    decor: scenery(),
+    decor,
   };
 }
 
@@ -86,6 +104,9 @@ function pointSegmentDistance(p: Vec2, a: Vec2, b: Vec2): number {
 function blockedByScenery(p: Vec2, decor: Decor): boolean {
   if ([...decor.lakes, ...decor.hills].some((blob) => distance(p, blob) < blob.radius * 1.3 + WIDTH / 2 + 2)) return true;
   return decor.houses.some((house) => {
+    const garden = house.garden;
+    if (garden && p.x >= garden.minX - WIDTH / 2 && p.x <= garden.maxX + WIDTH / 2
+      && p.y >= garden.minY - WIDTH / 2 && p.y <= garden.maxY + WIDTH / 2) return true;
     const d = sub(p, house);
     const x = d.x * Math.cos(house.angle) + d.y * Math.sin(house.angle);
     const y = -d.x * Math.sin(house.angle) + d.y * Math.cos(house.angle);
@@ -93,26 +114,48 @@ function blockedByScenery(p: Vec2, decor: Decor): boolean {
   });
 }
 
+function trimJoiningEnd(chain: Vec2[]): Vec2[] {
+  const kept = chain.slice();
+  let remaining = MIN_LENGTH;
+  while (kept.length >= 2) {
+    const last = kept.pop()!;
+    const previous = tip(kept);
+    const length = distance(previous, last);
+    if (length > remaining) {
+      kept.push(add(last, scale(sub(previous, last), remaining / length)));
+      break;
+    }
+    remaining -= length;
+  }
+  return kept;
+}
+
+function insideMeadow(p: Vec2): boolean {
+  const margin = WIDTH / 2 + 2;
+  return p.x >= BOUNDS.minX + margin && p.x <= BOUNDS.maxX - margin
+    && p.y >= BOUNDS.minY + margin && p.y <= BOUNDS.maxY - margin;
+}
+
 export function planMeadowRoad(roads: readonly MeadowRoad[], start: Vec2, end: Vec2): Plan {
   const fail = (reason: string): Plan => ({ ok: false, reason });
   if (![start.x, start.y, end.x, end.y].every(Number.isFinite)) return fail('Choose a point inside the meadow.');
+  if (!insideMeadow(end)) return fail('Keep the whole street inside the meadow.');
   const chains = chainsFor(roads);
   if (chains.length !== 2) return fail('The streets are already connected.');
   const source = chains.findIndex((c) => same(tip(c), start));
   if (source < 0) return fail('Start at an open street tip.');
   const target = chains.findIndex((c, i) => i !== source && same(tip(c), end));
   const span = distance(start, end);
-  if (span < MIN_LENGTH) return fail('Build at least 12 metres of street.');
+  if (target < 0 && span < MIN_LENGTH) return fail('Build at least 12 metres of street.');
   const chord = normalize(sub(end, start));
   const incoming = heading(chains[source]!);
   const outgoing = target >= 0 ? scale(heading(chains[target]!), -1) : chord;
-  if (dot(chord, incoming) < 0.45 || dot(chord, outgoing) < 0.45) return fail('Continue forward from the tip; avoid backtracking.');
+  if (dot(chord, incoming) < 0.45 || dot(chord, outgoing) < 0.45) return fail('Extend the road in its direction of travel.');
 
   const handle = span / 3;
-  // Short tangent leads make offset lane endpoints coincide exactly at segment joins.
   const points = [start, ...cubicPoints(
-    add(start, scale(incoming, 0.25)), add(start, scale(incoming, handle)),
-    sub(end, scale(outgoing, handle)), sub(end, scale(outgoing, 0.25)), 0.6,
+    add(start, scale(incoming, TANGENT_LEAD)), add(start, scale(incoming, handle)),
+    sub(end, scale(outgoing, handle)), sub(end, scale(outgoing, TANGENT_LEAD)), 0.6,
   ), end];
   const path = polyline(points);
   for (let i = 1; i < points.length - 1; i++) {
@@ -124,30 +167,16 @@ export function planMeadowRoad(roads: readonly MeadowRoad[], start: Vec2, end: V
     }
   }
   const decor = scenery();
-  for (let i = 0; i < points.length; i++) {
-    const p = points[i]!;
-    const margin = WIDTH / 2 + 2;
-    if (p.x < BOUNDS.minX + margin || p.x > BOUNDS.maxX - margin || p.y < BOUNDS.minY + margin || p.y > BOUNDS.maxY - margin) return fail('Keep the whole street inside the meadow.');
+  const obstacles = chains.map((chain, i) => i === source || i === target ? trimJoiningEnd(chain) : chain);
+  for (const p of points) {
+    if (!insideMeadow(p)) return fail('Keep the whole street inside the meadow.');
     if (blockedByScenery(p, decor)) return fail('Leave room around buildings, water and hills.');
-    for (let c = 0; c < chains.length; c++) {
-      const chain = chains[c]!;
+    for (const chain of obstacles) {
       for (let j = 1; j < chain.length; j++) {
-        // Only the local portion at an intended join may touch the existing street.
-        const joint = c === source ? start : c === target ? end : undefined;
-        if (joint && distance(p, joint) < 12 && distance(chain[j]!, joint) < 12) continue;
         if (pointSegmentDistance(p, chain[j - 1]!, chain[j]!) < WIDTH + 1) {
-          // The starter streets are single long segments, so trim their intended join.
-          if (joint && same(chain[j]!, joint)) {
-            const trimmed = sub(joint, scale(heading(chain), 12));
-            if (pointSegmentDistance(p, chain[j - 1]!, trimmed) >= WIDTH + 1) continue;
-          }
-          return fail('Streets need space; crossings are not supported here.');
+          return fail('Leave space between streets or snap to the open end.');
         }
       }
-    }
-    for (let j = 1; j < i; j++) {
-      if (path.cum[i]! - path.cum[j]! < 20) continue;
-      if (pointSegmentDistance(p, points[j - 1]!, points[j]!) < WIDTH + 1) return fail('The street cannot cross or fold back on itself.');
     }
   }
   return { ok: true, road: { points }, path };

@@ -7,18 +7,18 @@ import './ui/styles.css';
 
 /**
  * URL parameters (handy for screenshots and debugging):
- *   ?scenario=roundabout|straight  ?seed=1  ?speed=0..8  ?lanes=1
+ *   ?scenario=meadow|roundabout|straight  ?seed=1  ?speed=0..8  ?lanes=1
  *   ?x=0&y=0&mpp=0.15   initial view centre (meters) and zoom (meters per pixel)
  */
 function readOptions(): GameOptions {
   const q = new URLSearchParams(location.search);
-  const scenario = q.get('scenario') ?? 'roundabout';
+  const scenario = q.get('scenario') ?? 'meadow';
   const num = (key: string, fallback: number): number => {
     const v = Number(q.get(key));
     return q.has(key) && Number.isFinite(v) ? v : fallback;
   };
   return {
-    scenario: isScenarioName(scenario) ? scenario : 'roundabout',
+    scenario: isScenarioName(scenario) ? scenario : 'meadow',
     seed: num('seed', 1),
     speed: num('speed', 1),
     showLanes: q.get('lanes') === '1',

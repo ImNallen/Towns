@@ -8,6 +8,7 @@ export interface Demand {
 }
 
 export interface House {
+  garden?: Bounds;
   x: number;
   y: number;
   /** Radians; the house's long axis (ridge) direction. */

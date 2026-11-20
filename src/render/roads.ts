@@ -13,7 +13,7 @@ const LAYER = { outline: 0.05, surface: 0.1, marking: 0.15 } as const;
  * Roads are drawn as layered ribbons: every surface's widened outline first, then every
  * surface on top. Overlapping junction pieces merge into one clean shape with a single outline.
  */
-export function buildRoads(network: Network): THREE.Group {
+export function buildRoads(network: Network, marking: 'dashed' | 'solid' = 'solid'): THREE.Group {
   const outline = new FlatMesh(LAYER.outline);
   const surface = new FlatMesh(LAYER.surface);
   const centerLines = new FlatMesh(LAYER.marking);
@@ -22,7 +22,10 @@ export function buildRoads(network: Network): THREE.Group {
   for (const s of network.surfaces) {
     outline.ribbon(s.centerline, s.width + OUTLINE * 2);
     surface.ribbon(s.centerline, s.width);
-    if (s.style === 'twoWay') centerLines.ribbon(s.centerline, 0.3);
+    if (s.style === 'twoWay') {
+      if (marking === 'dashed') centerLines.dashes(s.centerline, 0.22, 3, 6);
+      else centerLines.ribbon(s.centerline, 0.3);
+    }
   }
 
   // Give-way line: short dashes across the lane where it reaches the edge of the priority road.
