@@ -35,7 +35,7 @@ test('the snapped and free previews build at their respective endpoints', async 
 
     await move(snapping ? -59 : -65, 67);
     await page.mouse.down();
-    await expect(status).toHaveText('Drag across an existing street to build a crossing.');
+    await expect(status).toHaveText('Drag to lay a new road, or click to place it point by point.');
     await page.mouse.up();
     await page.keyboard.press('Escape');
     await move(snapping ? -65 : -59, 67);
@@ -194,8 +194,8 @@ test('drag directly between angled road ends and fit a tight turn near the meado
   await page.mouse.up();
   await expect.poll(editor).toMatchObject({ roadCount: 2 });
   await drag(-65, 101, 65, 101);
-  await expect(status).toContainText('This bend would leave the meadow.');
-  await page.screenshot({ path: 'artifacts/screens/meadow-end-turn-outside.png' });
+  await expect(status).toHaveText('Release to connect the road ends.');
+  await page.screenshot({ path: 'artifacts/screens/meadow-end-turn-square.png' });
   await page.mouse.up();
-  await expect.poll(editor).toMatchObject({ roadCount: 2, connected: false, pending: false });
+  await expect.poll(editor).toMatchObject({ roadCount: 3, connected: true, pending: false });
 });

@@ -45,19 +45,22 @@ test('click a road end, then click point after point to keep building the same s
   }
 
   await click({ x: 20, y: 44 });
-  await expect.poll(editor).toMatchObject({ roadCount: 3, chaining: true, pending: false });
-  await expect(status).toHaveText('Extend the road in its direction of travel.');
-  await move({ x: 70, y: 50 });
+  await expect.poll(editor).toMatchObject({ roadCount: 4, chaining: true, pending: false, hint: CHAIN_HINT });
+  await page.screenshot({ path: 'artifacts/screens/chain-corner.png' });
+  await click({ x: 45, y: 38 });
+  await expect.poll(editor).toMatchObject({ roadCount: 4, chaining: true, pending: false });
+  await expect(status).toHaveText('That corner is too sharp. Turn by at most 120°.');
+  await move({ x: -10, y: 58 });
   await expect(status).toContainText(CHAIN_HINT);
 
-  const from = screen({ x: 70, y: 50 });
+  const from = screen({ x: -10, y: 58 });
   await page.mouse.down({ button: 'right' });
   await page.mouse.move(from.x - 40, from.y + 30, { steps: 4 });
   await page.mouse.up({ button: 'right' });
-  await expect.poll(editor).toMatchObject({ roadCount: 3, chaining: true });
+  await expect.poll(editor).toMatchObject({ roadCount: 4, chaining: true });
 
   await page.keyboard.press('Escape');
-  await expect.poll(editor).toMatchObject({ roadCount: 3, chaining: false, pending: false });
+  await expect.poll(editor).toMatchObject({ roadCount: 4, chaining: false, pending: false });
   await expect(page.getByText('Esc cancels')).toBeVisible();
   await page.screenshot({ path: 'artifacts/screens/chain-built.png' });
   expect(errors).toEqual([]);

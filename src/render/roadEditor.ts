@@ -251,6 +251,7 @@ export class RoadEditor {
           && Math.abs(dot(landing.tangent, square.direction)) < 1e-6) return square;
       }
     }
+    if (host?.kind === 'tip' && snap?.kind === 'tip') return undefined;
     let guide = host ? angleGuide(this.streets, host, cursor) : crossingAngleGuide(this.streets, start, cursor);
     if (guide && snap) {
       guide = fitGuideToStreet(guide, start, snap, Math.min(8, 14 * this.camera.mpp));
@@ -300,7 +301,7 @@ export class RoadEditor {
     const start = host?.point ?? cursor;
     this.mark(start);
     this.phase = { kind: 'drawing', host, start, id: e.pointerId, pointer: e, press: { x: e.clientX, y: e.clientY } };
-    this.hint = host ? 'Drag to the other end of your new road.' : 'Drag across an existing street to build a crossing.';
+    this.hint = host ? 'Drag to the other end of your new road.' : 'Drag to lay a new road, or click to place it point by point.';
     this.canvas.setPointerCapture(e.pointerId);
   }
 
