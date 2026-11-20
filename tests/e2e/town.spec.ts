@@ -66,8 +66,9 @@ test('residents commute, a household card opens on click, and a new road sends t
     return t !== null && t.day >= 2 && t.minuteOfDay >= 7 * 60 + 15;
   }, { timeout: 90_000 }).toBe(true);
   await page.getByRole('button', { name: '8× speed' }).click();
-  await expect.poll(async () => (await town())?.households.flatMap((h) => h.members).filter((m) => m.activity === 'outbound').length ?? 0).toBeGreaterThan(2);
-  const street = screen({ x: -95, y: -8 });
+  // Everyone bound for Eastford leaves along the east street.
+  await expect.poll(async () => (await town())?.households.flatMap((h) => h.members).filter((m) => m.activity === 'outbound' && m.place === 'Eastford').length ?? 0).toBeGreaterThan(2);
+  const street = screen({ x: 120, y: 8 });
   await page.mouse.move(street.x, street.y);
   await page.mouse.wheel(0, -450);
   await page.screenshot({ path: 'artifacts/screens/town-cars.png' });
