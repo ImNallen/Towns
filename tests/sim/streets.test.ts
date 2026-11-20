@@ -123,6 +123,21 @@ describe('street junctions', () => {
     expect(world.stats().lost).toBe(0);
   });
 
+  it('lets a car already committed to a side turn clear before through traffic enters', () => {
+    const { network } = build();
+    const world = new World(scenario(network), 7);
+    const { vehicles } = world;
+    const turn = movement(network, S, W);
+    const main = source(network, W);
+    const sideCar = vehicles.spawn(turn, 1, 1, network.sinks.indexOf(arrival(network, W)), 0);
+    const throughCar = vehicles.spawn(main, network.lanes[main]!.length - 9, 5, network.sinks.indexOf(arrival(network, E)), 0);
+    for (let tick = 0; tick < 60 / DT; tick++) {
+      world.step();
+      if (vehicles.lane[sideCar] === turn) expect(vehicles.lane[throughCar]).toBe(main);
+    }
+    expect(world.stats().completed).toBe(2);
+  });
+
   it('routes and actually drives the faster bypass between two T junctions', () => {
     const a = { x: -50, y: 0 };
     const b = { x: 50, y: 0 };

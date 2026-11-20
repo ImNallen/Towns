@@ -55,6 +55,7 @@ export class World {
   readonly vehicles: Vehicles;
 
   private readonly lanes: Lane[];
+  private readonly yieldingMovements: number[][];
   private readonly rng: Rng;
   private _tick = 0;
   private admissionsOpen = true;
@@ -86,6 +87,10 @@ export class World {
     this.scenario = scenario;
     this.network = scenario.network;
     this.lanes = scenario.network.lanes;
+    this.yieldingMovements = this.lanes.map(() => []);
+    for (const lane of this.lanes) {
+      for (const priority of lane.crossingYieldTo) this.yieldingMovements[priority]!.push(lane.id);
+    }
     this.routing = new Routing(this.network);
     this.vehicles = new Vehicles(capacity);
     this.rng = new Rng(seed);
@@ -290,7 +295,7 @@ export class World {
       let cur = L;
       let nxt = this.routing.nextHop(d, cur);
       while (nxt >= 0 && dist < LOOKAHEAD) {
-        if (this.lanes[nxt]!.crossingYieldTo.length > 0 && dist < YIELD_ZONE
+        if ((this.lanes[nxt]!.crossingYieldTo.length || this.yieldingMovements[nxt]!.length) && dist < YIELD_ZONE
           && dist >= COMMIT_DISTANCE && this.junctionBlocked(nxt, dist, vi)) {
           a = Math.min(a, idmAccel(vi, v0, dist, vi));
         }
@@ -349,6 +354,9 @@ export class World {
 
   /** Reserve the conflict area before entry; vehicles already inside finish clearing it. */
   private junctionBlocked(movement: number, distance: number, speed: number): boolean {
+    for (const committed of this.yieldingMovements[movement]!) {
+      if (this.bucketCount[committed]! > 0) return true;
+    }
     const tEntry = distance / Math.max(speed, 2);
     const clearTime = this.laneLen[movement]! / Math.max(Math.min(speed, this.laneSpeed[movement]!), 3);
     for (const priority of this.lanes[movement]!.crossingYieldTo) {

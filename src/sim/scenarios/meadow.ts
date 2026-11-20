@@ -80,23 +80,14 @@ export function meadowStreets(roads: readonly MeadowRoad[]): Vec2[][] {
       chains = split;
     }
     chains.push([...road.points]);
-    let merged = true;
-    while (merged) {
-      merged = false;
-      outer: for (let i = 0; i < chains.length; i++) {
-        for (const endpoint of [chains[i]![0]!, tip(chains[i]!)]) {
-          if (isPortal(endpoint)) continue;
-          const incident = chains.flatMap((c, j) => [c[0]!, tip(c)].filter((p) => same(p, endpoint)).map(() => j));
-          if (incident.length !== 2 || incident[0] === incident[1]) continue;
-          const j = incident.find((index) => index !== i)!;
-          const first = same(tip(chains[i]!), endpoint) ? chains[i]! : [...chains[i]!].reverse();
-          const second = same(chains[j]![0]!, endpoint) ? chains[j]! : [...chains[j]!].reverse();
-          chains[i] = [...first, ...second.slice(1)];
-          chains.splice(j, 1);
-          merged = true;
-          break outer;
-        }
-      }
+    for (const endpoint of [road.points[0]!, tip(road.points)]) {
+      const incident = chains.flatMap((c, i) => [c[0]!, tip(c)].filter((p) => same(p, endpoint)).map(() => i));
+      if (incident.length !== 2 || incident[0] === incident[1]) continue;
+      const [i, j] = incident;
+      const first = same(tip(chains[i]!), endpoint) ? chains[i]! : [...chains[i]!].reverse();
+      const second = same(chains[j]![0]!, endpoint) ? chains[j]! : [...chains[j]!].reverse();
+      chains[i] = [...first, ...second.slice(1)];
+      chains.splice(j, 1);
     }
   }
   return chains;
@@ -126,16 +117,29 @@ export function meadowConnected(roads: readonly MeadowRoad[]): boolean {
 
 export function meadowSnap(roads: readonly MeadowRoad[], point: Vec2, radius: number): Vec2 | undefined {
   if (![point.x, point.y, radius].every(Number.isFinite) || radius < 0) return undefined;
-  const nearest = (points: Vec2[]): Vec2 | undefined => points.filter((p) => distance(p, point) <= radius)
-    .sort((a, b) => distance(a, point) - distance(b, point))[0];
-  const open = nearest(meadowTips(roads));
-  if (open) return { ...open };
   const chains = meadowStreets(roads);
-  const candidates = chains.flatMap((c) => c.slice(1).map((b, i) => projection(point, c[i]!, b)))
-    .filter((p) => insideMeadow(p) && chains.every((c) => [c[0]!, tip(c)].every((end) =>
-      distance(p, end) >= (degree(chains, end) >= 3 ? 23 : 12))));
-  const street = nearest(candidates);
-  return street ? { ...street } : undefined;
+  const ends = chains.flatMap((c) => [c[0]!, tip(c)]).map((p) => ({ p, degree: degree(chains, p) }));
+  let best: Vec2 | undefined;
+  let reach = radius;
+  for (const end of ends) {
+    const d = distance(end.p, point);
+    if (end.degree === 1 && !isPortal(end.p) && d <= reach) {
+      best = end.p;
+      reach = d;
+    }
+  }
+  if (best) return { ...best };
+  for (const chain of chains) {
+    for (let i = 1; i < chain.length; i++) {
+      const p = projection(point, chain[i - 1]!, chain[i]!);
+      const d = distance(p, point);
+      if (d > reach || !insideMeadow(p)) continue;
+      if (ends.some((end) => distance(p, end.p) < (end.degree >= 3 ? 23 : 12))) continue;
+      best = p;
+      reach = d;
+    }
+  }
+  return best;
 }
 
 export function meadowScenario(roads: readonly MeadowRoad[] = []): Scenario {
@@ -156,9 +160,7 @@ export function meadowScenario(roads: readonly MeadowRoad[] = []): Scenario {
 }
 
 function pointSegmentDistance(p: Vec2, a: Vec2, b: Vec2): number {
-  const delta = sub(b, a);
-  const t = Math.max(0, Math.min(1, dot(sub(p, a), delta) / dot(delta, delta)));
-  return distance(p, add(a, scale(delta, t)));
+  return distance(p, projection(p, a, b));
 }
 
 function blockedByScenery(p: Vec2, decor: Decor): boolean {
@@ -243,20 +245,20 @@ export function planMeadowRoad(roads: readonly MeadowRoad[], start: Vec2, end: V
     if (turn > (distance(points[i - 1]!, points[i + 1]!) / 2) / MIN_RADIUS) return fail('That bend is too tight. Try a longer, gentler curve.');
   }
   const decor = scenery();
+  const joins = target ? [start, end] : [start];
   for (const p of points) {
     if (!insideMeadow(p)) return fail('Keep the whole street inside the meadow.');
     if (blockedByScenery(p, decor)) return fail('Leave room around buildings, water and hills.');
     for (const chain of chains) {
       for (let j = 1; j < chain.length; j++) {
         const closest = projection(p, chain[j - 1]!, chain[j]!);
-        const joining = [start, ...(target ? [end] : [])].some((join) =>
+        const joining = joins.some((join) =>
           distance(closest, join) <= 12 && distance(p, join) <= 16);
         if (!joining && distance(p, closest) < WIDTH + 1) return fail('Leave space between streets or snap to the street.');
       }
     }
   }
-  let travelled = 0;
-  const lengths = points.map((p, i) => { if (i) travelled += distance(points[i - 1]!, p); return travelled; });
+  const lengths = path.cum;
   for (let i = 0; i < points.length; i++) {
     for (let j = i + 2; j < points.length; j++) {
       if (lengths[j]! - lengths[i]! > 24 && distance(points[i]!, points[j]!) < WIDTH + 1) return fail('Leave space between streets.');
