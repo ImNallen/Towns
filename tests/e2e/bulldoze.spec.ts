@@ -1,0 +1,152 @@
+import { expect, test } from '@playwright/test';
+
+test('bulldoze one crossing arm, preserve the opposite arm, and undo the removal', async ({ page }) => {
+  await page.goto('/?speed=0&x=-35&y=0&mpp=0.2');
+  const editor = () => page.evaluate(() => window.__towns?.editor());
+  await expect.poll(editor).toMatchObject({ pending: false });
+  const box = await page.locator('#map').boundingBox();
+  if (!box) throw new Error('Missing map');
+  const move = (x: number, y: number) => page.mouse.move(
+    box.x + box.width / 2 + (x + 35) / 0.2, box.y + box.height / 2 - y / 0.2,
+  );
+  const status = page.getByRole('status');
+  await move(-65, -48);
+  await page.mouse.down();
+  await move(-65, 48);
+  await expect(status).toContainText('four-way intersection');
+  await page.mouse.up();
+  await expect.poll(editor).toMatchObject({ roadCount: 1, pending: false });
+  await page.getByRole('button', { name: 'Bulldoze road' }).click();
+  await expect.poll(editor).toMatchObject({ tool: 'bulldoze' });
+  await move(-65, 28);
+  await expect(status).toHaveText('Click to remove this segment.');
+  await page.screenshot({ path: 'artifacts/screens/meadow-bulldoze-highlight.png' });
+  await page.mouse.down();
+  await move(-65, 32);
+  await page.mouse.up();
+  await move(-65, 28);
+  await expect(status).toHaveText('Click to remove this segment.');
+  await page.mouse.down();
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  await move(-65, 29);
+  await expect(status).toHaveText('Click to remove this segment.');
+  await page.mouse.click(box.x + box.width / 2 - 30 / 0.2, box.y + box.height / 2 - 28 / 0.2);
+  await expect.poll(editor).toMatchObject({ pending: false, canUndo: true });
+  await move(-65, 29);
+  await expect(status).not.toHaveText('Click to remove this segment.');
+  await move(-65, -28);
+  await expect(status).toHaveText('Click to remove this segment.');
+  await page.screenshot({ path: 'artifacts/screens/meadow-bulldoze-t-junction.png' });
+  await page.getByRole('button', { name: 'Undo road' }).click();
+  await expect.poll(editor).toMatchObject({ pending: false });
+  await move(-65, 28);
+  await expect(status).toHaveText('Click to remove this segment.');
+
+  await page.getByRole('button', { name: 'Build road', exact: true }).click();
+  await move(65, 8);
+  await page.mouse.down();
+  await move(65, 48);
+  await page.mouse.up();
+  await expect.poll(editor).toMatchObject({ roadCount: 2, pending: false });
+  await page.keyboard.press('b');
+  await expect.poll(editor).toMatchObject({ tool: 'bulldoze' });
+  await move(-65, 28);
+  await expect(status).toHaveText('Click to remove this segment.');
+  await page.mouse.down();
+  await page.mouse.up();
+  await expect.poll(editor).toMatchObject({ pending: false });
+  await move(-65, 29);
+  await expect(status).not.toHaveText('Click to remove this segment.');
+  await move(65, 28);
+  await expect(status).toHaveText('Click to remove this segment.');
+});
+
+test('remove a bypass while traffic follows the remaining bend, then restore it', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto('/?speed=0&x=0&y=20&mpp=0.3');
+  const editor = () => page.evaluate(() => window.__towns?.editor());
+  const stats = () => page.evaluate(() => window.__towns?.stats());
+  await expect.poll(editor).toMatchObject({ pending: false });
+  const box = await page.locator('#map').boundingBox();
+  if (!box) throw new Error('Missing map');
+  const move = (x: number, y: number) => page.mouse.move(
+    box.x + box.width / 2 + x / 0.3, box.y + box.height / 2 - (y - 20) / 0.3,
+  );
+  const drag = async (x: number, y: number, endX: number, endY: number) => {
+    await move(x, y);
+    await page.mouse.down();
+    await move(endX, endY);
+    await page.mouse.up();
+  };
+  await page.getByRole('button', { name: 'Build curved road' }).click();
+  await drag(-65, -8, 65, 8);
+  await move(0, 85);
+  await page.mouse.down();
+  await page.mouse.up();
+  await expect.poll(editor).toMatchObject({ roadCount: 1, connected: true, pending: false });
+  await page.getByRole('button', { name: 'Build road', exact: true }).click();
+  await drag(-47.27, 27.85, 52.30, 27.74);
+  await expect.poll(editor).toMatchObject({ roadCount: 2, connected: true, pending: false });
+  await page.getByRole('button', { name: '8× speed' }).click();
+  await expect.poll(async () => (await stats())?.active ?? 0).toBeGreaterThan(1);
+  await page.keyboard.press('b');
+  await move(0, 27.8);
+  await expect(page.getByRole('status')).toHaveText('Click to remove this segment.');
+  await page.mouse.down();
+  await page.mouse.up();
+  await expect.poll(editor, { timeout: 20_000 }).toMatchObject({ connected: true, pending: false });
+  const arrived = (await stats())?.completed ?? 0;
+  await expect.poll(async () => (await stats())?.completed ?? 0, { timeout: 30_000 }).toBeGreaterThan(arrived);
+  await move(0, 28);
+  await expect(page.getByRole('status')).not.toHaveText('Click to remove this segment.');
+  await page.screenshot({ path: 'artifacts/screens/meadow-bulldoze-live-bypass.png' });
+  await page.getByRole('button', { name: 'Build road', exact: true }).click();
+  await drag(-47.27, 27.85, 52.30, 27.74);
+  await expect.poll(editor, { timeout: 20_000 }).toMatchObject({ roadCount: 3, connected: true, pending: false });
+  await page.keyboard.press('b');
+  await move(0, 27.8);
+  await expect(page.getByRole('status')).toHaveText('Click to remove this segment.');
+  const afterRebuild = (await stats())?.completed ?? 0;
+  await expect.poll(async () => (await stats())?.completed ?? 0, { timeout: 30_000 }).toBeGreaterThan(afterRebuild);
+  await page.screenshot({ path: 'artifacts/screens/meadow-bulldoze-rebuilt-bypass.png' });
+  await page.getByRole('button', { name: 'Undo road' }).click();
+  await expect.poll(editor, { timeout: 20_000 }).toMatchObject({ roadCount: 2, connected: true, pending: false });
+  await move(0, 28);
+  await expect(page.getByRole('status')).not.toHaveText('Click to remove this segment.');
+  await page.getByRole('button', { name: 'Undo road' }).click();
+  await expect.poll(editor, { timeout: 20_000 }).toMatchObject({ connected: true, pending: false });
+  await move(0, 27.8);
+  await expect(page.getByRole('status')).toHaveText('Click to remove this segment.');
+  expect((await stats())?.lost).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test.describe('touch bulldozing', () => {
+  test.use({ hasTouch: true });
+
+  test('tap a highlighted segment to remove it and undo', async ({ page }) => {
+    await page.goto('/?speed=0&x=-35&y=0&mpp=0.2');
+    const editor = () => page.evaluate(() => window.__towns?.editor());
+    await expect.poll(editor).toMatchObject({ pending: false });
+    const box = await page.locator('#map').boundingBox();
+    if (!box) throw new Error('Missing map');
+    const x = box.x + box.width / 2 - 30 / 0.2;
+    const y = (worldY: number) => box.y + box.height / 2 - worldY / 0.2;
+    await page.mouse.move(x, y(-8));
+    await page.mouse.down();
+    await page.mouse.move(x, y(48));
+    await page.mouse.up();
+    await expect.poll(editor).toMatchObject({ roadCount: 1, pending: false });
+    await page.getByRole('button', { name: 'Bulldoze road' }).tap();
+    await page.touchscreen.tap(x, y(28));
+    await expect.poll(editor).toMatchObject({ pending: false, canUndo: true });
+    await page.mouse.move(x, y(29));
+    await expect(page.getByRole('status')).not.toHaveText('Click to remove this segment.');
+    await page.getByRole('button', { name: 'Undo road' }).tap();
+    await expect.poll(editor).toMatchObject({ pending: false });
+    await page.mouse.move(x, y(28));
+    await expect(page.getByRole('status')).toHaveText('Click to remove this segment.');
+  });
+});

@@ -103,7 +103,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
       const { scenario } = msg;
       scene.add(buildDecor(scenario.decor));
       drawNetwork(scenario.network);
-      if (editor) editor.accept([], scenario.network.surfaces[0]!.width);
+      if (editor) editor.accept([]);
       vehicles = new VehicleLayer(msg.capacity);
       scene.add(vehicles.mesh);
       if (options.view) {
@@ -116,7 +116,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
       ready = true;
     } else if (msg.type === 'roadsChanged') {
       drawNetwork(msg.network);
-      editor?.accept(msg.roads, msg.network.surfaces[0]!.width);
+      editor?.accept(msg.edits);
     } else if (msg.type === 'editWaiting') {
       editor?.waitForTraffic();
     } else if (msg.type === 'editRejected') {

@@ -3,7 +3,7 @@ import { END_TURN_RUN } from './endConnection';
 import { segmentCrossings, segmentIntersection } from './junctions';
 
 type Street = readonly Vec2[];
-type StreetReference = { kind: 'tip' } | { kind: 'street'; segmentEnd: number } | { kind: 'junction'; priorityAxis: Vec2 };
+type StreetReference = { kind: 'tip' } | { kind: 'street'; segmentEnd: number } | { kind: 'junction'; priorityAxis: Vec2 } | { kind: 'corner'; tangents: readonly Vec2[] };
 export type StreetPoint = StreetReference & {
   street: Street;
   point: Vec2;
@@ -76,6 +76,14 @@ export function crossingAngleGuide(streets: readonly Street[], start: Vec2, curs
 
 export function angleGuide(streets: readonly Street[], host: StreetPoint, cursor: Vec2): AngleGuide | undefined {
   const start = host.point;
+  if (host.kind === 'corner') {
+    for (const arm of host.tangents) {
+      const direction = scale(arm, -1);
+      const guide = capture(start, cursor, 'Straight', direction, direction);
+      if (guide) return guide;
+    }
+    return undefined;
+  }
   if (host.kind !== 'street') return capture(start, cursor, 'Straight', host.tangent, host.tangent);
   const local = localAngle(start, cursor, host.tangent);
   if (local) return local;
@@ -101,7 +109,7 @@ export function angleGuide(streets: readonly Street[], host: StreetPoint, cursor
 }
 
 export function squareStreetGuide(host: StreetPoint, target: StreetPoint): AngleGuide | undefined {
-  if (host.kind === 'junction' || target.kind !== 'street') return undefined;
+  if ((host.kind !== 'tip' && host.kind !== 'street') || target.kind !== 'street') return undefined;
   if (Math.abs(cross(host.tangent, target.tangent)) > 1e-6) return undefined;
   const fromTip = host.kind === 'tip';
   const drag = sub(target.point, host.point);

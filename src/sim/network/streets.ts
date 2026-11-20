@@ -52,19 +52,35 @@ export function buildStreetNetwork(
   builder: NetworkBuilder, streets: readonly (readonly Vec2[])[], portals: readonly Vec2[],
   crossings: readonly StreetCrossing[] = [],
 ): { network: Network; demand: Demand[] } {
-  const degrees = new Map<string, number>();
+  const headings = new Map<string, Vec2[]>();
   for (const points of streets) {
     if (points.length < 2) throw new Error('A street needs at least two points');
-    for (const p of [points[0]!, points[points.length - 1]!]) degrees.set(key(p), (degrees.get(key(p)) ?? 0) + 1);
+    const last = points.length - 1;
+    for (const [end, neighbor] of [[points[0]!, points[1]!], [points[last]!, points[last - 1]!]] as const) {
+      const node = key(end);
+      const list = headings.get(node) ?? [];
+      list.push(normalize(sub(neighbor, end)));
+      headings.set(node, list);
+    }
+  }
+  const mouthNodes = new Set<string>();
+  for (const [node, arms] of headings) {
+    if (arms.length >= 3 || (arms.length === 2 && dot(arms[0]!, arms[1]!) > -0.95)) mouthNodes.add(node);
   }
   const nodes = new Map<string, Arm[]>();
   for (const points of streets) {
     const path = polyline(points);
+    if (!(path.length > 0)) throw new Error('A street needs positive length');
     const first = points[0]!;
     const last = points[points.length - 1]!;
-    const from = degrees.get(key(first))! >= 3 ? JUNCTION_MOUTH : 0;
-    const to = path.length - (degrees.get(key(last))! >= 3 ? JUNCTION_MOUTH : 0);
-    if (to - from < 1) throw new Error('Street is too short for junction mouths');
+    const startMouth = mouthNodes.has(key(first)) ? JUNCTION_MOUTH : 0;
+    const endMouth = mouthNodes.has(key(last)) ? JUNCTION_MOUTH : 0;
+    // Demolition can expose a short historical seam beside a junction. Keep part of
+    // every retained street, and let its connectors reach the shortened mouths.
+    const reserve = Math.min(1, path.length / 2);
+    const mouthScale = Math.min(1, (path.length - reserve) / (startMouth + endMouth || 1));
+    const from = startMouth * mouthScale;
+    const to = path.length - endMouth * mouthScale;
     const center = slicePolyline(path, from, to);
     const lanes = builder.addTwoWayRoad(center, { width: 8, laneWidth: 3.5, speedLimit: SPEED });
     const arms: [Vec2, Arm][] = [
@@ -80,6 +96,11 @@ export function buildStreetNetwork(
   const priorityAxes = new Map(crossings.map((c) => [key(c.point), c.priorityAxis]));
   for (const [node, arms] of nodes) {
     if (arms.length < 2) continue;
+    if (arms.length === 2 && mouthNodes.has(node)) {
+      turn(builder, arms[0]!.incoming, arms[1]!.outgoing);
+      turn(builder, arms[1]!.incoming, arms[0]!.outgoing);
+      continue;
+    }
     if (arms.length === 2) {
       builder.connect(arms[0]!.incoming, arms[1]!.outgoing);
       builder.connect(arms[1]!.incoming, arms[0]!.outgoing);
