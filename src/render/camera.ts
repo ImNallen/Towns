@@ -19,7 +19,7 @@ export class MapCamera {
   private dragging: { id: number; x: number; y: number } | null = null;
   private readonly abort = new AbortController();
 
-  constructor(private readonly el: HTMLElement) {
+  constructor(private readonly el: HTMLElement, private readonly canPan: (event: PointerEvent) => boolean) {
     this.camera.up.set(0, 0, -1);
     const signal = this.abort.signal;
     el.addEventListener('pointerdown', this.onPointerDown, { signal });
@@ -66,6 +66,7 @@ export class MapCamera {
   }
 
   private readonly onPointerDown = (e: PointerEvent): void => {
+    if (this.dragging || !e.isPrimary || !this.canPan(e)) return;
     this.dragging = { id: e.pointerId, x: e.clientX, y: e.clientY };
     this.el.setPointerCapture(e.pointerId);
   };

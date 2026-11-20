@@ -1,3 +1,6 @@
+import type { Vec2 } from '../sim/math/vec';
+import type { Network } from '../sim/network/types';
+import type { MeadowRoad } from '../sim/scenarios/meadow';
 import type { Scenario, ScenarioName } from '../sim/scenarios';
 import type { SimStats } from '../sim/world';
 
@@ -5,10 +8,14 @@ import type { SimStats } from '../sim/world';
 export type ToWorker =
   | { type: 'init'; scenario: ScenarioName; seed: number; speed: number }
   /** Simulation speed multiplier; 0 pauses. */
-  | { type: 'setSpeed'; speed: number };
+  | { type: 'setSpeed'; speed: number }
+  | { type: 'buildRoad'; start: Vec2; end: Vec2 }
+  | { type: 'undoRoad' };
 
 /** Simulation worker → main thread. */
 export type FromWorker =
+  | { type: 'roadsChanged'; network: Network; roads: MeadowRoad[] }
+  | { type: 'editRejected'; reason: string }
   | { type: 'ready'; scenario: Scenario; capacity: number }
   | {
       type: 'frame';

@@ -1,9 +1,12 @@
 import * as THREE from 'three';
+import type { Network } from '../sim/network/types';
 import type { ScenarioName } from '../sim/scenarios';
 import type { SimStats } from '../sim/world';
 import type { FromWorker, ToWorker } from '../worker/protocol';
 import { MapCamera } from './camera';
 import { buildLaneOverlay } from './debug';
+import { disposeLayer } from './dispose';
+import { RoadEditor, type EditorState, type MapTool } from './roadEditor';
 import { buildDecor } from './decor';
 import { PALETTE } from './palette';
 import { buildRoads } from './roads';
@@ -19,6 +22,9 @@ export interface GameOptions {
 }
 
 export interface Game {
+  editor(): EditorState | null;
+  setTool(tool: MapTool): void;
+  undoRoad(): void;
   stats(): SimStats | null;
   fps(): number;
   speed(): number;
@@ -64,7 +70,9 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   Object.assign(sun.shadow.camera, { left: -650, right: 650, top: 650, bottom: -650, near: 1, far: 1400 });
   scene.add(sun, sun.target);
 
-  const mapCamera = new MapCamera(canvas);
+  let editor: RoadEditor | null = null;
+  const mapCamera = new MapCamera(canvas, (event) => editor?.canPan(event) ?? true);
+  let roadLayer: THREE.Group | null = null;
   let vehicles: VehicleLayer | null = null;
   let laneOverlay: THREE.Group | null = null;
   let showLanes = options.showLanes;
@@ -74,15 +82,24 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   const worker = new Worker(new URL('../worker/sim.worker.ts', import.meta.url), { type: 'module' });
   const send = (msg: ToWorker): void => worker.postMessage(msg);
 
+  if (options.scenario === 'meadow') editor = new RoadEditor(canvas, mapCamera, scene, send);
+
+  const drawNetwork = (network: Network): void => {
+    if (roadLayer) disposeLayer(roadLayer);
+    if (laneOverlay) disposeLayer(laneOverlay);
+    roadLayer = buildRoads(network, editor ? 'dashed' : 'solid');
+    laneOverlay = buildLaneOverlay(network);
+    laneOverlay.visible = showLanes;
+    scene.add(roadLayer, laneOverlay);
+  };
+
   worker.onmessage = (e: MessageEvent<FromWorker>) => {
     const msg = e.data;
     if (msg.type === 'ready') {
       const { scenario } = msg;
       scene.add(buildDecor(scenario.decor));
-      scene.add(buildRoads(scenario.network));
-      laneOverlay = buildLaneOverlay(scenario.network);
-      laneOverlay.visible = showLanes;
-      scene.add(laneOverlay);
+      drawNetwork(scenario.network);
+      if (editor) editor.accept([], scenario.network.surfaces[0]!.width);
       vehicles = new VehicleLayer(msg.capacity);
       scene.add(vehicles.mesh);
       if (options.view) {
@@ -93,6 +110,11 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
         mapCamera.fit(scenario.bounds);
       }
       ready = true;
+    } else if (msg.type === 'roadsChanged') {
+      drawNetwork(msg.network);
+      editor?.accept(msg.roads, msg.network.surfaces[0]!.width);
+    } else if (msg.type === 'editRejected') {
+      editor?.reject(msg.reason);
     } else {
       vehicles?.push(msg, performance.now());
       latestStats = msg.stats;
@@ -119,6 +141,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     raf = requestAnimationFrame(frame);
     vehicles?.update(now);
     mapCamera.update();
+    editor?.update();
     renderer.render(scene, mapCamera.camera);
     frames++;
     if (now - fpsWindowStart >= 500) {
@@ -130,6 +153,9 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   raf = requestAnimationFrame(frame);
 
   const game: Game = {
+    editor: () => editor?.state() ?? null,
+    setTool: (tool) => editor?.setTool(tool),
+    undoRoad: () => editor?.undo(),
     stats: () => (ready ? latestStats : null),
     fps: () => fps,
     speed: () => speed,
@@ -145,7 +171,9 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     dispose() {
       cancelAnimationFrame(raf);
       observer.disconnect();
+      editor?.dispose();
       mapCamera.dispose();
+      disposeLayer(scene);
       worker.terminate();
       renderer.dispose();
     },

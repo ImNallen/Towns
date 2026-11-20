@@ -14,7 +14,7 @@ export function buildDecor(decor: Decor): THREE.Group {
 
   for (const lake of decor.lakes) {
     const sand = new FlatMesh(0.01);
-    sand.polygon(blobPoints(lake, lake.radius + 16));
+    sand.polygon(blobPoints(lake, lake.radius + Math.min(16, lake.radius * 0.14)));
     const water = new FlatMesh(0.02);
     water.polygon(blobPoints(lake, lake.radius));
     for (const [mesh, color] of [[sand, PALETTE.sand], [water, PALETTE.water]] as const) {
@@ -25,7 +25,10 @@ export function buildDecor(decor: Decor): THREE.Group {
   }
 
   for (const hill of decor.hills) group.add(buildHill(hill));
-  if (decor.houses.length > 0) group.add(buildHouses(decor));
+  if (decor.houses.length > 0) {
+    group.add(buildHouses(decor));
+    addGardens(group, decor);
+  }
   return group;
 }
 
@@ -93,6 +96,37 @@ function houseGeometry(): THREE.BufferGeometry {
   return merged;
 }
 
+function addGardens(group: THREE.Group, decor: Decor): void {
+  const parcels = PALETTE.gardens.map(() => new FlatMesh(0.03));
+  const planted = decor.houses.filter((house) => house.garden);
+  if (!planted.length) return;
+  const trees = new THREE.InstancedMesh(
+    new THREE.IcosahedronGeometry(1, 1),
+    new THREE.MeshLambertMaterial({ flatShading: true }), planted.length,
+  );
+  const crown = new THREE.Object3D();
+  planted.forEach((house, i) => {
+    const { minX, maxX, minY, maxY } = house.garden!;
+    parcels[i % parcels.length]!.quad({ x: minX, y: minY }, { x: maxX, y: minY }, { x: maxX, y: maxY }, { x: minX, y: maxY });
+    const radius = 2.2 + 0.4 * (i % 3);
+    const streetSide = house.y - minY < maxY - house.y ? 1 : -1;
+    crown.position.set(maxX - 3.5, 2.8, -(house.y + streetSide * (5 + i % 4)));
+    crown.rotation.y = i;
+    crown.scale.set(radius, radius * 1.1, radius);
+    crown.updateMatrix();
+    trees.setMatrixAt(i, crown.matrix);
+    trees.setColorAt(i, new THREE.Color(PALETTE.orchard[i % PALETTE.orchard.length]!));
+  });
+  trees.castShadow = true;
+  group.add(trees);
+  parcels.forEach((parcel, i) => {
+    if (parcel.empty) return;
+    const lawn = new THREE.Mesh(parcel.build(), flatMaterial(PALETTE.gardens[i]!));
+    lawn.receiveShadow = true;
+    group.add(lawn);
+  });
+}
+
 function buildHouses(decor: Decor): THREE.InstancedMesh {
   const material = new THREE.MeshLambertMaterial({ vertexColors: true });
   const mesh = new THREE.InstancedMesh(houseGeometry(), material, decor.houses.length);
@@ -104,7 +138,8 @@ function buildHouses(decor: Decor): THREE.InstancedMesh {
     q.setFromAxisAngle(up, h.angle);
     m.compose(new THREE.Vector3(h.x, 0, -h.y), q, new THREE.Vector3(1, 1, 1));
     mesh.setMatrixAt(i, m);
-    mesh.setColorAt(i, color.set(PALETTE.houses[h.variant % PALETTE.houses.length]!));
+    const roofs = h.garden ? PALETTE.cottageRoofs : PALETTE.houses;
+    mesh.setColorAt(i, color.set(roofs[h.variant % roofs.length]!));
   });
   mesh.castShadow = true;
   mesh.receiveShadow = true;
