@@ -13,6 +13,9 @@ export interface MeadowRoad {
   readonly fourWays?: readonly StreetCrossing[];
 }
 
+export type MeadowEdit = MeadowRoad | { readonly remove: number };
+type RemovedArm = Pick<StreetPoint, 'point' | 'tangent'>;
+
 type Plan = { ok: true; road: MeadowRoad; path: Polyline } | { ok: false; reason: string; points?: readonly Vec2[] };
 const WIDTH = 8;
 export { WIDTH as MEADOW_ROAD_WIDTH };
@@ -75,26 +78,69 @@ export function meadowRoadSections(road: MeadowRoad): Vec2[][] {
   return sections;
 }
 
-/** Replay into maximal chains whose endpoints are dead ends, portals or junctions. */
-export function meadowStreets(roads: readonly MeadowRoad[]): Vec2[][] {
+function removable(chain: readonly Vec2[]): boolean {
+  return !isPortal(chain[0]!) && !isPortal(tip(chain));
+}
+
+/** Keep construction boundaries so each bulldozer edit removes one reproducible section. */
+function replayMeadow(edits: readonly MeadowEdit[]): { chains: Vec2[][]; crossings: StreetCrossing[]; removedArms: RemovedArm[] } {
   let chains: Vec2[][] = [
-    [PORTALS[0]!, { x: -45, y: -8 }],
-    [PORTALS[1]!, { x: 45, y: 8 }],
+    [PORTALS[0]!, { x: MEADOW_BUILD_BOUNDS.minX, y: -8 }],
+    [{ x: MEADOW_BUILD_BOUNDS.minX, y: -8 }, { x: -45, y: -8 }],
+    [PORTALS[1]!, { x: MEADOW_BUILD_BOUNDS.maxX, y: 8 }],
+    [{ x: MEADOW_BUILD_BOUNDS.maxX, y: 8 }, { x: 45, y: 8 }],
   ];
-  for (const road of roads) {
-    const endpoints = [road.points[0]!, tip(road.points)];
-    for (const node of endpoints) chains = chains.flatMap((chain) => splitAt(chain, node));
-    for (const { point } of road.fourWays ?? []) chains = chains.flatMap((chain) => splitAt(chain, point));
-    chains.push(...meadowRoadSections(road));
-    for (const endpoint of endpoints) {
-      const incident = chains.flatMap((c, i) => [c[0]!, tip(c)].filter((p) => same(p, endpoint)).map(() => i));
-      if (incident.length !== 2 || incident[0] === incident[1]) continue;
-      const [i, j] = incident;
+  const crossings: StreetCrossing[] = [];
+  const removedArms: RemovedArm[] = [];
+  for (const edit of edits) {
+    if ('remove' in edit) {
+      const selected = chains.filter(removable)[edit.remove];
+      if (selected) {
+        removedArms.push(
+          { point: selected[0]!, tangent: normalize(sub(selected[1]!, selected[0]!)) },
+          { point: tip(selected), tangent: normalize(sub(selected[selected.length - 2]!, tip(selected))) },
+        );
+        chains.splice(chains.indexOf(selected), 1);
+      }
+      continue;
+    }
+    const endpoints = [edit.points[0]!, tip(edit.points)];
+    for (const node of [...endpoints, ...(edit.fourWays ?? []).map((c) => c.point)]) {
+      chains = chains.flatMap((chain) => splitAt(chain, node));
+    }
+    chains.push(...meadowRoadSections(edit));
+    crossings.push(...(edit.fourWays ?? []));
+  }
+  return { chains, crossings, removedArms };
+}
+
+export function meadowSegments(edits: readonly MeadowEdit[]): readonly (readonly Vec2[])[] {
+  return replayMeadow(edits).chains.filter(removable);
+}
+
+/** Coalesce smooth degree-two nodes while preserving sharp corners for lane connectors. */
+export function meadowStreets(edits: readonly MeadowEdit[]): Vec2[][] {
+  return coalesceStreets(replayMeadow(edits).chains);
+}
+
+function coalesceStreets(chains: Vec2[][]): Vec2[][] {
+  for (let i = 0; i < chains.length; i++) {
+    let merged = false;
+    for (const endpoint of [chains[i]![0]!, tip(chains[i]!)]) {
+      if (degree(chains, endpoint) !== 2) continue;
+      const j = chains.findIndex((chain, index) => index !== i && (same(chain[0]!, endpoint) || same(tip(chain), endpoint)));
+      if (j < 0) continue;
       const first = same(tip(chains[i]!), endpoint) ? chains[i]! : [...chains[i]!].reverse();
       const second = same(chains[j]![0]!, endpoint) ? chains[j]! : [...chains[j]!].reverse();
+      const incoming = normalize(sub(endpoint, first[first.length - 2]!));
+      const outgoing = normalize(sub(second[1]!, endpoint));
+      if (dot(incoming, outgoing) < 0.95) continue;
       chains[i] = [...first, ...second.slice(1)];
       chains.splice(j, 1);
+      merged = true;
+      break;
     }
+    if (merged) i = -1;
   }
   return chains;
 }
@@ -103,14 +149,12 @@ function degree(chains: readonly (readonly Vec2[])[], p: Vec2): number {
   return chains.reduce((sum, c) => sum + Number(same(c[0]!, p)) + Number(same(tip(c), p)), 0);
 }
 
-export function meadowTips(roads: readonly MeadowRoad[]): Vec2[] {
-  const chains = meadowStreets(roads);
+function streetTips(chains: Vec2[][]): Vec2[] {
   return chains.flatMap((c) => [c[0]!, tip(c)])
     .filter((p) => !isPortal(p) && degree(chains, p) === 1).map((p) => ({ ...p }));
 }
 
-export function meadowConnected(roads: readonly MeadowRoad[]): boolean {
-  const chains = meadowStreets(roads);
+function portalsConnected(chains: Vec2[][]): boolean {
   const reached: Vec2[] = [PORTALS[0]!];
   for (let i = 0; i < reached.length; i++) {
     for (const chain of chains) {
@@ -121,7 +165,22 @@ export function meadowConnected(roads: readonly MeadowRoad[]): boolean {
   return reached.some((p) => same(p, PORTALS[1]!));
 }
 
-export function meadowSnap(roads: readonly MeadowRoad[], point: Vec2, radius: number): Vec2 | undefined {
+export function meadowTips(edits: readonly MeadowEdit[]): Vec2[] {
+  return streetTips(meadowStreets(edits));
+}
+
+export function meadowConnected(edits: readonly MeadowEdit[]): boolean {
+  return portalsConnected(meadowStreets(edits));
+}
+
+export function meadowLayout(edits: readonly MeadowEdit[]) {
+  const { chains } = replayMeadow(edits);
+  const segments = chains.filter(removable);
+  const streets = coalesceStreets(chains);
+  return { segments, streets, tips: streetTips(streets), connected: portalsConnected(streets) };
+}
+
+export function meadowSnap(roads: readonly MeadowEdit[], point: Vec2, radius: number): Vec2 | undefined {
   return snapToMeadowStreet(meadowStreets(roads), point, radius)?.point;
 }
 
@@ -135,7 +194,12 @@ export function snapToMeadowStreet(chains: readonly (readonly Vec2[])[], point: 
   for (const end of ends) {
     const d = distance(end.p, point);
     if (d > reach || isPortal(end.p)) continue;
-    if (end.degree === 3) {
+    if (end.degree === 2) {
+      const tangents = ends.filter((arm) => same(arm.p, end.p)).map((arm) =>
+        normalize(sub(arm.street[arm.i === 0 ? 1 : arm.i - 1]!, arm.p)));
+      best = { kind: 'corner', street: end.street, point: end.p, tangent: scale(tangents[0]!, -1), tangents };
+      reach = d;
+    } else if (end.degree === 3) {
       const arms = ends.filter((arm) => same(arm.p, end.p)).map((arm) => ({
         street: arm.street,
         tangent: normalize(sub(arm.street[arm.i === 0 ? 1 : arm.i - 1]!, arm.p)),
@@ -165,12 +229,16 @@ export function snapToMeadowStreet(chains: readonly (readonly Vec2[])[], point: 
   return best;
 }
 
-export function meadowScenario(roads: readonly MeadowRoad[] = []): Scenario {
-  const { network, demand } = buildStreetNetwork(new NetworkBuilder(), meadowStreets(roads), PORTALS, roads.flatMap((road) => road.fourWays ?? []));
+export function meadowScenario(roads: readonly MeadowEdit[] = []): Scenario {
+  const replay = replayMeadow(roads);
+  const streets = coalesceStreets(replay.chains);
+  const crossings = replay.crossings.filter((crossing) => degree(streets, crossing.point) === 4);
+  const { network, demand } = buildStreetNetwork(new NetworkBuilder(), streets, PORTALS, crossings);
   const decor = scenery();
   const driveways = new NetworkBuilder();
   for (const house of decor.houses) {
     const streetY = house.x < 0 ? -8 : 8;
+    if (!streets.some((street) => containsPoint(street, { x: house.x - 4, y: streetY }))) continue;
     const side = Math.sign(house.y - streetY);
     const x = house.x - 4;
     driveways.addSurface('driveway', polyline([
@@ -208,8 +276,19 @@ function insideMeadow(p: Vec2): boolean {
     && p.y >= MEADOW_BUILD_BOUNDS.minY && p.y <= MEADOW_BUILD_BOUNDS.maxY;
 }
 
-function departure(snap: StreetPoint | undefined, toward: Vec2): Vec2 {
+function departure(snap: StreetPoint | undefined, toward: Vec2, removedArms: readonly RemovedArm[]): Vec2 {
   if (!snap) return toward;
+  if (snap.kind === 'corner') {
+    return snap.tangents.map((tangent) => scale(tangent, -1)).reduce((best, tangent) =>
+      dot(tangent, toward) > dot(best, toward) ? tangent : best);
+  }
+  if (snap.kind === 'tip') {
+    const restored = removedArms.filter((arm) => same(arm.point, snap.point)
+      && Math.abs(dot(snap.tangent, arm.tangent)) < Math.SQRT1_2
+      && dot(arm.tangent, toward) >= Math.cos(5 * Math.PI / 180))
+      .sort((a, b) => dot(b.tangent, toward) - dot(a.tangent, toward))[0];
+    if (restored) return restored.tangent;
+  }
   if (snap.kind !== 'street') return snap.tangent;
   const along = snap.tangent;
   if (Math.abs(dot(along, toward)) <= Math.SQRT1_2) return toward;
@@ -266,11 +345,12 @@ function hasTightBend(points: readonly Vec2[]): boolean {
   return false;
 }
 
-export function planMeadowRoad(roads: readonly MeadowRoad[], start: Vec2, end: Vec2, bend?: Vec2): Plan {
+export function planMeadowRoad(roads: readonly MeadowEdit[], start: Vec2, end: Vec2, bend?: Vec2): Plan {
   const fail = (reason: string): Plan => ({ ok: false, reason });
   if (![start, end, ...(bend ? [bend] : [])].every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))) return fail('Choose a point inside the meadow.');
   if (!insideMeadow(start) || !insideMeadow(end) || (bend && !insideMeadow(bend))) return fail('Keep the whole street inside the meadow.');
-  const chains = meadowStreets(roads);
+  const replay = replayMeadow(roads);
+  const chains = coalesceStreets(replay.chains);
   const chord = normalize(sub(end, start));
   const source = snapToMeadowStreet(chains, start, 1e-6);
   const target = snapToMeadowStreet(chains, end, 1e-6);
@@ -282,8 +362,8 @@ export function planMeadowRoad(roads: readonly MeadowRoad[], start: Vec2, end: V
   if ((!target || !source) && distance(start, end) < MIN_LENGTH) return fail('Build at least 12 metres of street.');
   const firstChord = normalize(sub(bend ?? end, start));
   const lastChord = normalize(sub(end, bend ?? start));
-  const incoming = departure(source, firstChord);
-  const outgoing = scale(departure(target, scale(lastChord, -1)), -1);
+  const incoming = departure(source, firstChord, replay.removedArms);
+  const outgoing = scale(departure(target, scale(lastChord, -1), replay.removedArms), -1);
   const decor = scenery();
   const rounded = bend ? undefined : endJoin(source, target, chord, decor);
   if (!rounded && (dot(firstChord, incoming) < (source?.kind === 'tip' ? 0.45 : Math.SQRT1_2)
@@ -306,7 +386,7 @@ export function planMeadowRoad(roads: readonly MeadowRoad[], start: Vec2, end: V
   const intersections = streetCrossings(points, chains);
   if (!intersections.ok) return intersections;
   const { crossings } = intersections;
-  if (!source && target?.kind !== 'junction' && !crossings.length) return fail('Drag across an existing street to build a crossing.');
+  if (!source && target?.kind !== 'junction' && target?.kind !== 'corner' && !crossings.length) return fail('Drag across an existing street to build a crossing.');
   for (const { point } of crossings) {
     const nearEndpoint = distance(point, start) < (startsAtJunction ? MIN_JUNCTION_SPACING : MIN_LENGTH)
       || distance(point, end) < (endsAtJunction ? MIN_JUNCTION_SPACING : MIN_LENGTH);

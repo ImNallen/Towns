@@ -55,6 +55,15 @@ it('aligns with the closest nearby parallel street', () => {
   expect(angleGuide([...streets, ref.map((p) => add(p, vec2(90, 0)))], host, cursor)).toBeUndefined();
 });
 
+it('can extend either surviving arm straight through a corner', () => {
+  const corner = vec2(0, 0);
+  const arms = [[corner, vec2(-40, 0)], [corner, vec2(0, 35)]];
+  const host = snapToMeadowStreet(arms, corner, 0)!;
+  expect(host.kind).toBe('corner');
+  expect(angleGuide(arms, host, vec2(40, 1))?.end).toEqual(vec2(40, 0));
+  expect(angleGuide(arms, host, vec2(1, -40))?.end).toEqual(vec2(0, -40));
+});
+
 it('closes a square block on the destination centerline within connection range', () => {
   const target = [vec2(-110, 42), vec2(-20, 42)];
   const cursor = vec2(-62, 44);
