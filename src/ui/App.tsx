@@ -137,6 +137,10 @@ export function App({ game }: { game: Game }) {
           <p role="status" aria-live="polite">{instruction}</p>
           {editor.canCancel && editor.pending && speed === 0 && <button className="cancel-edit" onClick={() => changeSpeed(lastSpeed)}>Resume traffic</button>}
           {editor.canCancel && <button className="cancel-edit" onClick={() => game.cancelRoadEdit()}>Cancel edit</button>}
+          {editor.chaining && <button className="cancel-edit" onClick={() => {
+            game.cancelRoadEdit();
+            setEditor(game.editor());
+          }}>Finish road</button>}
           {editor.tool === 'road' && <label className="angle-toggle">
             <input type="checkbox" checked={editor.angleSnapping} onChange={(e) => {
               game.setAngleSnapping(e.target.checked);

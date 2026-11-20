@@ -83,6 +83,7 @@ export class RoadEditor {
   private readonly hover = roadMarker();
   private preview: THREE.Group | null = null;
   private move: PointerEvent | null = null;
+  private pointer: PointerEvent | null = null;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -96,7 +97,11 @@ export class RoadEditor {
     this.hover.visible = false;
     scene.add(this.handles, this.hover, this.boundary);
     canvas.addEventListener('pointerdown', (e) => this.begin(e), { signal });
-    canvas.addEventListener('pointermove', (e) => { if (e.isPrimary) this.move = e; }, { signal });
+    canvas.addEventListener('pointermove', (e) => {
+      if (!e.isPrimary) return;
+      this.move = e;
+      this.pointer = e;
+    }, { signal });
     canvas.addEventListener('pointerleave', () => {
       this.hover.visible = false;
       this.move = null;
@@ -129,6 +134,7 @@ export class RoadEditor {
   setAngleSnapping(enabled: boolean): void {
     this.angleSnapping = enabled;
     if (this.phase.kind === 'drawing') this.move ??= this.phase.pointer;
+    else if (this.phase.kind === 'chaining') this.move ??= this.pointer;
   }
 
   setTool(tool: MapTool): void {
@@ -158,7 +164,10 @@ export class RoadEditor {
       this.handles.add(marker);
     }
     const tip = chain && layout.tips.find((p) => distance(p, chain.to) < 1e-6);
-    if (tip) this.chain(tip);
+    if (tip) {
+      this.chain(tip);
+      this.move = this.pointer;
+    }
     this.update();
   }
 

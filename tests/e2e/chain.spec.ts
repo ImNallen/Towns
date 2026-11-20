@@ -99,3 +99,72 @@ test('a drag builds one road without chaining, and a chain ends where it joins a
   await page.getByRole('button', { name: 'Undo road' }).click();
   await expect.poll(editor).toMatchObject({ roadCount: 1, connected: false, chaining: false, pending: false });
 });
+
+test('toggling angle snap mid-chain redraws the preview without moving the pointer', async ({ page }) => {
+  const { editor, move, click, status } = await open(page);
+  const [west] = meadowTips([]);
+  await click(west!);
+  await expect.poll(editor).toMatchObject({ chaining: true });
+  await move({ x: west!.x, y: west!.y + 28 });
+  await expect(status).toContainText(`90° · ${CHAIN_HINT}`);
+  const snap = page.getByRole('checkbox', { name: 'Angle snap' });
+  await snap.uncheck();
+  await expect(status).not.toContainText('90°');
+  await snap.check();
+  await expect(status).toContainText(`90° · ${CHAIN_HINT}`);
+  await expect.poll(editor).toMatchObject({ chaining: true, roadCount: 0 });
+});
+
+test.describe('on a touch screen', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+  test('tap a road end to start a chain, then tap Finish road', async ({ page }) => {
+    const [west] = meadowTips([]);
+    await page.goto(`/?speed=0&x=${west!.x}&y=${west!.y}&mpp=0.1`);
+    const editor = () => page.evaluate(() => window.__towns?.editor());
+    await expect.poll(editor).toMatchObject({ tool: 'road', pending: false });
+    const box = await page.locator('#map').boundingBox();
+    if (!box) throw new Error('Missing map');
+    await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+    await expect.poll(editor).toMatchObject({ chaining: true, roadCount: 0 });
+    const finish = page.getByRole('button', { name: 'Finish road' });
+    await expect(finish).toBeVisible();
+    await page.screenshot({ path: 'artifacts/screens/chain-finish-mobile.png' });
+    await finish.tap();
+    await expect.poll(editor).toMatchObject({ chaining: false, roadCount: 0, pending: false });
+    await expect(finish).toBeHidden();
+  });
+});
+
+test('a chain resumes with the preview at a pointer that moved while the road was building', async ({ page }) => {
+  await page.addInitScript(() => {
+    const held: (() => void)[] = [];
+    const hold = window as unknown as { holdRoads: boolean; releaseRoads: () => void };
+    hold.holdRoads = false;
+    hold.releaseRoads = () => {
+      hold.holdRoads = false;
+      for (const deliver of held.splice(0)) deliver();
+    };
+    const onmessage = Object.getOwnPropertyDescriptor(Worker.prototype, 'onmessage')!;
+    Object.defineProperty(Worker.prototype, 'onmessage', {
+      ...onmessage,
+      set(handler: (e: MessageEvent) => void) {
+        onmessage.set!.call(this, (e: MessageEvent) => {
+          if (hold.holdRoads && e.data?.type === 'roadsChanged') held.push(() => handler(e));
+          else handler(e);
+        });
+      },
+    });
+  });
+  const { editor, move, click, status } = await open(page);
+  const [west] = meadowTips([]);
+  await click(west!);
+  await expect.poll(editor).toMatchObject({ chaining: true });
+  await page.evaluate(() => { (window as unknown as { holdRoads: boolean }).holdRoads = true; });
+  await click({ x: -10, y: west!.y });
+  await expect.poll(editor).toMatchObject({ pending: true });
+  await move({ x: -10, y: west!.y + 28 });
+  await page.evaluate(() => (window as unknown as { releaseRoads: () => void }).releaseRoads());
+  await expect.poll(editor).toMatchObject({ roadCount: 1, chaining: true, pending: false });
+  await expect(status).toContainText(`90° · ${CHAIN_HINT}`);
+});
