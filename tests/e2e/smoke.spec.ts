@@ -135,7 +135,7 @@ test('painted residential frontage grows into a lived-in street', async ({ page 
   expect(errors).toEqual([]);
 });
 
-async function connectedStreet(page: Page, query = '') {
+async function connectedStreet(page: Page, query = '', connect = false) {
   await page.goto('/?scenario=meadow&seed=1&speed=0&x=20&y=8&mpp=0.15' + query);
   const editor = () => page.evaluate(() => window.__towns?.editor());
   await expect.poll(editor).toMatchObject({ tool: 'road', pending: false });
@@ -150,7 +150,12 @@ async function connectedStreet(page: Page, query = '') {
     await page.mouse.move(...at(end, y), { steps: 16 });
     await page.mouse.up();
   };
-  await drag(45, 8, -35);
+  if (connect) {
+    await page.mouse.move(...at(45,8));
+    await page.mouse.down();
+    await page.mouse.move(...at(-45,-8),{steps:16});
+    await page.mouse.up();
+  } else await drag(45, 8, -35);
   await expect.poll(editor).toMatchObject({ roadCount: 1, pending: false });
   await page.keyboard.press('z');
   return { at, drag, editor };
@@ -413,28 +418,26 @@ test('residents walk along the shop frontage', async ({ page }) => {
 
 test('a footpath joins the frontage and a zebra carries residents across the street', async ({ page }) => {
   test.setTimeout(180000);
-  const { at, drag, editor } = await connectedStreet(page);
+  const { at, drag, editor } = await connectedStreet(page,'',true);
   const stroke = async (x:number,y:number,endX:number,endY:number) => {
     await page.mouse.move(...at(x,y));
     await page.mouse.down();
     await page.mouse.move(...at(endX,endY),{steps:12});
     await page.mouse.up();
   };
-  await page.keyboard.press('r');
-  await stroke(-35,8,-45,-8);
   await expect.poll(editor).toMatchObject({connected:true,pending:false});
   await page.getByRole('button',{name:'Build footpath'}).click();
   const balance=()=>page.evaluate(()=>window.__towns!.town()!.budget.balance);
   const before=await balance();
-  await stroke(5,3.75,20,-17);
+  await stroke(50,3.75,30,-19);
   await expect.poll(balance).toBeLessThan(before);
   await page.screenshot({path:'artifacts/screens/footpath.png'});
   await page.getByRole('button',{name:'Build zebra crossing'}).click();
   const beforeZebra=await balance();
-  await page.mouse.click(...at(20,8));
+  await page.mouse.click(...at(65,8));
   await expect.poll(balance).toBe(beforeZebra-45);
   await page.keyboard.press('z');
-  for(const [brush,start,y,end] of [['h',-34,-8,76],['w',0,24,76]] as const){
+  for(const [brush,start,y,end] of [['h',-34,-8,76],['w',20,24,90]] as const){
     await page.keyboard.press(brush);
     await drag(start,y,end);
     await expect.poll(editor).toMatchObject({pending:false});
