@@ -1,3 +1,4 @@
+import { parkFootprint } from '../town/parks';
 import { decodeCellKey, findCell, ZONE_ROWS, type CellKey, type ZoneCells } from './cells';
 
 export const ZONE_KINDS = ['residential', 'shops', 'workplaces'] as const;
@@ -44,6 +45,13 @@ export function planZoneStroke(
     for (let r = from; r <= to; r++) {
       const k = (front + r) as CellKey;
       if (findCell(cells, k) >= 0) footprint.add(k);
+    }
+  }
+  if (zone === 'park') {
+    const size=Math.sqrt(footprint.size);
+    const first=Math.min(...footprint) as CellKey;
+    if (!(size===1 || size===2 || size===3) || !parkFootprint(first,size).every(key=>footprint.has(key))) {
+      return {ok:false,reason:'Choose a square park with its front row beside the street.'};
     }
   }
   if (zone && [...footprint].some(k=>zoning.get(k)==='park')) return {ok:false,reason:'Clear the park first.'};

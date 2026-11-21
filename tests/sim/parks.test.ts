@@ -11,6 +11,7 @@ it('charges for a park, benefits connected homes, and clears visiting families s
     cells = scenario.zones!,
     w = new World(scenario, 1);
   const keys = parkFootprint(524388 as CellKey, 2);
+  expect(planZoneStroke(cells,new Map(),'park',keys.slice(1)).ok).toBe(false);
   const plan = planZoneStroke(cells, new Map(), 'park', keys);
   if (!plan.ok) throw new Error(plan.reason);
   expect(editCost([], plan.stroke)).toBe(140);
