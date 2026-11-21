@@ -1,4 +1,5 @@
 import { signalAspect } from './network/signals';
+import { TrafficConditions } from './traffic/conditions';
 import { parksOn } from './town/parks';
 import type { WalkRouting } from './network/walkRouting';
 import { endOf, sampleAt, startOf, type PathSample } from './math/polyline';
@@ -62,6 +63,7 @@ interface Spawner {
   model?: Model;
   lane: number;
   rate: number;
+  offPeakRate?: number;
   /** Reachable destination indices, excluding a U-turn back down the same road. */
   destinations: number[];
 }
@@ -74,6 +76,8 @@ export class World {
   readonly scenario: Scenario;
   readonly network: Network;
   routing: Routing;
+  readonly traffic: TrafficConditions;
+  congestionAware = true;
   private zoning: Zoning = new Map();
   readonly vehicles: Vehicles;
 
@@ -114,6 +118,7 @@ export class World {
     this.lastSecond = Math.floor(this.time);
     this.scenario = scenario;
     this.network = scenario.network;
+    this.traffic = new TrafficConditions(this.network);
     this.lanes = scenario.network.lanes;
     this.yieldingMovements = this.lanes.map(() => []);
     for (const lane of this.lanes) {
@@ -153,7 +158,7 @@ export class World {
         const uTurn = dx * dx + dy * dy < 100;
         if (!uTurn && this.routing.canReach(idx, d.lane)) destinations.push(idx);
       });
-      return { lane: d.lane, rate: d.rate, model: d.model, destinations };
+      return { lane: d.lane, rate: d.rate, offPeakRate: d.offPeakRate, model: d.model, destinations };
     });
   }
 
@@ -170,6 +175,8 @@ export class World {
   get walkers() { return this.town?.walkers; }
 
   step(): void {
+    if (this._tick % TICKS_PER_MINUTE === 0) this.traffic.sample(this.vehicles);
+    if (this.congestionAware) this.routing.refresh(this._tick, this.traffic.seconds);
     this.walkers?.step(DT,this.vehicles,this.tick);
     if (this.town && this._tick % TICKS_PER_MINUTE === 0) this.town.update(this.minute(), this, this.admissionsOpen);
     this.buildBuckets();
@@ -293,6 +300,7 @@ export class World {
         }
       }
       if (!best) return fail(slot);
+      edited.vehicles.laneDelay[slot] = 0;
       edited.vehicles.lane[slot] = best.lane;
       edited.vehicles.s[slot] = best.s;
       edited.vehicles.dest[slot] = dest;
@@ -596,6 +604,7 @@ export class World {
       const room = this.crossingGap(lane[i]!,s[i]!);
       let si = s[i]! + Math.min(vi * DT,room);
       if (vi*DT >= room) v[i]=0;
+      V.laneDelay[i] += Math.max(0, DT - (si - s[i]!) / this.laneSpeed[lane[i]!]!);
       let L = lane[i]!;
       const d = dest[i]!;
       for (;;) {
@@ -622,6 +631,7 @@ export class World {
         }
         si -= this.laneLen[L]!;
         if (this.signalGroups[nh]! >= 0) this.enteredAt[nh] = this.tick;
+        V.laneDelay[i] = 0;
         L = nh;
       }
       s[i] = si;
@@ -635,12 +645,14 @@ export class World {
   }
 
   private spawn(): void {
+    const clock = this.minute() % 1440;
+    const rush = (clock >= 390 && clock < 570) || (clock >= 960 && clock < 1140);
     for (const sp of this.spawners) {
       // Always draw both numbers so the random stream does not depend on traffic state.
       const arrival = this.rng.next();
       const pick = this.rng.next();
       if (!this.admissionsOpen) continue;
-      if (arrival >= sp.rate * DT || sp.destinations.length === 0) continue;
+      if (arrival >= (rush ? sp.rate : sp.offPeakRate ?? sp.rate) * DT || sp.destinations.length === 0) continue;
       if (this.laneMinRear[sp.lane]! < SPAWN_SPACING) continue;
       const dest = sp.destinations[Math.floor(pick * sp.destinations.length)]!;
       // Enter no faster than allows a comfortable stop behind whoever is already on the lane.

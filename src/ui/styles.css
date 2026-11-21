@@ -239,3 +239,9 @@ button.bulldoze.active, button.bulldoze.active:hover { background: #904731; }
   .tool-tray .tool { min-width: 58px; }
   .hud .placement-info .mouse-help { display: none; }
 }
+
+.traffic-key { font-size: 12px; }
+.traffic-key > div { display: flex; gap: 10px; }
+.traffic-key span { display: inline-flex; align-items: center; gap: 4px; text-transform: capitalize; }
+.traffic-key i { width: 9px; height: 9px; border-radius: 50%; }
+.traffic-key p { margin: 5px 0; }

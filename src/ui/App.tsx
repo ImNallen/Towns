@@ -1,3 +1,4 @@
+import { PALETTE } from '../render/palette';
 import { Disclosure } from './Disclosure';
 import { BUDGET } from '../sim/town/economy';
 import { ROAD_ORDER, ROAD_TYPES, type RoadType } from '../sim/network/roadTypes';
@@ -61,6 +62,9 @@ export function App({ game }: { game: Game }) {
   const [speed, setSpeed] = useState(game.speed());
   const [lastSpeed, setLastSpeed] = useState(speed || 1);
   const [occupancy, setOccupancy] = useState(false);
+  const [trafficVisible, setTrafficVisible] = useState(false);
+  const traffic = game.traffic();
+  const jam = traffic && traffic.jam >= 0 ? game.approachName(traffic.jam) : null;
   const [lanes, setLanes] = useState(game.showLanes());
 
   useEffect(() => {
@@ -220,6 +224,10 @@ export function App({ game }: { game: Game }) {
     <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m2 7 8-4 8 4-8 4zM2 10l8 4 8-4M2 13l8 4 8-4" /></svg><span>Views</span>
   </button>;
   const viewsTray = tray === 'Views' && <div className="tool-tray panel" role="group" aria-label="Map overlays">
+    <label className="toggle"><input type="checkbox" checked={trafficVisible} onChange={e => {
+      setTrafficVisible(e.target.checked);
+      game.setTrafficView(e.target.checked);
+    }} />Traffic view</label>
     {town && <label className="toggle"><input type="checkbox" checked={occupancy} onChange={e => {
       setOccupancy(e.target.checked);
       game.setParkingView(e.target.checked);
@@ -243,7 +251,7 @@ export function App({ game }: { game: Game }) {
             <span className="traffic-status"><i className={speed > 0 && (!editor || editor.connected) && !editor?.pending ? 'running' : ''} aria-hidden="true" />{tripStatus}</span>
           </div>
         </section>
-        {town && <TownPanel town={town} />}
+        {town && <TownPanel town={town} jam={jam} />}
       </div>
 
       <div className="hud-column right">
@@ -257,6 +265,11 @@ export function App({ game }: { game: Game }) {
                 <button key={s} className={speed === s ? 'active' : ''} onClick={() => changeSpeed(s)} aria-label={`${s}× speed`} aria-pressed={speed === s} title={`${s}× speed (${i + 1})`}>{s}×</button>
               ))}
             </div>
+          {trafficVisible && <div className="traffic-key">
+            <div>{(['free', 'slow', 'jammed'] as const).map(level => <span key={level}>
+              <i style={{ background: PALETTE.traffic[level] }} />{level}</span>)}</div>
+            {traffic && traffic.worst >= 0 && <p>◎ {game.approachName(traffic.worst)} · {traffic.queue[traffic.worst]} queuing</p>}
+          </div>}
             <details className="traffic-details">
               <summary>Traffic details</summary>
               <dl>

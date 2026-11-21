@@ -9,6 +9,8 @@ export interface Demand {
   lane: number;
   /** Mean arrivals per second. */
   rate: number;
+  /** Optional lower demand outside the morning and evening commute. */
+  offPeakRate?: number;
 }
 
 export interface House {

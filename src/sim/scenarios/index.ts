@@ -1,3 +1,4 @@
+import { millStreet } from './millStreet';
 import { meadowScenario } from './meadow';
 import { roundaboutTown } from './roundabout';
 import { straightRoad } from './straight';
@@ -5,6 +6,7 @@ import type { Scenario } from './types';
 
 export const SCENARIOS = {
   meadow: meadowScenario,
+  mill: millStreet,
   roundabout: roundaboutTown,
   straight: straightRoad,
 } as const satisfies Record<string, () => Scenario>;
