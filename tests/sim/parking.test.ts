@@ -40,6 +40,18 @@ describe('parking', () => {
     expect(walkMinutes(15)).toBe(11);
   });
 
+  it('keeps extra cars on the apron when side bays belong to a disconnected street', () => {
+    const westParking = meadowScenario([{ upgrade: 0, roadType: 'parking' }]);
+    const world = new World(westParking, 1);
+    for (let tick = 0; tick < 10 * 28800; tick++) world.step();
+    const town = world.townView()!;
+    const east = town.households.filter(h => h.region === 'Eastford');
+    expect(east.some(h => h.cars === 2 && h.drivewayOverflow === 1)).toBe(true);
+    expect(east.every(h => !h.parked.includes('street'))).toBe(true);
+    expect(town.bays.some(b => b.kind === 'street' && b.x < 0)).toBe(true);
+    expect(world.stats().lost).toBe(0);
+  });
+
   it('requires the whole frontage, quotes the invoice, and refunds the lot on undo', () => {
     const plan = planZoneStroke(cells, new Map(), 'parking', lotCells);
     if (!plan.ok) throw new Error(plan.reason);
@@ -107,6 +119,7 @@ describe('parking', () => {
         if (!queued) continue;
         waiting = queued.home;
         expect(queued.unloading).toBe(false);
+        expect(Math.hypot(queued.kerb.x-queued.loadingBay.x,queued.kerb.y-queued.loadingBay.y)).toBeGreaterThan(10.8);
         expect(businesses.some(b => b.unloading && b.loadingBay.x === queued.loadingBay.x && b.loadingBay.y === queued.loadingBay.y)).toBe(true);
       } else if (businesses.some(b => b.home === waiting && b.unloading)) {
         expect(world.stats().lost).toBe(0);

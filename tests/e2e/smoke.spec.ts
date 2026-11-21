@@ -374,7 +374,7 @@ test('drivers park on a street with side bays', async ({ page }) => {
   await page.mouse.move(0, 0);
   await page.evaluate(() => window.__towns!.setSpeed(360));
   await page.waitForFunction(() => {
-    if (!window.__towns!.town()!.bays.some(b => b.kind === 'street' && b.model)) return false;
+    if (window.__towns!.town()!.bays.filter(b => b.kind === 'street' && b.model).length < 2) return false;
     window.__towns!.setSpeed(0);
     return true;
   }, null, { timeout: 55_000 });

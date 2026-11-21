@@ -2,7 +2,7 @@ import { decodeCellKey } from '../zoning/cells';
 import { Parking, sameEntrance, WALK_LIMIT, walkMinutes, type Bay } from './parking';
 import type { AccessPoint } from '../traffic/routing';
 import type { Vec2 } from '../math/vec';
-import { Model } from '../../vehicles/catalogue';
+import { Model, vehicleType } from '../../vehicles/catalogue';
 import { BUDGET, ECONOMY } from './economy';
 import { Treasury, type BudgetView } from './budget';
 import { ZONE_KINDS, type ZoneKind } from '../zoning/paint';
@@ -153,6 +153,7 @@ export interface BusinessView {
   turnedAway: number;
   unloading: boolean;
   waitingAtKerb: boolean;
+  kerb: { x: number; y: number; angle: number };
   loadingBay: { x: number; y: number; angle: number };
   customers: number;
 }
@@ -281,7 +282,7 @@ export class Town {
   private turnedAway = 0;
   private walkMetres = 0;
 
-  constructor(spec: TownSpec, homeDest: number, seed: number, routing: Routing, readonly parking: Parking, houses: Vec2[], starterHomes = spec.homes.length) {
+  constructor(spec: TownSpec, homeDest: number, seed: number, private readonly routing: Routing, readonly parking: Parking, houses: Vec2[], starterHomes = spec.homes.length) {
     this.spec = spec;
     this.homeDest = homeDest;
     this.rng = new Rng((seed ^ TOWN_SEED) >>> 0);
@@ -718,6 +719,9 @@ export class Town {
       if (this.parking.occupant[i]! >= 0) continue;
       if (b.home === h && b.kind === 'driveway') { best = i; break; }
       if (b.kind !== 'street') continue;
+      const homeAccess = this.spec.homes[h]!.access;
+      if (!sameEntrance(homeAccess, b.access) && (this.routing.bestAccess(homeAccess, this.parking.firstDest + i) < 0
+        || this.routing.bestAccess(b.access, this.homeDest + h) < 0)) continue;
       const dx = door.x - b.x, dy = door.y - b.y;
       const d = dx * dx + dy * dy;
       if (d < distance) { best = i; distance = d; }
@@ -1271,8 +1275,13 @@ export class Town {
       const zone = lotZone(lot);
       if (zone === 'residential') throw new Error('A residence cannot be an open business');
       budget.today[zone] += this.dailyTax(h);
+      const loadingBay = this.loadingPose[h]!;
+      // Leave room for a lorry using the shared entrance while the next driver waits.
+      const clearance = vehicleType(Model.Lorry).length + 1;
+      const kerb = { x: loadingBay.x - Math.cos(loadingBay.angle) * clearance,
+        y: loadingBay.y - Math.sin(loadingBay.angle) * clearance, angle: loadingBay.angle };
       businesses.push({ lastDailyCost: this.lastDailyCost[h]!, taxesPaid: this.taxesPaid[h]!, home: h, lot: visibleLot(lot), name: this.placeName(r), zone,
-        deliveries: this.deliveries[h]!, unloading: this.freightState[h] === UNLOADING, waitingAtKerb: this.freightState[h] === WAIT_KERB, loadingBay: this.loadingPose[h]!,
+        deliveries: this.deliveries[h]!, unloading: this.freightState[h] === UNLOADING, waitingAtKerb: this.freightState[h] === WAIT_KERB, loadingBay, kerb,
         occupied: this.parking.bays.filter((b, i) => b.home === h && this.parking.occupant[i]! >= 0).length,
         capacity: this.parking.bays.filter(b => b.home === h).length, turnedAway: this.denied[h]!,
         jobs: lotJobs(lot), filled: this.filled[r]!, customers: this.customers[h]! });

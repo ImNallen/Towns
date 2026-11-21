@@ -89,13 +89,9 @@ export class VehicleLayer {
     }
     for (const business of this.businesses) {
       if (!business.unloading && !business.waitingAtKerb) continue;
-      const { streetX, streetY, angle, x, y } = business.lot;
       const model = business.zone === 'shops' ? Model.DeliveryVan : Model.Lorry;
-      const inset = 4.6 / Math.hypot(x - streetX, y - streetY);
       const half = vehicleType(model).length / 2;
-      const bay = business.waitingAtKerb
-        ? { x: streetX + (x - streetX) * inset, y: streetY + (y - streetY) * inset, angle }
-        : business.loadingBay;
+      const bay = business.waitingAtKerb ? business.kerb : business.loadingBay;
       this.place(model, vehicleType(model).colours[0], bay.x + Math.cos(bay.angle) * half, bay.y + Math.sin(bay.angle) * half, bay.angle);
     }
     for (const batch of this.batches) {
