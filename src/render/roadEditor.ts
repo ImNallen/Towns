@@ -5,7 +5,7 @@ import { editCost, shortage } from '../sim/town/budget';
 import * as THREE from 'three';
 import { offsetPolyline, polyline, slicePolyline, type Polyline } from '../sim/math/polyline';
 import { add, scale, distance, dot, projectOntoSegment, type Vec2 } from '../sim/math/vec';
-import { MEADOW_BUILD_BOUNDS, MEADOW_ROAD_WIDTH, planWalk, meadowScenario, meadowLayout, meadowNetwork, meadowRoadSections, upgradeFailure, snapToMeadowStreet, planMeadowRoad, isZoneStroke, type MeadowEdit } from '../sim/scenarios/meadow';
+import { MEADOW_ROAD_WIDTH, meadowNetwork, meadowRoadSections, planMeadowRoad, isZoneStroke, type EditableMap, type MeadowEdit } from '../sim/scenarios/meadow';
 import { angleGuide, crossingAngleGuide, fitGuideToStreet, squareStreetGuide, type StreetPoint, type AngleGuide } from '../sim/network/angleSnap';
 import { JUNCTION_MOUTH } from '../sim/network/streets';
 import { cellsAlong, type CellKey, type ZoneCells } from '../sim/zoning/cells';
@@ -85,8 +85,8 @@ function roadMarker(): THREE.Group {
   return marker;
 }
 
-function buildBoundary(): THREE.Mesh {
-  const { minX, maxX, minY, maxY } = MEADOW_BUILD_BOUNDS;
+function buildBoundary(map: EditableMap): THREE.Mesh {
+  const { minX, maxX, minY, maxY } = map.MEADOW_BUILD_BOUNDS;
   const curb = MEADOW_ROAD_WIDTH / 2;
   const corners = [
     { x: minX - curb, y: minY - curb }, { x: maxX + curb, y: minY - curb },
@@ -127,7 +127,7 @@ export class RoadEditor {
   private hint = '';
   private readonly abort = new AbortController();
   private readonly handles = new THREE.Group();
-  private readonly boundary = buildBoundary();
+  private readonly boundary: THREE.Mesh;
   private readonly hover = roadMarker();
   private cost: number | null = null;
   private preview: THREE.Group | null = null;
@@ -141,7 +141,9 @@ export class RoadEditor {
     private readonly send: (msg: ToWorker) => void,
     private readonly setRoadVisibility: (visible: boolean) => void,
     private readonly houses: HousePicker,
+    private readonly map: EditableMap,
   ) {
+    this.boundary = buildBoundary(map);
     const { signal } = this.abort;
     canvas.dataset.tool = this.tool;
     this.hover.visible = false;
@@ -227,7 +229,7 @@ export class RoadEditor {
     this.cells = cells;
     this.zoning = zoning;
     this.roadCount = edits.filter((edit) => 'points' in edit).length;
-    const layout = meadowLayout(edits);
+    const layout = this.map.meadowLayout(edits);
     this.streets = layout.streets;
     this.segments = layout.segments;
     this.segmentTypes = layout.segmentTypes;
@@ -305,7 +307,7 @@ export class RoadEditor {
   }
 
   private snap(p: Vec2, extraReach = 0): StreetPoint | undefined {
-    return snapToMeadowStreet(this.streets, p, this.reach() + extraReach);
+    return this.map.snapToMeadowStreet(this.streets, p, this.reach() + extraReach);
   }
 
   private segmentAt(cursor: Vec2): number | null {
@@ -328,16 +330,16 @@ export class RoadEditor {
     this.highlightedSegment = segment;
     this.hint = segment === null ? '' : 'Click to remove this segment.';
     if (segment !== null && this.tool === 'upgrade') {
-      const reason = upgradeFailure(this.edits, segment, this.roadType);
+      const reason = this.map.upgradeFailure(this.edits, segment, this.roadType);
       if (reason) {
         this.hint = reason;
         return;
       }
       const edit = { upgrade: segment, roadType: this.roadType };
-      this.preview = buildRoads(meadowNetwork([...this.edits, edit]), 'dashed');
+      this.preview = buildRoads(this.map.meadowNetwork([...this.edits, edit]), 'dashed');
       this.scene.add(this.preview);
       this.setRoadVisibility(false);
-      this.cost = editCost(this.edits, edit);
+      this.cost = editCost(this.edits, edit, this.map);
       this.hint = shortage(this.balance, this.cost) ?? 'Click to change this segment to ' + ROAD_TYPES[this.roadType].name + '.';
     } else if (segment !== null) this.guide(polyline(this.segments[segment]!), PALETTE.editorInvalid, MEADOW_ROAD_WIDTH);
   }
@@ -348,7 +350,7 @@ export class RoadEditor {
       const target = snap ?? this.snap(cursor, MEADOW_ROAD_WIDTH / 2);
       const square = target && squareStreetGuide(host, target);
       if (square) {
-        const landing = snapToMeadowStreet(this.streets, square.end, 1e-6);
+        const landing = this.map.snapToMeadowStreet(this.streets, square.end, 1e-6);
         if (landing?.kind === 'street' && landing.street === target.street
           && Math.abs(dot(landing.tangent, square.direction)) < 1e-6) return square;
       }
@@ -365,7 +367,7 @@ export class RoadEditor {
           : heading < -1 + 1e-6;
         if (!straightArrival) guide = undefined;
       }
-      if (guide && !snapToMeadowStreet(this.streets, guide.end, 1e-6)) guide = undefined;
+      if (guide && !this.map.snapToMeadowStreet(this.streets, guide.end, 1e-6)) guide = undefined;
     }
     return guide;
   }
@@ -397,7 +399,7 @@ export class RoadEditor {
       return;
     }
     if (this.tool === 'footpath' || this.tool === 'zebra') {
-      this.phase = { kind: 'walk', tool: this.tool, start: cursor, network: meadowScenario(this.edits).network, id: e.pointerId };
+      this.phase = { kind: 'walk', tool: this.tool, start: cursor, network: this.map.meadowScenario(this.edits).network, id: e.pointerId };
       this.canvas.setPointerCapture(e.pointerId);
       this.point(e,false);
       return;
@@ -467,14 +469,14 @@ export class RoadEditor {
     if (this.tool === 'pan') return;
     if (phase.kind === 'walk') {
       if (phase.id !== e.pointerId) return;
-      const plan = planWalk(phase.network,phase.tool,phase.start,cursor,{cells:this.cells,zoning:this.zoning});
+      const plan = this.map.planWalk(phase.network,phase.tool,phase.start,cursor,{cells:this.cells,zoning:this.zoning});
       this.clearPreview();
       if (typeof plan === 'string') {
         if (release) this.finish();
         this.hint = plan;
         return;
       }
-      this.cost = editCost(this.edits,plan);
+      this.cost = editCost(this.edits, plan, this.map);
       this.guide(polyline([plan.a,plan.b]),PALETTE.editorHandle,plan.walk === 'zebra' ? 3 : 1.8);
       this.hint = 'Release to build ' + (plan.walk === 'zebra' ? 'the zebra crossing.' : 'the footpath.');
       if (release) {
@@ -512,7 +514,7 @@ export class RoadEditor {
         this.hint = plan.reason;
         return;
       }
-      const reason = shortage(this.balance, editCost(this.edits, plan.stroke));
+      const reason = shortage(this.balance, editCost(this.edits, plan.stroke, this.map));
       if (reason) {
         this.hint = reason;
         return;
@@ -575,8 +577,8 @@ export class RoadEditor {
   }
 
   private place(start: Vec2, end: Vec2, bend: Vec2 | undefined, release: boolean, hint: string, alignment?: AngleGuide): void {
-    let plan = planMeadowRoad(this.edits, start, end, bend, this.roadType);
-    const cost = plan.ok ? editCost(this.edits, plan.road) : 0;
+    let plan = this.map.planMeadowRoad(this.edits, start, end, bend, this.roadType);
+    const cost = plan.ok ? editCost(this.edits, plan.road, this.map) : 0;
     const reason = shortage(this.balance, cost);
     if (reason && plan.ok) plan = { ok: false, reason, points: plan.road.points };
     this.clearPreview();
@@ -599,7 +601,7 @@ export class RoadEditor {
     }
     this.cost = cost;
     this.hint = alignment ? `${alignment.label} · ${hint}` : hint;
-    const preview = buildRoads(meadowNetwork([...this.edits, plan.road]), 'dashed');
+    const preview = buildRoads(this.map.meadowNetwork([...this.edits, plan.road]), 'dashed');
     const edges = new FlatMesh(0.19);
     const atJunction = (p: Vec2) => fourWays.some(({ point }) => distance(point, p) < 1e-6)
       || (alignment?.label === '90° at both ends' && (distance(p, start) < 1e-6 || distance(p, end) < 1e-6))
@@ -645,7 +647,7 @@ export class RoadEditor {
       this.hint = plan.reason;
       return;
     }
-    const cost = editCost(this.edits, plan.stroke);
+    const cost = editCost(this.edits, plan.stroke, this.map);
     const n = plots(plan.stroke.cells.length);
     this.hint = zone ? `${action} to zone ${n} ${zone}.` : `${action} to clear ${n}.`;
     if (zone === 'park') this.hint = action + ' to build a park · $' + plan.stroke.cells.length * BUDGET.parkUpkeep + '/day.';
@@ -659,7 +661,7 @@ export class RoadEditor {
 
   private chain(start: Vec2): void {
     this.finish();
-    this.phase = { kind: 'chaining', host: snapToMeadowStreet(this.streets, start, 1e-6), start, id: null };
+    this.phase = { kind: 'chaining', host: this.map.snapToMeadowStreet(this.streets, start, 1e-6), start, id: null };
     this.hint = CHAIN_HINT;
   }
 

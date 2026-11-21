@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import type { Vec2 } from '../sim/math/vec';
 import type { Network } from '../sim/network/types';
 import type { ScenarioName } from '../sim/scenarios';
-import { meadowZoning, type MeadowEdit } from '../sim/scenarios/meadow';
+import { editableScenario, meadowZoning, type MeadowEdit } from '../sim/scenarios/meadow';
 import type { TownView } from '../sim/town/town';
 import type { SimStats } from '../sim/world';
 import type { ZoneCells } from '../sim/zoning/cells';
@@ -36,6 +36,7 @@ export interface GameOptions {
 }
 
 export interface Game {
+  townName: string;
   save(): Promise<string>;
   load(json: string): Promise<void>;
   cancelLoad(): void;
@@ -138,14 +139,17 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   const send = (msg: ToWorker): void => worker.postMessage(msg);
 
   let scenarioName: string = options.scenario;
-  const makeEditor = () => new RoadEditor(canvas, mapCamera, scene, send, (visible) => {
+  const makeEditor = (name: string) => {
+    const map = editableScenario(name);
+    return map ? new RoadEditor(canvas, mapCamera, scene, send, (visible) => {
     if (roadLayer) roadLayer.visible = visible;
   }, {
     houseAt: (p) => (latestTown ? houses?.houseAt(p) ?? null : null),
     select: selectHouse,
-  });
+  }, map) : null;
+  };
 
-  if (scenarioName === 'meadow') editor = makeEditor();
+  editor = makeEditor(scenarioName);
 
   const drawNetwork = (network: Network): void => {
     if (roadLayer) disposeLayer(roadLayer);
@@ -212,7 +216,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
       if (ready) {
         editor?.dispose();
         scenarioName = scenario.name;
-        editor = scenarioName === 'meadow' ? makeEditor() : null;
+        editor = makeEditor(scenarioName);
       }
       decor = buildDecor(scenario.decor);
       scene.add(decor);
@@ -294,6 +298,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   raf = requestAnimationFrame(frame);
 
   const game: Game = {
+    townName: options.scenario === 'valley' ? 'North Valley' : 'Meadow Vale',
     save: () => new Promise(resolve => {
       const id = ++requestId;
       saves.set(id, resolve);

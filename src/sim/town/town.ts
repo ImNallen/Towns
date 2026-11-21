@@ -597,8 +597,8 @@ export class Town {
       for (const a of this.spec.homes[h]!.access) density += roads.traffic.noiseDensity[a.lane]!;
       this.noise[h] = clamp01((density - QUALITY.peacefulDensity) / QUALITY.noisyDensity);
     }
+    if (minute % (this.spec.growthInterval ?? 60) === 0) this.grow(minute, roads.routing);
     if (minute % 60 === 0) {
-      this.grow(minute, roads.routing);
       this.updateWalkAccess();
     }
     const clock = minute % MINUTES_PER_DAY;

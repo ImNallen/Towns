@@ -246,7 +246,7 @@ export function App({ game }: { game: Game }) {
           <header className="map-heading">
             <span className="wordmark">Towns</span>
           </header>
-          <h1>{editor ? 'Meadow Vale' : 'Traffic study'}</h1>
+          <h1>{editor ? game.townName : 'Traffic study'}</h1>
           {editor && <div className={`objective${editor.connected ? ' is-complete' : ''}`}>
             <span className="objective-marker" aria-hidden="true">{editor.connected ? '✓' : '○'}</span>
             <h2>{editor.connected ? 'Neighborhoods connected' : 'Connect the two neighborhoods'}</h2>

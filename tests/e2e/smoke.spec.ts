@@ -712,3 +712,10 @@ test('autosaves with the tray closed and can cancel a long import', async ({ pag
   await expect(menu.getByRole('status')).toHaveText('Load cancelled.');
   expect(await page.evaluate(() => window.__towns!.save())).toBe(original);
 });
+
+test('North Valley opens with an editable starter street and three entrances', async ({page}) => {
+  await page.goto('/?scenario=valley&speed=0');
+  await expect(page.getByRole('heading', {name:'North Valley'})).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.__towns?.town()?.households.length)).toBe(0);
+  await page.screenshot({path:'artifacts/screens/valley-empty.png'});
+});
