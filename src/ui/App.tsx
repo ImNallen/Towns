@@ -108,6 +108,13 @@ export function App({ game }: { game: Game }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      if (tray && e.key === 'Escape') {
+        // Dismiss the tray before the map editor receives Escape and cancels the road draft.
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        setTray(null);
+        return;
+      }
       if (e.target instanceof HTMLElement && (e.target.isContentEditable || e.target.closest('input, textarea, select'))) return;
       if (e.metaKey || e.ctrlKey) {
         if (editor && e.key.toLowerCase() === 'z' && !e.shiftKey) {
@@ -118,7 +125,6 @@ export function App({ game }: { game: Game }) {
       }
       if (e.altKey || e.repeat) return;
       if (e.key === 'Escape') {
-        if (tray) { setTray(null); return; }
         // Esc finishes a road in progress first; the next one closes the household card.
         if (selected !== null && !editor?.chaining && !editor?.canCancel) selectHouse(null);
       } else if (editor?.tool === 'zone' && ['h', 's', 'w', 'e'].includes(e.key.toLowerCase())) {
@@ -148,8 +154,8 @@ export function App({ game }: { game: Game }) {
         toggleLanes();
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   });
 
   const instruction = editor?.hint || (editor?.pending

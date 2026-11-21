@@ -33,6 +33,11 @@ test('click a road end, then click point after point to keep building the same s
   await click(west!);
   await expect.poll(editor).toMatchObject({ chaining: true, roadCount: 0, hint: CHAIN_HINT });
   await expect(page.getByText('Esc finishes')).toBeVisible();
+  const roads = page.getByRole('button', { name: 'Roads', exact: true });
+  await roads.click();
+  await page.keyboard.press('Escape');
+  await expect(roads).toHaveAttribute('aria-expanded', 'false');
+  await expect.poll(editor).toMatchObject({ chaining: true, roadCount: 0 });
 
   const points = [{ x: -10, y: -8 }, { x: 20, y: 6 }, { x: 50, y: 30 }];
   for (const [i, point] of points.entries()) {
