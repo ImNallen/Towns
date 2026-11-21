@@ -7,6 +7,7 @@ import { NetworkBuilder } from '../network/builder';
 import { streetCrossings, throughArms, type StreetCrossing } from '../network/junctions';
 import { buildStreetNetwork } from '../network/streets';
 import type { Network } from '../network/types';
+import { ECONOMY } from '../town/economy';
 import type { AccessPoint } from '../traffic/routing';
 import { buildZoneCells, type CellKey, type RoadIndex, type ZoneCells, type ZoneRoad } from '../zoning/cells';
 import type { ZoneKind, ZoneStroke, Zoning } from '../zoning/paint';
@@ -39,8 +40,8 @@ const SMOOTH_NODE = 0.95;
  * plenty of better-paid ones, so connecting the neighbourhoods raises West incomes.
  */
 const REGIONS: readonly Omit<RegionSpec, 'sink' | 'source'>[] = [
-  { name: 'Westbrook', wage: 16, jobs: 4, groceryPrice: 6 },
-  { name: 'Eastford', wage: 30, jobs: 14, groceryPrice: 6 },
+  { name: 'Westbrook', wage: ECONOMY.westbrookWage, jobs: 4, groceryPrice: ECONOMY.regionalGroceryPrice },
+  { name: 'Eastford', wage: ECONOMY.eastfordWage, jobs: 14, groceryPrice: ECONOMY.regionalGroceryPrice },
 ];
 const BOUNDS: Bounds = { minX: -180, maxX: 180, minY: -115, maxY: 115 };
 const BUILD_MARGIN = WIDTH / 2 + 2;
@@ -360,7 +361,7 @@ function meadowWithoutZones(replay: Replay): Scenario {
   }
   for (const surface of driveways.build().surfaces) network.surfaces.push({ ...surface, id: network.surfaces.length });
   const regions = REGIONS.map((region, i) => ({ ...region, sink: i, source: entries[i]! }));
-  return { name: 'meadow', network, demand, bounds: { ...BOUNDS }, decor, town: { homes, regions } };
+  return { name: 'meadow', network, demand, bounds: { ...BOUNDS }, decor, town: { homes, regions, roadMetres: replay.sections.reduce((n, s) => n + s.to - s.from, 0) } };
 }
 
 /** Where a driveway at `p` meets each directional road lane passing it. */

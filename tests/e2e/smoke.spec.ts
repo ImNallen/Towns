@@ -168,4 +168,46 @@ test('businesses grow beside homes on a mixed street', async ({ page }) => {
   await expect(page.getByRole('region', {name: 'Business'})).toContainText(shop.name);
   await page.screenshot({path: 'artifacts/screens/mixed-street.png'});
   await page.getByRole('region', {name: 'Zone demand'}).screenshot({path: 'artifacts/screens/zone-demand.png'});
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => window.__towns!.setSpeed(120));
+  await expect.poll(async () => (await town()).day, {timeout: 100_000}).toBeGreaterThanOrEqual(4);
+  await page.evaluate(() => window.__towns!.setSpeed(0));
+  await page.locator('.budget summary').click();
+  await expect(page.locator('.budget')).toContainText('Day 3');
+  await page.screenshot({path: 'artifacts/screens/budget-day-four.png'});
+});
+
+test('road quote, salvage and insufficient funds agree with the HUD', async ({ page }) => {
+  await page.goto('/?scenario=meadow&seed=1&speed=0&x=0&y=0&mpp=0.24');
+  const balance = () => page.evaluate(() => window.__towns?.town()?.budget.balance);
+  await expect.poll(balance).toBe(6000);
+  const box = (await page.locator('#map').boundingBox())!;
+  const at = (x: number, y: number) =>
+    [box.x + box.width / 2 + x / 0.24, box.y + box.height / 2 - y / 0.24] as const;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const before = (await balance())!;
+    await page.keyboard.press('r');
+    await page.mouse.move(...at(45, 8));
+    await page.mouse.down();
+    await page.mouse.move(...at(-45, -8), { steps: 8 });
+    if (attempt === 0) {
+      await expect(page.locator('.preview-cost')).toContainText('Costs $');
+      await page.screenshot({path: 'artifacts/screens/budget-road-quote.png'});
+    }
+    await expect(page.locator('.preview-cost, [role=status]').filter({hasText: /Costs \$/}).first()).toBeVisible();
+    if (await page.evaluate(() => window.__towns!.editor()!.hint.includes('you have'))) {
+      await page.screenshot({path: 'artifacts/screens/budget-refused.png'});
+      await page.mouse.up();
+      await expect(page.getByRole('status')).toContainText('you have');
+      expect(await balance()).toBe(before);
+      return;
+    }
+    await page.mouse.up();
+    await expect.poll(balance).toBeLessThan(before);
+    const built = (await balance())!;
+    await page.keyboard.press('b');
+    await page.mouse.click(...at(0, 0));
+    await expect.poll(balance).toBeGreaterThan(built);
+  }
+  throw new Error('Repeated construction and salvage should exhaust the budget');
 });

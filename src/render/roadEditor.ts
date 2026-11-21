@@ -1,3 +1,5 @@
+import { BUDGET } from '../sim/town/economy';
+import { editCost, shortage } from '../sim/town/budget';
 import * as THREE from 'three';
 import { offsetPolyline, polyline, slicePolyline, type Polyline } from '../sim/math/polyline';
 import { add, scale, distance, dot, projectOntoSegment, type Vec2 } from '../sim/math/vec';
@@ -22,6 +24,7 @@ export interface EditorState {
   hint: string;
   pending: boolean;
   canCancel: boolean;
+  cost: number | null;
   canUndo: boolean;
   angleSnapping: boolean;
   chaining: boolean;
@@ -91,6 +94,14 @@ function buildBoundary(): THREE.Mesh {
 }
 
 export class RoadEditor {
+  private balance: number = BUDGET.startingBalance;
+
+  setBalance(balance: number): void {
+    if (balance === this.balance) return;
+    this.balance = balance;
+    if (this.phase.kind !== 'idle' || this.canvas.matches(':hover')) this.move ??= this.pointer;
+  }
+
   private edits: readonly MeadowEdit[] = [];
   private cells: ZoneCells = { count: 0, keys: new Float64Array(), corners: new Float64Array() };
   private zoning: Zoning = new Map();
@@ -108,6 +119,7 @@ export class RoadEditor {
   private readonly handles = new THREE.Group();
   private readonly boundary = buildBoundary();
   private readonly hover = roadMarker();
+  private cost: number | null = null;
   private preview: THREE.Group | null = null;
   private move: PointerEvent | null = null;
   private pointer: PointerEvent | null = null;
@@ -148,7 +160,7 @@ export class RoadEditor {
   state(): EditorState {
     const kind = this.phase.kind;
     return {
-      tool: this.tool, hint: this.hint, roadCount: this.roadCount, connected: this.connected,
+      tool: this.tool, cost: this.cost, hint: this.hint, roadCount: this.roadCount, connected: this.connected,
       angleSnapping: this.angleSnapping, chaining: kind === 'chaining',
       pending: kind === 'pending' || kind === 'waiting',
       canCancel: kind === 'bending' || kind === 'waiting',
@@ -426,6 +438,11 @@ export class RoadEditor {
         this.hint = plan.reason;
         return;
       }
+      const reason = shortage(this.balance, editCost(this.edits, plan.stroke));
+      if (reason) {
+        this.hint = reason;
+        return;
+      }
       this.phase = { kind: 'pending' };
       this.hint = phase.zone ? 'Zoning plots…' : 'Clearing plots…';
       this.send({ type: 'paintZone', zone: phase.zone, cells: [...phase.touched] });
@@ -482,13 +499,16 @@ export class RoadEditor {
   }
 
   private place(start: Vec2, end: Vec2, bend: Vec2 | undefined, release: boolean, hint: string, alignment?: AngleGuide): void {
-    const plan = planMeadowRoad(this.edits, start, end, bend);
+    let plan = planMeadowRoad(this.edits, start, end, bend);
+    const cost = plan.ok ? editCost(this.edits, plan.road) : 0;
+    const reason = shortage(this.balance, cost);
+    if (reason && plan.ok) plan = { ok: false, reason, points: plan.road.points };
     this.clearPreview();
     if (!plan.ok) {
       if (distance(start, end) > 0.1) {
         this.guide(polyline(plan.points ?? (bend ? [start, bend, end] : [start, end])), PALETTE.editorInvalid, plan.points ? MEADOW_ROAD_WIDTH : 0);
       }
-      this.hint = !release && this.phase.kind === 'drawing' && this.tool === 'curve' ? hint : plan.reason;
+      this.hint = !reason && !release && this.phase.kind === 'drawing' && this.tool === 'curve' ? hint : plan.reason;
     }
     if (release) {
       this.release(plan, start, end, bend);
@@ -501,6 +521,7 @@ export class RoadEditor {
       const count = fourWays.length === 1 ? 'a four-way intersection' : `${fourWays.length} four-way intersections`;
       hint = `${this.phase.kind === 'chaining' ? 'Click' : 'Release'} to build ${count}.`;
     }
+    this.cost = cost;
     this.hint = alignment ? `${alignment.label} · ${hint}` : hint;
     const preview = buildRoads(meadowNetwork([...this.edits, plan.road]), 'dashed');
     const edges = new FlatMesh(0.19);
@@ -548,8 +569,12 @@ export class RoadEditor {
       this.hint = plan.reason;
       return;
     }
+    const cost = editCost(this.edits, plan.stroke);
     const n = plots(plan.stroke.cells.length);
     this.hint = zone ? `${action} to zone ${n} ${zone}.` : `${action} to clear ${n}.`;
+    const reason = shortage(this.balance, cost);
+    if (reason) this.hint = reason;
+    else this.cost = cost;
     this.preview = buildStrokePreview(this.cells, plan.stroke);
     this.scene.add(this.preview);
   }
@@ -600,6 +625,7 @@ export class RoadEditor {
   }
 
   private clearPreview(): void {
+    this.cost = null;
     if (this.preview) disposeLayer(this.preview);
     this.preview = null;
     this.highlightedSegment = null;

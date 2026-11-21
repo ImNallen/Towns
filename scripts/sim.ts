@@ -9,8 +9,10 @@
 import { decodeCellKey, type CellKey } from '../src/sim/zoning/cells';
 import type { ZoneKind } from '../src/sim/zoning/paint';
 import { parseArgs } from 'node:util';
-import { buildScenario, isScenarioName, SCENARIOS, type Scenario } from '../src/sim/scenarios';
+import { buildScenario, isScenarioName, SCENARIOS } from '../src/sim/scenarios';
 import { meadowScenario, meadowTips, planMeadowRoad } from '../src/sim/scenarios/meadow';
+import { BUDGET } from '../src/sim/town/economy';
+import { editCost } from '../src/sim/town/budget';
 import type { TownView } from '../src/sim/town/town';
 import { DT, World, type SimStats } from '../src/sim/world';
 
@@ -56,6 +58,9 @@ const town = (view: TownView): string => {
   return [
     `  town day ${view.day} ${clock}`,
     `homes=${view.households.length}`,
+    `balance=${view.budget.balance}`,
+    `taxes=${view.budget.yesterday.homes}/${view.budget.yesterday.shops}/${view.budget.yesterday.workplaces}`,
+    `upkeep=${view.budget.yesterday.upkeep}`,
     `people=${t.population}`,
     `employed=${t.employed}/${t.adults}`,
     `local=${t.localWorkers}`,
@@ -74,18 +79,24 @@ const town = (view: TownView): string => {
 };
 
 /** Meadow Vale with one road joining the two neighbourhoods. */
-function connectedMeadow(): Scenario {
+function connectingRoad() {
   const [west, east] = meadowTips([]);
   const road = planMeadowRoad([], west!, east!);
   if (!road.ok) throw new Error(road.reason);
-  return meadowScenario([road.road]);
+  return road.road;
 }
 
 if (values.connect && scenarioName !== 'meadow') {
   console.error('--connect only applies to --scenario meadow');
   process.exit(1);
 }
-const world = new World(values.connect ? connectedMeadow() : buildScenario(scenarioName), seed);
+const road = values.connect ? connectingRoad() : undefined;
+const world = new World(road ? meadowScenario([road]) : buildScenario(scenarioName), seed);
+function pay(cost: number): void {
+  const reason = world.treasury!.book(cost);
+  if (reason) throw new Error(reason);
+}
+if (road) pay(editCost([], road));
 if (values.paint !== undefined) {
   if (values.paint !== 'homes' && values.paint !== 'mixed') throw new Error('--paint expects homes or mixed');
   const cells = world.scenario.zones;
@@ -97,6 +108,7 @@ if (values.paint !== undefined) {
     const band = (column + side * 2) % 6;
     zoning.set(key, values.paint === 'homes' || band < 3 ? 'residential' : band === 3 ? 'shops' : 'workplaces');
   }
+  pay(zoning.size * BUDGET.zonePerCell);
   world.setZoning(zoning);
 }
 const started = performance.now();

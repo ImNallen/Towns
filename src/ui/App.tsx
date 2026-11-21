@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Game } from '../render/game';
 import { ZONE_KINDS, type ZoneKind } from '../sim/zoning/paint';
-import { dayClock, HouseholdCard, TownPanel } from './town';
+import { BudgetPanel, money, dayClock, HouseholdCard, TownPanel } from './town';
 
 const SPEEDS = [1, 2, 4, 8] as const;
 type Editor = ReturnType<Game['editor']>;
@@ -161,12 +161,15 @@ export function App({ game }: { game: Game }) {
             <div className="performance">{fps.toFixed(0)} fps</div>
           </details>
         </section>
+        {town && <BudgetPanel town={town} />}
         {business && <section className="household panel" aria-label="Business">
           <div className="panel-heading">{business.zone === 'shops' ? 'Shop' : 'Workplace'}
             <button className="close" onClick={() => selectHouse(null)} aria-label="Close business card">×</button>
           </div>
           <h2 className="household-name">{business.name}</h2>
           <dl><dt>Jobs filled</dt><dd>{business.filled} / {business.jobs}</dd>
+            <dt>Yesterday’s wages and taxes</dt><dd>{money(business.lastDailyCost)}</dd>
+            <dt>Taxes paid to date</dt><dd>{money(business.taxesPaid)}</dd>
             <dt>Customers today</dt><dd>{business.customers}</dd></dl>
         </section>}
         {household && <HouseholdCard household={household} onClose={() => selectHouse(null)} />}
@@ -174,6 +177,7 @@ export function App({ game }: { game: Game }) {
 
       {editor && <section className="editor" aria-label="Road editor">
         <div className="placement-info panel">
+          {editor.cost !== null && <strong className="preview-cost">Costs {money(editor.cost)}</strong>}
           <p role="status" aria-live="polite">{instruction}</p>
           {editor.canCancel && editor.pending && speed === 0 && <button className="cancel-edit" onClick={() => changeSpeed(lastSpeed)}>Resume traffic</button>}
           {editor.canCancel && <button className="cancel-edit" onClick={() => game.cancelRoadEdit()}>Cancel edit</button>}
