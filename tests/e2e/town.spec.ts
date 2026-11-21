@@ -12,17 +12,10 @@ test('residents commute, a household card opens on click, and a new road sends t
   await page.goto('/?speed=8');
   const town = () => page.evaluate(() => window.__towns?.town() ?? null);
   const selected = () => page.evaluate(() => window.__towns?.selectedHouse() ?? null);
-  const box = await page.locator('#map').boundingBox();
-  if (!box) throw new Error('Map canvas is missing');
   const scenario = meadowScenario();
-  const b = scenario.bounds;
-  const mpp = Math.max((b.maxX - b.minX) / box.width, (b.maxY - b.minY) / box.height) * 0.95;
-  const screen = (p: Vec2) => ({
-    x: box.x + box.width / 2 + (p.x - (b.minX + b.maxX) / 2) / mpp,
-    y: box.y + box.height / 2 - (p.y - (b.minY + b.maxY) / 2) / mpp,
-  });
+  const screen = (p: Vec2) => page.evaluate(point => window.__towns!.worldToScreen(point), p);
   const click = async (p: Vec2) => {
-    const at = screen(p);
+    const at = await screen(p);
     await page.mouse.click(at.x, at.y);
   };
   const residents = page.getByRole('region', { name: 'Residents' });
@@ -51,7 +44,7 @@ test('residents commute, a household card opens on click, and a new road sends t
   await click({ x: 0, y: -60 });
   await expect.poll(selected).toBeNull();
 
-  const [westTip, eastTip] = meadowTips([]).map(screen);
+  const [westTip, eastTip] = await Promise.all(meadowTips([]).map(screen));
   await page.getByRole('button', { name: 'Build road', exact: true }).click();
   await page.mouse.move(eastTip!.x, eastTip!.y);
   await page.mouse.down();
@@ -68,7 +61,7 @@ test('residents commute, a household card opens on click, and a new road sends t
   await page.getByRole('button', { name: '8× speed' }).click();
   // Everyone bound for Eastford leaves along the east street.
   await expect.poll(async () => (await town())?.households.flatMap((h) => h.members).filter((m) => m.activity === 'outbound' && m.place === 'Eastford').length ?? 0).toBeGreaterThan(2);
-  const street = screen({ x: 120, y: 8 });
+  const street = await screen({ x: 120, y: 8 });
   await page.mouse.move(street.x, street.y);
   await page.mouse.wheel(0, -450);
   await page.screenshot({ path: 'artifacts/screens/town-cars.png' });
@@ -76,7 +69,7 @@ test('residents commute, a household card opens on click, and a new road sends t
   const commuters = (await town())!.households.filter(h => h.region === 'Westbrook' && h.members.some(m => m.job === 'Eastford'));
   let commuter;
   for (const candidate of commuters) {
-    const point = screen(scenario.decor.houses[candidate.home]!);
+    const point = await screen(scenario.decor.houses[candidate.home]!);
     if (await page.evaluate(p => document.elementFromPoint(p.x, p.y)?.id === 'map', point)) { commuter = candidate; break; }
   }
   expect(commuter).toBeDefined();
@@ -92,7 +85,7 @@ test('residents commute, a household card opens on click, and a new road sends t
   const upgraded = (await town())!.households.find((h) => h.level > 1);
   if (upgraded) {
     await click(scenario.decor.houses[upgraded.home]!);
-    const at = screen(scenario.decor.houses[upgraded.home]!);
+    const at = await screen(scenario.decor.houses[upgraded.home]!);
     await page.mouse.move(at.x, at.y);
     await page.mouse.wheel(0, -500);
     await page.screenshot({ path: 'artifacts/screens/town-upgraded-house.png' });

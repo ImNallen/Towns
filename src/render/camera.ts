@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { Vec2 } from '../sim/math/vec';
 import type { Bounds } from '../sim/scenarios/types';
 
 const MIN_MPP = 0.04;
@@ -59,6 +60,30 @@ export class MapCamera {
       x: this.centerX + (px - this.width / 2) * this.mpp,
       y: this.centerY - (py - this.height / 2) * this.mpp,
     };
+  }
+
+  worldToScreen(p: Vec2): Vec2 {
+    return { x: this.width / 2 + (p.x - this.centerX) / this.mpp, y: this.height / 2 - (p.y - this.centerY) / this.mpp };
+  }
+
+  screenBounds(b: Bounds): DOMRect {
+    const origin = this.worldToScreen({ x: b.minX, y: b.maxY });
+    return new DOMRect(
+      origin.x, origin.y,
+      (b.maxX - b.minX) / this.mpp,
+      (b.maxY - b.minY) / this.mpp,
+    );
+  }
+
+  /** Pan just enough to show the outlined parcel in the clear part of the map. */
+  reveal(b: Bounds, area: DOMRect): void {
+    if (area.width <= 0 || area.height <= 0) return;
+    this.mpp = Math.max(this.mpp, (b.maxX - b.minX) / area.width, (b.maxY - b.minY) / area.height);
+    const rect = this.screenBounds(b);
+    const x = Math.max(area.left, Math.min(rect.left, area.right - rect.width));
+    const y = Math.max(area.top, Math.min(rect.top, area.bottom - rect.height));
+    this.centerX += (rect.left - x) * this.mpp;
+    this.centerY -= (rect.top - y) * this.mpp;
   }
 
   dispose(): void {

@@ -2,6 +2,7 @@ import { WalkerLayer } from './walkers';
 import type { RoadType } from '../sim/network/roadTypes';
 import { SUN_DIRECTION, SUN_INTENSITY, AMBIENT_INTENSITY } from './lighting';
 import * as THREE from 'three';
+import type { Vec2 } from '../sim/math/vec';
 import type { Network } from '../sim/network/types';
 import type { ScenarioName } from '../sim/scenarios';
 import { meadowZoning, type MeadowEdit } from '../sim/scenarios/meadow';
@@ -47,6 +48,9 @@ export interface Game {
   town(): TownView | null;
   /** Index into `scenario.decor.houses` (= `HouseholdView.home`) of the inspected house. */
   selectedHouse(): number | null;
+  selectedParcelOnScreen(): DOMRect | null;
+  worldToScreen(point: Vec2): Vec2;
+  revealSelectedParcel(area: DOMRect): void;
   selectHouse(house: number | null): void;
   fps(): number;
   speed(): number;
@@ -251,6 +255,9 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     town: () => latestTown,
     selectedHouse: () => selectedHouse,
     selectHouse,
+    worldToScreen: point => mapCamera.worldToScreen(point),
+    selectedParcelOnScreen: () => houses?.selectedBounds ? mapCamera.screenBounds(houses.selectedBounds) : null,
+    revealSelectedParcel: area => { if (houses?.selectedBounds) mapCamera.reveal(houses.selectedBounds, area); },
     fps: () => fps,
     speed: () => speed,
     setSpeed(next) {
