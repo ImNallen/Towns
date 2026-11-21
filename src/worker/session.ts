@@ -4,7 +4,6 @@ import { planZoneStroke } from '../sim/zoning/paint';
 import { editCost, shortage, undoCost } from '../sim/town/budget';
 import { World } from '../sim/world';
 import type { FromWorker } from './protocol';
-
 import type { EditCommand, ReplayEvent, TownSave, InitialTown } from './save';
 
 export const CAPACITY = 4096;
@@ -146,14 +145,28 @@ export function createSession(initial: InitialTown, post: (msg: FromWorker) => v
   };
 }
 
-export function replay(save: TownSave, notify: (msg: FromWorker) => void = () => {}): Session {
+export async function replay(save: TownSave, notify: (msg: FromWorker) => void = () => {}, signal?: AbortSignal): Promise<Session> {
   let live = false;
   const session = createSession({ scenario: save.scenario, seed: save.seed, walkLimit: save.walkLimit }, msg => { if (live) notify(msg); });
-  for (const { tick, command } of save.events) {
-    while (session.world.tick < tick) session.world.step();
-    session.command(command);
+  let nextYield = performance.now() + 40;
+  let index = 0;
+  while (true) {
+    const event = save.events[index];
+    const until = event?.tick ?? save.tick;
+    // Give the worker a chance to receive Cancel even for an imported, very distant tick.
+    const end = Math.min(until, session.world.tick + 2048);
+    while (session.world.tick < end) session.world.step();
+    if (session.world.tick === until) {
+      if (!event) break;
+      session.command(event.command);
+      index++;
+    }
+    if (performance.now() >= nextYield) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+      signal?.throwIfAborted();
+      nextYield = performance.now() + 40;
+    }
   }
-  while (session.world.tick < save.tick) session.world.step();
   live = true;
   return session;
 }

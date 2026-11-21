@@ -38,6 +38,7 @@ export interface GameOptions {
 export interface Game {
   save(): Promise<string>;
   load(json: string): Promise<void>;
+  cancelLoad(): void;
   walkerPositions(): Float32Array;
   editor(): EditorState | null;
   setAngleSnapping(enabled: boolean): void;
@@ -144,6 +145,8 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     select: selectHouse,
   });
 
+  if (scenarioName === 'meadow') editor = makeEditor();
+
   const drawNetwork = (network: Network): void => {
     if (roadLayer) disposeLayer(roadLayer);
     if (laneOverlay) disposeLayer(laneOverlay);
@@ -206,9 +209,11 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
       parkingSignature = '';
       latestTown = null;
       selectedHouse = null;
-      editor?.dispose();
-      scenarioName = scenario.name;
-      editor = scenarioName === 'meadow' ? makeEditor() : null;
+      if (ready) {
+        editor?.dispose();
+        scenarioName = scenario.name;
+        editor = scenarioName === 'meadow' ? makeEditor() : null;
+      }
       decor = buildDecor(scenario.decor);
       scene.add(decor);
       houses = new HouseLayer(scenario.decor.houses);
@@ -294,6 +299,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
       saves.set(id, resolve);
       send({ type: 'save', id });
     }),
+    cancelLoad: () => send({ type: 'cancelLoad' }),
     load: json => new Promise((resolve, reject) => {
       const id = ++requestId;
       loads.set(id, { resolve, reject });

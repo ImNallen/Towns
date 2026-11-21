@@ -7,6 +7,7 @@ export function SaveMenu({ game, open }: { game: Game; open: boolean }) {
   const [auto, setAuto] = useState('Autosaves every minute');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(false);
   const file = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const timer = setInterval(async () => {
@@ -23,7 +24,11 @@ export function SaveMenu({ game, open }: { game: Game; open: boolean }) {
     setMessage('Working…');
     try { await work(); setMessage(success); }
     catch (error) { setMessage(error instanceof Error ? error.message : 'Could not complete that action.'); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setLoading(false); }
+  }
+  function load(json: string) {
+    setLoading(true);
+    return game.load(json);
   }
   if (!open) return null;
   return <section className="panel save-menu" aria-label="Town saves">
@@ -32,15 +37,16 @@ export function SaveMenu({ game, open }: { game: Game; open: boolean }) {
         {slots.map(name => <option key={name}>{name}</option>)}
       </select>
       <button disabled={slot === 'Autosave'} onClick={() => run(async () => browserSaves.write(slot, await game.save()), slot + ' saved.')}>Save</button>
-      <button onClick={() => run(() => game.load(browserSaves.read(slot)), slot + ' loaded.')}>Load</button>
+      <button onClick={() => run(() => load(browserSaves.read(slot)), slot + ' loaded.')}>Load</button>
       <button onClick={() => run(async () => browserSaves.exportFile(await game.save()), 'Exported town.')}>Export</button>
       <button onClick={() => file.current?.click()}>Import</button>
       <input ref={file} hidden type="file" aria-label="Import town file" accept=".json,application/json" onChange={e => {
         const selected = e.target.files?.[0];
         e.target.value = '';
-        if (selected) void run(async () => game.load(await browserSaves.importFile(selected)), 'Imported town.');
+        if (selected) void run(async () => load(await browserSaves.importFile(selected)), 'Imported town.');
       }} />
     </fieldset>
+    {loading && <button onClick={() => game.cancelLoad()}>Cancel load</button>}
     <small>{auto}</small> <span role="status">{message}</span>
   </section>;
 }

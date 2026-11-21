@@ -9,6 +9,7 @@ const MAX_STEPS_PER_PUMP = 40;
 const TOWN_INTERVAL = 250;
 
 let session: Session;
+let loading: AbortController | null = null;
 let speed = 1;
 let accumulator = 0;
 let last = performance.now();
@@ -37,7 +38,7 @@ function ready(): void {
   postTown(session.world);
 }
 
-self.onmessage = (e: MessageEvent<ToWorker>) => {
+self.onmessage = async (e: MessageEvent<ToWorker>) => {
   const msg = e.data;
   switch (msg.type) {
     case 'init':
@@ -45,16 +46,25 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       speed = msg.speed;
       ready();
       break;
-    case 'load':
+    case 'cancelLoad':
+      loading?.abort(new Error('Load cancelled.'));
+      break;
+    case 'load': {
+      loading?.abort(new Error('Another town was opened.'));
+      const controller = new AbortController();
+      loading = controller;
       try {
-        session = replay(parseSave(msg.json), notify);
+        session = await replay(parseSave(msg.json), notify, controller.signal);
         ready();
         post({ type: 'loaded', id: msg.id });
       } catch (error) {
         last = performance.now();
         post({ type: 'loadError', id: msg.id, reason: error instanceof Error ? error.message : 'Invalid save.' });
+      } finally {
+        if (loading === controller) loading = null;
       }
       break;
+    }
     case 'save':
       post({ type: 'saved', id: msg.id, json: JSON.stringify(session.save()) });
       break;
@@ -62,7 +72,8 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       speed = msg.speed;
       break;
     default:
-      session.command(msg);
+      if (loading) post({ type: 'editRejected', reason: 'Wait for the town to load.' });
+      else session.command(msg);
   }
 };
 
@@ -87,7 +98,7 @@ setInterval(() => {
   const now = performance.now();
   const elapsed = Math.min((now - last) / 1000, 0.25);
   last = now;
-  if (!session || speed <= 0) return;
+  if (loading || !session || speed <= 0) return;
   const world = session.world;
   accumulator += elapsed * speed;
   let steps = 0;

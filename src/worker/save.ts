@@ -2,7 +2,7 @@ import { ROAD_TYPES } from '../sim/network/roadTypes';
 import { isScenarioName, type ScenarioName } from '../sim/scenarios';
 import type { ToWorker } from './protocol';
 
-export type EditCommand = Exclude<ToWorker, { type: 'init' | 'save' | 'load' | 'setSpeed' }> | { type: 'retry' };
+export type EditCommand = Exclude<ToWorker, { type: 'init' | 'save' | 'load' | 'cancelLoad' | 'setSpeed' }> | { type: 'retry' };
 export interface InitialTown { scenario: ScenarioName; seed: number; walkLimit?: number }
 export interface ReplayEvent { tick: number; command: EditCommand }
 export interface TownSave extends InitialTown { version: 1; tick: number; events: ReplayEvent[] }
@@ -36,9 +36,10 @@ export function parseSave(json: string): TownSave {
   if (typeof data.scenario !== 'string' || !isScenarioName(data.scenario) || !finite(data.seed)
     || !(data.walkLimit === undefined || (finite(data.walkLimit) && data.walkLimit >= 0))
     || !integer(data.tick) || !Array.isArray(data.events)) throw new Error('Invalid town save settings.');
+  const finalTick = data.tick;
   let previous = 0;
   const events: ReplayEvent[] = data.events.map((event: unknown) => {
-    if (!record(event) || !integer(event.tick) || event.tick < previous || event.tick > Number(data.tick) || !command(event.command))
+    if (!record(event) || !integer(event.tick) || event.tick < previous || event.tick > finalTick || !command(event.command))
       throw new Error('Invalid town edit history.');
     previous = event.tick;
     return { tick: event.tick, command: event.command };

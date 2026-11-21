@@ -10,6 +10,7 @@ import type { LandUse } from '../sim/zoning/paint';
 
 /** Main thread → simulation worker. */
 export type ToWorker =
+  | { type: 'cancelLoad' }
   | { type: 'load'; id: number; json: string }
   | { type: 'save'; id: number }
   | { type: 'init'; walkLimit?: number; scenario: ScenarioName; seed: number; speed: number }

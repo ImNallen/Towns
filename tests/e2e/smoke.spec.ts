@@ -676,6 +676,7 @@ test('saves a paused town across a page reload and a file round trip', async ({ 
   await toggle.click();
   await menu.getByRole('button', { name: 'Load', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Meadow Vale' })).toBeVisible();
+  await expect(menu.getByRole('status')).toHaveText('Town 1 loaded.');
   await expect.poll(() => page.evaluate(() => window.__towns!.save())).toBe(saved);
   await page.goto('/?scenario=meadow&seed=2&speed=0');
   await page.setViewportSize({ width: 390, height: 844 });
@@ -689,4 +690,25 @@ test('saves a paused town across a page reload and a file round trip', async ({ 
   });
   await expect(menu.getByRole('status')).toContainText('Unsupported town save version');
   expect(await page.evaluate(() => window.__towns!.save())).toBe(saved);
+});
+
+test('autosaves with the tray closed and can cancel a long import', async ({ page }) => {
+  await page.clock.install();
+  await page.goto('/?scenario=meadow&speed=0');
+  await expect(page.locator('.town')).toBeVisible();
+  const original = await page.evaluate(() => window.__towns!.save());
+  await page.clock.fastForward(61000);
+  await page.getByRole('button', { name: 'Save and load' }).click();
+  const menu = page.getByRole('region', { name: 'Town saves' });
+  await expect(menu).toContainText('Autosaved at');
+  await menu.getByLabel('Save slot').selectOption('Autosave');
+  await menu.getByRole('button', { name: 'Load', exact: true }).click();
+  await expect(menu.getByRole('status')).toHaveText('Autosave loaded.');
+  const distant = { ...JSON.parse(original), tick: Number.MAX_SAFE_INTEGER };
+  await menu.getByLabel('Import town file').setInputFiles({
+    name: 'long.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(distant)),
+  });
+  await menu.getByRole('button', { name: 'Cancel load' }).click();
+  await expect(menu.getByRole('status')).toHaveText('Load cancelled.');
+  expect(await page.evaluate(() => window.__towns!.save())).toBe(original);
 });
