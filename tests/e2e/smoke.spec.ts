@@ -234,3 +234,25 @@ test('rear gardens and service yards on a mature mixed street', async ({ page })
   await page.evaluate(() => window.__towns!.setSpeed(0));
   await page.screenshot({path: 'artifacts/screens/mature-mixed.png'});
 });
+
+test('erasing a rear row updates the occupied garden while paused', async ({ page }) => {
+  const { at, editor } = await connectedStreet(page);
+  const rear = at(2, -24);
+  await page.mouse.click(...rear);
+  await expect.poll(editor).toMatchObject({ pending: false, zoned: 4 });
+  await page.getByRole('button', { name: 'Pan' }).click();
+  await page.evaluate(() => window.__towns!.setSpeed(120));
+  await expect.poll(() => page.evaluate(() => window.__towns!.town()!.households.some(h => h.lot)), { timeout: 30_000 }).toBe(true);
+  await page.evaluate(() => window.__towns!.setSpeed(0));
+  await page.mouse.click(...rear);
+  const household = page.getByRole('region', { name: 'Household' });
+  await expect(household).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('z');
+  await page.getByRole('radio', { name: 'Erase' }).click();
+  await page.mouse.click(...rear);
+  await expect.poll(editor).toMatchObject({ pending: false, zoned: 3 });
+  await page.getByRole('button', { name: 'Pan' }).click();
+  await page.mouse.click(...rear);
+  expect(await page.evaluate(() => window.__towns!.selectedHouse())).toBeNull();
+});
