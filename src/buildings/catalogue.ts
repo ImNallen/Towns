@@ -19,6 +19,7 @@ const finishes = {
   expensive: { walls: ['chalk', 'stone', 'rose', 'celadon', 'brick'], roofs: ['charcoal', 'moss', 'slate', 'terracotta'] },
 } as const satisfies Record<Tier, Swatches>;
 
+const industrial: Swatches = { walls: ['precast', 'blueConcrete', 'aluminium'], roofs: ['zinc', 'gunmetal', 'galvalume'] };
 const modern: Swatches = { walls: ['chalk', 'mist', 'stone', 'celadon'], roofs: ['charcoal', 'tan', 'slate'] };
 
 function design(id: string, name: string, tier: Tier, columns: number, rows: number, parts: Part[],
@@ -26,8 +27,22 @@ function design(id: string, name: string, tier: Tier, columns: number, rows: num
   return { id, name, zone: 'residential', tier, density: 'low', lot: { columns, rows }, ...swatches, parts, ...(upgradesTo ? { upgradesTo } : {}) };
 }
 
+type Slab = Extract<Part, { kind: 'slab' }>;
+const slab = (finish: Slab['finish'], x: number, y: number, width: number, depth: number, base: number, height: number): Slab =>
+  ({ kind: 'slab', finish, x, y, width, depth, base, height });
+
+function loadingBay(x: number, front: number, width: number): Part[] {
+  return [slab('grille', x, front, width, 0.16, 0.4, 2),
+    slab('flashing', x, front - 0.45, width + 0.3, 1, 0.1, 0.35)];
+}
+
+function timberStack(x: number, y: number): Part[] {
+  return [slab('timber', x, y, 4.4, 1.35, 0.1, 0.85),
+    ...[-1.25, 1.25].map(dx => slab('strap', x + dx, y, 0.18, 1.37, 0.95, 0.04))];
+}
+
 function business(id: string, name: string, zone: 'shops' | 'workplaces', size: number, parts: Part[]): Blueprint {
-  return { ...design(id, name, 'cheap', size, size, parts), zone, ...(zone === 'shops' ? finishes.mid : modern) };
+  return { ...design(id, name, 'cheap', size, size, parts), zone, ...(zone === 'shops' ? finishes.mid : industrial) };
 }
 
 /** Authored footprints, not random combinations. Compact designs keep every 1–4 cell lot usable. */
@@ -62,10 +77,39 @@ export const BLUEPRINTS: readonly Blueprint[] = [
   business('fresh-grocer', 'Orchard Grocer', 'shops', 2, [block(-1, 1, 9, 6, flat, 4), awning(-1, -2.9, 9, 2), garage(4.8, 3)]),
   business('arcade', 'Market Row', 'shops', 2, [-4, 0, 4].flatMap(x => [block(x, 1, 3.8, 7, gable('y'), 4), awning(x, -3.1, 3.6)])),
   business('flower-shop', 'Meadow Florist', 'shops', 2, [block(-2, 1, 6, 7, hip()), wing(3, 2, 4, 5, gable('y')), awning(-2, -3.2, 5.8), hedge(3, -3, 5, 1), tree(5, 5)]),
-  business('fern-workshop', 'Fern Workshop', 'workplaces', 1, [block(-0.8, 0, 3.5, 5.5, gable('y')), garage(1.8, 1, 1.6, 3.5)]),
-  business('survey-office', 'Vale Survey Office', 'workplaces', 1, [block(0, 0.5, 5.2, 4.4, flat, 4.6), porch(-1, -2.2), tree(2.5, -2.6, 0.6)]),
-  business('kiln', 'Willow Pottery', 'workplaces', 1, [block(0, 0, 4.7, 5, gable()), chimney(-1.4, 1.5)]),
-  business('warehouse', 'Depot Warehouse', 'workplaces', 2, [block(0, 1, 11, 7, gable(), 4.8), porch(0, -3, 10, 2)]),
-  business('timber-yard', 'Birch Timber Yard', 'workplaces', 2, [garage(-4, 2, 3.6, 7), garage(1, 3, 4, 5), block(4, -3, 3, 4, flat)]),
-  business('studios', 'Station Studios', 'workplaces', 2, [block(-2, 0, 6, 9, flat, 5), wing(3, 2, 4, 5, flat), tree(4, -4)]),
+  business('fern-workshop', 'Fern Workshop', 'workplaces', 1, [
+    block(0, 0.6, 6.3, 4.9, { kind: 'sawtooth', bays: 3, rise: 0.95 }, 3.3),
+    ...loadingBay(-1.3, -1.85, 2.6),
+  ]),
+  business('survey-office', 'Vale Survey Office', 'workplaces', 1, [
+    block(-0.25, 0.9, 5.9, 4.5, flat, 4.1),
+    slab('glass', -1.6, 1, 0.95, 3.4, 4.35, 0.14),
+    { kind: 'condenser', x: 1, y: 1.5, base: 4.35, radius: 0.7 },
+    ...[-2.8, -0.7, 1.4].map(x => slab('marking', x, -2.5, 0.13, 1.7, 0.06, 0.02)),
+  ]),
+  business('kiln', 'Willow Pottery', 'workplaces', 1, [
+    block(-0.45, 0.8, 5.3, 4.8, flat, 3.4),
+    { kind: 'flue', x: -1.6, y: 1.2, base: 3.65, radius: 0.85 },
+    { kind: 'flue', x: 0.65, y: 1.2, base: 3.65, radius: 0.65 },
+    ...loadingBay(-0.4, -1.6, 2.6),
+  ]),
+  business('warehouse', 'Depot Warehouse', 'workplaces', 2, [
+    block(0, 1.6, 12.4, 8, flat, 4.8),
+    ...[-2, 0.3, 2.6].map(y => slab('glass', 0, y + 1.5, 9.8, 0.7, 5.05, 0.14)),
+    ...loadingBay(-3.4, -2.4, 3.4), ...loadingBay(3.4, -2.4, 3.4),
+    ...[-5.3, -1.5, 1.5, 5.3].map(x => slab('marking', x, -5, 0.14, 3.6, 0.06, 0.02)),
+  ]),
+  business('timber-yard', 'Birch Timber Yard', 'workplaces', 2, [
+    block(-4.7, 1.3, 3.7, 9.6, flat, 3), block(1.7, 4.6, 6.8, 2.4, flat, 2.5),
+    ...[-2.8, -0.65, 1.5].flatMap(y => timberStack(2.4, y)),
+    slab('grille', 6.7, 0.2, 0.18, 12.7, 0.08, 1.4),
+    slab('grille', 4.5, -6.1, 4.5, 0.18, 0.08, 1.4),
+    slab('grille', -4.7, -6.1, 3.7, 0.18, 0.08, 1.4),
+  ]),
+  business('studios', 'Station Studios', 'workplaces', 2, [
+    block(-1.8, 1.5, 8.6, 8.4, { kind: 'sawtooth', bays: 3, rise: 1.3 }, 4.1),
+    block(4.45, 3.4, 3.7, 4.5, flat, 3.1),
+    { kind: 'condenser', x: 4.5, y: 3.7, base: 3.35, radius: 0.8 },
+    ...loadingBay(-2, -2.7, 3.6),
+  ]),
 ];

@@ -56,7 +56,7 @@ export class PreviewRenderer {
     const finishes = catalogueVariants(blueprint);
     const instances = finishes.map((variant, i) => {
       const x = (i - (finishes.length - 1) / 2) * pitch;
-      ground(group, x, 0, width, depth, PALETTE.gardens[0]);
+      ground(group, x, 0, width, depth, blueprint.zone === 'workplaces' ? PALETTE.building.industrial.apron : PALETTE.gardens[0]);
       return { blueprint, variant, x, y: 0, angle: 0 };
     });
     group.add(buildBuildingLayer(instances));

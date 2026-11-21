@@ -37,6 +37,27 @@ export function buildingGeometry(blueprint: Blueprint, variant: Variant): THREE.
           add(box(p.width + 0.3, 0.25, p.depth + 0.3), PALETTE.building.roofs[variant.roof], p.x, p.height + 0.125, p.y);
           break;
         }
+        if (p.roof.kind === 'sawtooth') {
+          // Each bay has a broad metal pitch and a steep glazed northlight.
+          const pitch = p.width / p.roof.bays;
+          const peak = pitch * 0.68;
+          const rise = p.roof.rise;
+          const section = new THREE.Shape();
+          section.moveTo(0, 0);
+          section.lineTo(peak, rise);
+          section.lineTo(pitch, 0);
+          section.closePath();
+          for (let i = 0; i < p.roof.bays; i++) {
+            const left = p.x - p.width / 2 + i * pitch;
+            const roof = new THREE.ExtrudeGeometry(section, { depth: p.depth, bevelEnabled: false });
+            add(roof, PALETTE.building.roofs[variant.roof], left, p.height, p.y + p.depth / 2);
+            const run = pitch - peak;
+            const pane = box(Math.hypot(run, rise) * 0.90, 0.08, p.depth - 0.24);
+            pane.rotateZ(-Math.atan2(rise, run));
+            add(pane, PALETTE.building.industrial.glass, left + peak + run / 2, p.height + rise / 2 + 0.05, p.y);
+          }
+          break;
+        }
         const alongX = p.roof.ridge === 'x';
         const length = (alongX ? p.width : p.depth) + 0.6;
         const span = (alongX ? p.depth : p.width) + 0.6;
@@ -48,6 +69,19 @@ export function buildingGeometry(blueprint: Blueprint, variant: Variant): THREE.
         roof.setAttribute('position', new THREE.Float32BufferAttribute([a,e,b,b,e,f,b,f,c,c,f,d,d,f,e,d,e,a].flat(), 3));
         if (!alongX) roof.rotateY(Math.PI / 2);
         add(roof, PALETTE.building.roofs[variant.roof], p.x, p.height, p.y);
+        break;
+      }
+      case 'slab':
+        add(box(p.width, p.height, p.depth), PALETTE.building.industrial[p.finish], p.x, p.base + p.height / 2, p.y);
+        break;
+      case 'condenser': case 'flue': {
+        const { radius, base } = p;
+        const flue = p.kind === 'flue';
+        const height = flue ? 1.7 : 0.65;
+        const body = flue ? new THREE.CylinderGeometry(radius, radius, height, 16) : box(radius * 2.5, height, radius * 2.5);
+        add(body, PALETTE.building.industrial.flashing, p.x, base + height / 2, p.y);
+        add(new THREE.CylinderGeometry(radius * 0.75, radius * 0.75, 0.06, 16), PALETTE.building.industrial.grille,
+          p.x, base + height + 0.03, p.y);
         break;
       }
       case 'awning': {

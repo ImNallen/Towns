@@ -139,14 +139,18 @@ export class HouseLayer {
     disposeLayer(this.grownLayer);
     const instances: BuildingInstance[] = [];
     const gardens = new FlatMesh(0.042);
+    // Paving covers the driveway ribbon inside the parcel, leaving the kerb entrance visible.
+    const yards = new FlatMesh(0.054);
     const driveways = new FlatMesh(0.048);
     for (const lot of grown.values()) {
-      instances.push({ ...lot, blueprint: BLUEPRINTS.find(b => b.id === lot.design)! });
-      gardens.polygon(lot.corners);
+      const blueprint = BLUEPRINTS.find(b => b.id === lot.design)!;
+      instances.push({ ...lot, blueprint });
+      const surface = blueprint.zone === 'workplaces' ? yards : gardens;
+      surface.polygon(lot.corners);
       driveways.ribbon(polyline([{ x: lot.streetX, y: lot.streetY }, lot]), 2.4);
     }
     this.grownLayer = buildBuildingLayer(instances);
-    for (const [mesh, colour] of [[gardens, PALETTE.gardens[0]], [driveways, PALETTE.roadSurface]] as const) {
+    for (const [mesh, colour] of [[gardens, PALETTE.gardens[0]], [yards, PALETTE.building.industrial.apron], [driveways, PALETTE.roadSurface]] as const) {
       if (mesh.empty) continue;
       const ground = new THREE.Mesh(mesh.build(), flatMaterial(colour));
       ground.receiveShadow = true;
