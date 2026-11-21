@@ -32,6 +32,29 @@ test('map renders and traffic flows', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('mixed vehicles share the road between the neighbourhoods', async ({ page }) => {
+  const mpp = 0.15;
+  await page.goto('/?scenario=meadow&seed=1&speed=0&x=15&y=0&mpp=0.15');
+  await expect.poll(() => page.evaluate(() => window.__towns?.editor()?.pending)).toBe(false);
+  const box = (await page.locator('#map').boundingBox())!;
+  const at = (x: number, y: number) =>
+    [box.x + box.width / 2 + (x - 15) / mpp, box.y + box.height / 2 - y / mpp] as const;
+  await page.mouse.move(...at(45, 8));
+  await page.mouse.down();
+  await page.mouse.move(...at(-45, -8), { steps: 16 });
+  await page.mouse.up();
+  await expect.poll(() => page.evaluate(() => window.__towns?.editor()?.connected)).toBe(true);
+  await page.getByRole('button', { name: 'Pan', exact: true }).click();
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => window.__towns!.setSpeed(40));
+  await page.waitForFunction(() => {
+    if ((window.__towns!.stats()?.active ?? 0) < 18) return false;
+    window.__towns!.setSpeed(0);
+    return true;
+  });
+  await page.screenshot({path: 'artifacts/screens/mixed-vehicles.png'});
+});
+
 test('painted plots read at map zoom', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -183,12 +206,6 @@ test('businesses grow beside homes on a mixed street', async ({ page }) => {
   await expect(page.locator('.budget')).toContainText('settle at midnight');
   await page.screenshot({path: 'artifacts/screens/budget-accrual.png'});
   await page.locator('.budget summary').click();
-  await page.waitForFunction(() => {
-    if ((window.__towns!.stats()?.active ?? 0) < 10) return false;
-    window.__towns!.setSpeed(0);
-    return true;
-  });
-  await page.screenshot({path: 'artifacts/screens/mixed-vehicles.png'});
   // Pause in the browser as soon as a delivery is unloading, before the next worker frame.
   await page.evaluate(() => window.__towns!.setSpeed(40));
   await page.waitForFunction(() => {
