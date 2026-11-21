@@ -121,6 +121,8 @@ export function App({ game }: { game: Game }) {
     : editor?.tool === 'bulldoze' ? 'Select a street segment to remove.'
     : editor?.tool === 'upgrade' ? 'Choose a road type, then click a segment.'
     : editor?.tool === 'curve' ? 'Drag between two points, then place the bend.'
+            : editor?.tool === 'footpath' ? 'Drag across open ground to connect walking routes.'
+            : editor?.tool === 'zebra' ? 'Click a paved street to add a zebra crossing.'
             : editor?.tool === 'parking' ? 'Choose a size, then click empty frontage beside a street.'
     : editor?.tool === 'zone' ? (editor.brush
       ? 'Drag along the plots beside a street to zone them. Plots fill in toward the street.'

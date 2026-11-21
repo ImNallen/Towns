@@ -83,7 +83,7 @@ export function buildRoads(network: Network, marking: 'dashed' | 'solid' = 'soli
   for (const link of network.pedestrianLinks ?? []) {
     if (!link.zebra) continue;
     const path = polyline([link.a, link.b]);
-    stripes.dashes(path, 3.2, 0.6, 0.55);
+    stripes.dashes(path, 3.2, 0.6, 1.15);
   }
   const group = new THREE.Group();
   group.name = 'roads';

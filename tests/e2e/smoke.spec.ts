@@ -420,6 +420,9 @@ test('a footpath joins the frontage and a zebra carries residents across the str
     await page.mouse.move(...at(endX,endY),{steps:12});
     await page.mouse.up();
   };
+  await page.keyboard.press('r');
+  await stroke(-35,8,-45,-8);
+  await expect.poll(editor).toMatchObject({connected:true,pending:false});
   await page.getByRole('button',{name:'Build footpath'}).click();
   const balance=()=>page.evaluate(()=>window.__towns!.town()!.budget.balance);
   const before=await balance();
@@ -440,7 +443,7 @@ test('a footpath joins the frontage and a zebra carries residents across the str
   await page.evaluate(()=>window.__towns!.setSpeed(200));
   await page.waitForFunction(()=>{
     const g=window.__towns!;
-    if(!g.stats()?.activeZebras || !g.stats()!.active) return false;
+    if(!g.stats()?.zebraWaits) return false;
     g.setSpeed(0);return true;
   },null,{timeout:140000});
   await page.screenshot({path:'artifacts/screens/zebra-crossing.png'});

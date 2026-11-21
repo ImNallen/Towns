@@ -37,6 +37,7 @@ const SPAWN_SPACING = IDM.minGap + 3;
 export interface SimStats {
   walkers: number;
   activeZebras: number;
+  zebraWaits: number;
   tick: number;
   /** Simulated seconds. */
   time: number;
@@ -681,6 +682,19 @@ export class World {
     this.completedPerSecond[this.lastSecond % 60]!++;
   }
 
+  private zebraWaits(): number {
+    let count=0;
+    const v=this.vehicles;
+    if (!this.walkers) return count;
+    for (const c of this.walkers.graph.crossings) {
+      if (!c.zebra || !c.occupied) continue;
+      for (const z of c.lanes) for (let i=0; i<v.highWater; i++) {
+        if (v.alive[i] && v.lane[i]===z.lane && v.v[i]!<2 && v.s[i]! <= z.from && z.from-v.s[i]!<8) count++;
+      }
+    }
+    return count;
+  }
+
   stats(): SimStats {
     const V = this.vehicles;
     let speedSum = 0;
@@ -696,6 +710,7 @@ export class World {
     return {
       tick: this._tick,
       time: this.time,
+      zebraWaits: this.zebraWaits(),
       activeZebras: this.walkers?.graph.crossings.filter(c => c.zebra && c.occupied).length ?? 0,
       walkers: this.walkers?.count ?? 0,
       active: V.count,

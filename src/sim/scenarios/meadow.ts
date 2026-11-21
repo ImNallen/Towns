@@ -371,17 +371,6 @@ export function meadowNetwork(roads: readonly MeadowEdit[]): Network {
 export function meadowScenario(roads: readonly MeadowEdit[] = []): Scenario {
   const replay = replayMeadow(roads);
   const scenario = meadowWithoutZones(replay);
-  const { lakes, hills } = scenario.decor;
-  const zones = buildZoneCells(zoneRoads(replay), {
-    surfaces: scenario.network.surfaces,
-    blobs: [...lakes, ...hills].map((blob) => ({ x: blob.x, y: blob.y, radius: blob.radius * SCENERY_REACH })),
-    bounds: MEADOW_BUILD_BOUNDS,
-  });
-  zones.gardenCells = Uint8Array.from(zones.keys, (_, i) => {
-    const q = zones.corners.subarray(i * 8, i * 8 + 8);
-    const xs = [q[0]!, q[2]!, q[4]!, q[6]!], ys = [q[1]!, q[3]!, q[5]!, q[7]!];
-    return Number(scenario.decor.houses.some(({ garden: g }) => g && Math.min(...xs) < g.maxX && Math.max(...xs) > g.minX && Math.min(...ys) < g.maxY && Math.max(...ys) > g.minY));
-  });
   for (const edit of roads) {
     if (!('walk' in edit)) continue;
     if (edit.walk === 'footpath') {
@@ -393,6 +382,17 @@ export function meadowScenario(roads: readonly MeadowEdit[] = []): Scenario {
     }
     scenario.town!.roadUpkeep! += edit.walk === 'zebra' ? 1 : Math.ceil(distance(edit.a,edit.b)*0.07);
   }
+  const { lakes, hills } = scenario.decor;
+  const zones = buildZoneCells(zoneRoads(replay), {
+    surfaces: scenario.network.surfaces,
+    blobs: [...lakes, ...hills].map((blob) => ({ x: blob.x, y: blob.y, radius: blob.radius * SCENERY_REACH })),
+    bounds: MEADOW_BUILD_BOUNDS,
+  });
+  zones.gardenCells = Uint8Array.from(zones.keys, (_, i) => {
+    const q = zones.corners.subarray(i * 8, i * 8 + 8);
+    const xs = [q[0]!, q[2]!, q[4]!, q[6]!], ys = [q[1]!, q[3]!, q[5]!, q[7]!];
+    return Number(scenario.decor.houses.some(({ garden: g }) => g && Math.min(...xs) < g.maxX && Math.max(...xs) > g.minX && Math.min(...ys) < g.maxY && Math.max(...ys) > g.minY));
+  });
   return { ...scenario, zones };
 }
 
