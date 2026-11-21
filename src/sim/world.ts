@@ -667,6 +667,8 @@ export class World {
     return V.highWater;
   }
 
+  get treasury() { return this.town?.treasury; }
+
   /** The residents, their households and the clock; null on maps without a town. Allocates. */
   townView(): TownView | null {
     return this.town?.view(this.minute()) ?? null;

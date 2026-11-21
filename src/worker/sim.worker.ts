@@ -5,6 +5,7 @@
 import { buildScenario, type Scenario } from '../sim/scenarios';
 import { isZoneStroke, meadowScenario, meadowSegments, meadowZoning, planMeadowRoad, type MeadowEdit } from '../sim/scenarios/meadow';
 import { planZoneStroke } from '../sim/zoning/paint';
+import { editCost, shortage, undoCost } from '../sim/town/budget';
 import { DT, World } from '../sim/world';
 import type { FromWorker, ToWorker } from './protocol';
 
@@ -15,7 +16,8 @@ const MAX_STEPS_PER_PUMP = 40;
 const TOWN_INTERVAL = 250;
 
 let edits: MeadowEdit[] = [];
-let waiting: { edits: MeadowEdit[]; scenario: Scenario } | null = null;
+type RoadChange = { edits: MeadowEdit[]; scenario: Scenario; cost: number };
+let waiting: RoadChange | null = null;
 let world: World | null = null;
 let speed = 1;
 let accumulator = 0;
@@ -63,12 +65,15 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
         }
         proposed = [...edits, { remove: msg.segment }];
       } else if (edits.length && isZoneStroke(edits.at(-1)!)) {
-        commitZoning(edits.slice(0, -1));
+        const next = edits.slice(0, -1);
+        commitZoning(next, undoCost(edits));
         break;
       } else {
         proposed = edits.slice(0, -1);
       }
-      const edit = { edits: proposed, scenario: meadowScenario(proposed) };
+      if (!edits.length && msg.type === 'undo') break;
+      const cost = msg.type === 'undo' ? undoCost(edits) : editCost(edits, proposed.at(-1)!);
+      const edit = { edits: proposed, scenario: meadowScenario(proposed), cost };
       if (!applyEdit(edit)) {
         waiting = edit;
         world.setAdmissions(false);
@@ -84,7 +89,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       }
       if (waiting) break;
       const plan = planZoneStroke(cells, meadowZoning(edits, cells), msg.zone, msg.cells);
-      if (plan.ok) commitZoning([...edits, plan.stroke]);
+      if (plan.ok) commitZoning([...edits, plan.stroke], editCost(edits, plan.stroke));
       else post({ type: 'editRejected', reason: plan.reason });
       break;
     }
@@ -101,8 +106,17 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
   }
 };
 
-function commitZoning(next: MeadowEdit[]): void {
+function rejectShortage(reason: string | undefined): boolean {
+  if (!reason) return false;
+  waiting = null;
+  world!.setAdmissions(true);
+  post({ type: 'editRejected', reason });
+  return true;
+}
+
+function commitZoning(next: MeadowEdit[], cost: number): void {
   if (world?.scenario.zones) {
+    if (rejectShortage(world.treasury!.book(cost))) return;
     world.setZoning(meadowZoning(next, world.scenario.zones));
     postTown(world);
     postFrame(world);
@@ -111,10 +125,12 @@ function commitZoning(next: MeadowEdit[]): void {
   post({ type: 'zoningChanged', edits });
 }
 
-function applyEdit(edit: { edits: MeadowEdit[]; scenario: Scenario }): boolean {
+function applyEdit(edit: RoadChange): boolean {
   if (!world) return false;
+  if (rejectShortage(shortage(world.treasury!.balance, edit.cost))) return true;
   const result = world.editNetwork(edit.scenario, meadowZoning(edit.edits, edit.scenario.zones!));
   if (!result.ok) return false;
+  if (rejectShortage(result.world.treasury!.book(edit.cost))) return true;
   world = result.world;
   world.setAdmissions(true);
   edits = edit.edits;

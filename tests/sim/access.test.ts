@@ -10,7 +10,7 @@ function withBuilding(): { scenario: Scenario; forward: number; backward: number
   const scenario: Scenario = {
     ...base,
     demand: [],
-    town: { homes: [{ access: [{ lane: forward, s: 400 }, { lane: backward, s: 400 }], region: 0 }], regions: [] },
+    town: { roadMetres: 0, homes: [{ access: [{ lane: forward, s: 400 }, { lane: backward, s: 400 }], region: 0 }], regions: [] },
   };
   return { scenario, forward, backward };
 }

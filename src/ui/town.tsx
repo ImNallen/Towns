@@ -1,3 +1,4 @@
+import { dollars as money } from '../sim/town/budget';
 import { ZONE_KINDS } from '../sim/zoning/paint';
 import { PALETTE } from '../render/palette';
 import type { HouseholdView, PersonView, TownEventView, TownView } from '../sim/town/town';
@@ -13,10 +14,7 @@ export function dayClock(town: TownView): string {
   return `Day ${town.day} · ${pad(Math.floor(town.minuteOfDay / 60))}:${pad(town.minuteOfDay % 60)}`;
 }
 
-export function money(amount: number): string {
-  const rounded = Math.round(amount);
-  return `${rounded < 0 ? '−' : ''}$${Math.abs(rounded).toLocaleString('en-US')}`;
-}
+export { money };
 
 export function family(household: HouseholdView): string {
   return `The ${household.surname}${household.surname.endsWith('s') ? 'es' : 's'}`;
@@ -52,7 +50,7 @@ function when(event: TownEventView, town: TownView): string {
 export function TownPanel({ town }: { town: TownView }) {
   const { totals } = town;
   const upgraded = town.households.filter((h) => h.level > 1).length;
-  const recent = town.events.slice(-FEED_LENGTH).reverse();
+  const recent = town.events.slice(-(FEED_LENGTH - (town.day > 1 ? 1 : 0))).reverse();
   return (
     <section className="town panel" aria-label="Residents">
       <div className="panel-heading"><span>Residents</span><span>{town.households.length} homes</span></div>
@@ -75,7 +73,8 @@ export function TownPanel({ town }: { town: TownView }) {
           </div>
         </div>)}
       </section>
-      {recent.length > 0 && <ol className="town-feed" aria-label="Recent events">
+      {(recent.length > 0 || town.day > 1) && <ol className="town-feed" aria-label="Recent events">
+        {town.day > 1 && <li><span>Taxes collected: +{money(town.budget.yesterday.homes + town.budget.yesterday.shops + town.budget.yesterday.workplaces)}</span><time>Midnight</time></li>}
         {recent.map((event) => (
           <li key={`${event.day}-${event.minute}-${event.household}-${event.kind}-${'person' in event ? `${event.person}-${event.region}` : ''}`}>
             <span>{describe(event, town)}</span>
@@ -143,4 +142,28 @@ export function HouseholdCard({ household, onClose }: { household: HouseholdView
       </ul>
     </section>
   );
+}
+
+export function BudgetPanel({ town }: { town: TownView }) {
+  const { balance, today, yesterday, history } = town.budget;
+  const rows = [
+    ['Homes', 'homes'], ['Shops', 'shops'], ['Workplaces', 'workplaces'],
+    ['Building', 'building'], ['Road upkeep', 'upkeep'],
+  ] as const;
+  return <details className="budget panel">
+    <summary>Town budget <strong>{money(balance)}</strong></summary>
+    <table>
+      <thead><tr><th>Cash flow</th><th>Today</th><th>Yesterday</th></tr></thead>
+      <tbody>{rows.map(([label, key]) => {
+        const sign = key === 'building' || key === 'upkeep' ? -1 : 1;
+        return <tr key={key}><th>{label}</th><td>{money(today[key] * sign)}</td>
+          <td>{town.day === 1 ? '–' : money(yesterday[key] * sign)}</td></tr>;
+      })}</tbody>
+    </table>
+    <h3>Closing balances</h3>
+    {history.length ? <ol>{history.map((amount, i) => {
+      const day = town.day - history.length + i;
+      return <li key={day}><span>Day {day}</span><strong>{money(amount)}</strong></li>;
+    })}</ol> : <p>First close at midnight</p>}
+  </details>;
 }

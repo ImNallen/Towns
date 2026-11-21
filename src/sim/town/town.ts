@@ -1,3 +1,5 @@
+import { BUDGET, ECONOMY } from './economy';
+import { Treasury, type BudgetView } from './budget';
 import { ZONE_KINDS, type ZoneKind } from '../zoning/paint';
 import type { Lot } from '../zoning/lots';
 import { Rng } from '../rng';
@@ -38,25 +40,9 @@ const SHOP_STAY = 30;
 const PANTRY_FULL = 4;
 const PANTRY_LOW = 1.5;
 
-const ADULT_COST = 30;
-const CHILD_COST = 20;
-const CAR_UPKEEP = 8;
-/** Indexed by house level (1..3). */
-const HOUSE_UPKEEP = [0, 10, 18, 30];
 const HOUSE_CAPACITY = [0, 3, 5, 7];
-const HOUSE_PRICE = [0, 0, 1800, 4000];
 const MAX_LEVEL = 3;
-/** Indexed by car model (1..3). A newer model trades the old cars in at half price. */
-const CAR_PRICE = [0, 1200, 2200, 3600];
 const MAX_MODEL = 3;
-/** Purchases keep this many days of running costs in the bank. */
-const RESERVE_DAYS = 7;
-/** Luxuries (bigger house, newer car) wait until this much is spare on top of the price. */
-const WEALTH_MARGIN = 800;
-/** How much an hour of driving is worth when choosing a job, per minute of round trip. */
-const COMMUTE_VALUE = 0.5;
-/** A better job has to beat the current one by this much per day to be worth switching. */
-const SWITCH_MARGIN = 10;
 type Demand = Record<ZoneKind, number>;
 const GROWTH_THRESHOLD = 360;
 const lotZone = (lot: Lot) => lot.designs[0]!.blueprint.zone;
@@ -140,6 +126,8 @@ export type TownEventView = { day: number; minute: number; household: number } &
 );
 
 export interface BusinessView {
+  taxesPaid: number;
+  lastDailyCost: number;
   home: number;
   name: string;
   zone: Exclude<ZoneKind, 'residential'>;
@@ -149,6 +137,7 @@ export interface BusinessView {
   customers: number;
 }
 export interface TownView {
+  budget: BudgetView;
   businesses: BusinessView[];
   demand: Demand;
   day: number;
@@ -180,6 +169,12 @@ const dayOf = (minute: number): number => Math.floor(minute / MINUTES_PER_DAY) +
  * so `update` never allocates.
  */
 export class Town {
+  readonly treasury = new Treasury();
+  // Daily gross wages for homes and receipts for shops.
+  private readonly taxable: Float64Array;
+  private readonly taxesPaid: Float64Array;
+  private readonly payroll: Float64Array;
+  private readonly lastDailyCost: Float64Array;
   readonly spec: TownSpec;
   /** Routing destination of home 0; home `h` is `homeDest + h`. */
   private readonly homeDest: number;
@@ -243,6 +238,10 @@ export class Town {
     const P = H * MAX_MEMBERS;
     this.surname = new Uint16Array(H);
     this.funds = new Float64Array(H);
+    this.taxable = new Float64Array(H);
+    this.taxesPaid = new Float64Array(H);
+    this.payroll = new Float64Array(H);
+    this.lastDailyCost = new Float64Array(H);
     this.wages = new Float64Array(H);
     this.level = new Uint8Array(H);
     this.cars = new Uint8Array(H);
@@ -298,7 +297,7 @@ export class Town {
       this.firstName[p] = rng.int(FIRST_NAMES.length);
       this.early[p] = rng.int(MAX_EARLY);
     }
-    this.funds[h] = 1000 + rng.int(1500);
+    this.funds[h] = ECONOMY.initialFunds + rng.int(ECONOMY.initialFundsRange);
     this.level[h] = 1;
     this.cars[h] = 1;
     this.carModel[h] = 1;
@@ -330,8 +329,9 @@ export class Town {
       throw new Error('Town copy requires enough home slots and the same regions');
     }
     this.rng.copyFrom(source.rng);
+    this.treasury.copyFrom(source.treasury);
     for (const key of [
-      'surname', 'funds', 'wages', 'level', 'cars', 'carModel', 'pantry', 'firstMember', 'memberCount', 'adults',
+      'taxable', 'taxesPaid', 'payroll', 'lastDailyCost', 'surname', 'funds', 'wages', 'level', 'cars', 'carModel', 'pantry', 'firstMember', 'memberCount', 'adults',
       'household', 'role', 'age', 'firstName', 'job', 'activity', 'errand', 'at', 'arrivedAt', 'until', 'workedDay',
       'open', 'customers', 'early', 'eventDay', 'eventMinute', 'eventHousehold', 'eventKind', 'eventDetail', 'eventPerson',
     ] as const) this[key].set(source[key]);
@@ -343,6 +343,7 @@ export class Town {
     for (let h = 0; h < source.spec.homes.length; h++) {
       const old = source.spec.homes[h]!.lot;
       if (!old || this.spec.homes[h]!.lot === old) continue;
+      this.taxable[h] = this.taxesPaid[h] = this.payroll[h] = this.lastDailyCost[h] = 0;
       if (this.level[h]) this.moveOut(h);
       if (!this.open[h]) continue;
       closed = true;
@@ -435,7 +436,7 @@ export class Town {
   }
 
   private wage(r: number): number {
-    return this.spec.regions[r]?.wage ?? 32;
+    return this.spec.regions[r]?.wage ?? ECONOMY.localWage;
   }
 
   /** A resident's car reached its destination. */
@@ -506,15 +507,21 @@ export class Town {
     if (this.errand[p] !== WORK) return;
     const start = this.until[p]! - (SHIFT_END - SHIFT_START);
     const hours = Math.max(0, this.until[p]! - Math.max(this.arrivedAt[p]!, start)) / 60;
-    this.funds[h] += hours * this.wage(place);
-    this.wages[h] += hours * this.wage(place);
+    const pay = hours * this.wage(place);
+    this.funds[h] += pay;
+    this.wages[h] += pay;
+    this.taxable[h] += pay;
+    const employer = place - this.spec.regions.length;
+    if (employer >= 0) this.payroll[employer] += pay;
   }
 
   private buyGroceries(h: number, region: number): void {
-    const price = (this.spec.regions[region]?.groceryPrice ?? 4) * this.memberCount[h]!;
+    const price = (this.spec.regions[region]?.groceryPrice ?? ECONOMY.localGroceryPrice) * this.memberCount[h]!;
     const days = Math.min(PANTRY_FULL - this.pantry[h]!, Math.max(0, this.funds[h]!) / price);
     this.pantry[h] += days;
-    this.funds[h] -= days * price;
+    const bill = days * price;
+    this.funds[h] -= bill;
+    if (region >= this.spec.regions.length) this.taxable[region - this.spec.regions.length] += bill;
   }
 
   private freeCars(h: number): number {
@@ -574,10 +581,23 @@ export class Town {
   private midnight(minute: number, routing: Routing): void {
     this.customers.fill(0);
     for (let h = 0; h < this.spec.homes.length; h++) {
+      const gross = this.taxable[h]!;
+      this.taxable[h] = 0;
+      if (this.open[h]) {
+        const shop = lotZone(this.spec.homes[h]!.lot!) === 'shops';
+        const tax = Math.round(shop ? gross * BUDGET.shopTax : this.payroll[h]! * BUDGET.workplaceTax);
+        this.lastDailyCost[h] = this.payroll[h]! + tax;
+        this.payroll[h] = 0;
+        this.treasury.today[shop ? 'shops' : 'workplaces'] += tax;
+        this.taxesPaid[h] += tax;
+      }
       if (!this.level[h]) continue;
-      this.funds[h] -= this.dailyCost(h);
+      const tax = Math.round(gross * BUDGET.homeTax);
+      this.treasury.today.homes += tax;
+      this.funds[h] -= this.dailyCost(h) + tax;
       this.pantry[h] = Math.max(0, this.pantry[h]! - 1);
     }
+    this.treasury.close(this.spec.roadMetres);
     this.jobMarket(routing, minute);
     for (let h = 0; h < this.spec.homes.length; h++) if (this.level[h]) this.purchase(h, minute);
     for (let p = 0; p < this.people; p++) if (!this.departed(p)) this.early[p] = this.rng.int(MAX_EARLY);
@@ -585,13 +605,13 @@ export class Town {
 
   private dailyCost(h: number): number {
     const adults = this.adults[h]!;
-    return adults * ADULT_COST + (this.memberCount[h]! - adults) * CHILD_COST
-      + HOUSE_UPKEEP[this.level[h]!]! + this.cars[h]! * CAR_UPKEEP;
+    return adults * ECONOMY.adultCost + (this.memberCount[h]! - adults) * ECONOMY.childCost
+      + ECONOMY.houseUpkeep[this.level[h]!]! + this.cars[h]! * ECONOMY.carUpkeep;
   }
 
   /** Daily value of working in region `r` for household `h`: pay minus the time spent commuting. */
   private jobValue(h: number, r: number, routing: Routing): number {
-    return this.wage(r) * (SHIFT_END - SHIFT_START) / 60 - COMMUTE_VALUE * this.roundTrip(h, r, routing);
+    return this.wage(r) * (SHIFT_END - SHIFT_START) / 60 - ECONOMY.commuteValuePerMinute * this.roundTrip(h, r, routing);
   }
 
   private jobMarket(routing: Routing, minute: number): void {
@@ -619,7 +639,7 @@ export class Town {
         const h = this.household[p]!;
         const current = this.job[p]!;
         if (current < 0 && this.employed(h) >= this.cars[h]!) continue;
-        const base = current >= 0 ? this.jobValue(h, current, routing) + SWITCH_MARGIN : 0;
+        const base = current >= 0 ? this.jobValue(h, current, routing) + ECONOMY.switchMargin : 0;
         for (let r = 0; r < this.filled.length; r++) {
           const slot = r - regions.length;
           const jobs = regions[r]?.jobs ?? (this.open[slot] ? lotJobs(this.spec.homes[slot]!.lot!) : 0);
@@ -651,22 +671,22 @@ export class Town {
 
   /** At most one purchase a day, for the household's worst unmet need, keeping a cash reserve. */
   private purchase(h: number, minute: number): void {
-    const spare = this.funds[h]! - RESERVE_DAYS * this.dailyCost(h);
+    const spare = this.funds[h]! - ECONOMY.reserveDays * this.dailyCost(h);
     const mobility = this.mobility(h);
     const comfort = this.comfort(h);
     const level = this.level[h]!;
     const model = this.carModel[h]!;
     if (mobility < 1 && mobility <= comfort) {
-      if (spare >= CAR_PRICE[model]!) this.buyCar(h, minute);
+      if (spare >= ECONOMY.carPrice[model]!) this.buyCar(h, minute);
       return;
     }
     if (comfort < 1) {
-      if (level < MAX_LEVEL && spare >= HOUSE_PRICE[level + 1]!) this.upgradeHouse(h, minute);
+      if (level < MAX_LEVEL && spare >= ECONOMY.housePrice[level + 1]!) this.upgradeHouse(h, minute);
       return;
     }
-    const house = level < MAX_LEVEL ? HOUSE_PRICE[level + 1]! : Infinity;
-    const car = model < MAX_MODEL ? this.cars[h]! * (CAR_PRICE[model + 1]! - CAR_PRICE[model]! / 2) : Infinity;
-    if (Math.min(house, car) === Infinity || spare < Math.min(house, car) + WEALTH_MARGIN) return;
+    const house = level < MAX_LEVEL ? ECONOMY.housePrice[level + 1]! : Infinity;
+    const car = model < MAX_MODEL ? this.cars[h]! * (ECONOMY.carPrice[model + 1]! - ECONOMY.carPrice[model]! * ECONOMY.tradeInShare) : Infinity;
+    if (Math.min(house, car) === Infinity || spare < Math.min(house, car) + ECONOMY.wealthMargin) return;
     if (house <= car) this.upgradeHouse(h, minute);
     else {
       this.funds[h] -= car;
@@ -677,14 +697,14 @@ export class Town {
   }
 
   private buyCar(h: number, minute: number): void {
-    this.funds[h] -= CAR_PRICE[this.carModel[h]!]!;
+    this.funds[h] -= ECONOMY.carPrice[this.carModel[h]!]!;
     this.cars[h]++;
     this.carsBought++;
     this.record(minute, h, BOUGHT_CAR, this.cars[h]!);
   }
 
   private upgradeHouse(h: number, minute: number): void {
-    this.funds[h] -= HOUSE_PRICE[this.level[h]! + 1]!;
+    this.funds[h] -= ECONOMY.housePrice[this.level[h]! + 1]!;
     this.level[h]++;
     this.houseUpgrades++;
     this.record(minute, h, UPGRADED_HOUSE, this.level[h]!);
@@ -718,7 +738,7 @@ export class Town {
   }
 
   private security(h: number): number {
-    return clamp01(this.funds[h]! / (RESERVE_DAYS * this.dailyCost(h)));
+    return clamp01(this.funds[h]! / (ECONOMY.reserveDays * this.dailyCost(h)));
   }
 
   // --- Output -------------------------------------------------------------------
@@ -729,6 +749,11 @@ export class Town {
   }
 
   hash(mix: (x: number) => void): void {
+    this.treasury.hash(mix);
+    this.taxable.forEach(n => mix(Math.round(n * 100)));
+    this.taxesPaid.forEach(mix);
+    this.payroll.forEach(n => mix(Math.round(n * 100)));
+    this.lastDailyCost.forEach(n => mix(Math.round(n * 100)));
     for (let h = 0; h < this.spec.homes.length; h++) {
       const lot = this.spec.homes[h]!.lot;
       if (lot) { mix(lot.key); mix(lot.columns); mix(lot.rows); }
@@ -839,10 +864,11 @@ export class Town {
       const r = h + regions.length;
       const zone = lotZone(lot);
       if (zone === 'residential') throw new Error('A residence cannot be an open business');
-      businesses.push({ home: h, lot: visibleLot(lot), name: this.placeName(r), zone,
+      businesses.push({ lastDailyCost: this.lastDailyCost[h]!, taxesPaid: this.taxesPaid[h]!, home: h, lot: visibleLot(lot), name: this.placeName(r), zone,
         jobs: lotJobs(lot), filled: this.filled[r]!, customers: this.customers[h]! });
     }
     return {
+      budget: this.treasury.view(),
       businesses,
       demand: { residential: this.demandFor('residential'), shops: this.demandFor('shops'), workplaces: this.demandFor('workplaces') },
       day: dayOf(minute),

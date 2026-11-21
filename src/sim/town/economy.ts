@@ -1,0 +1,32 @@
+export const BUDGET = {
+  startingBalance: 6000,
+  roadPerMetre: 12,
+  zonePerCell: 2,
+  salvageShare: 0.5,
+  upkeepPerMetre: 0.55,
+  homeTax: 0.08,
+  shopTax: 0.08,
+  workplaceTax: 0.06,
+} as const;
+
+/** Household and employer prices in dollars. Level and model prices are indexed from one. */
+export const ECONOMY = {
+  initialFunds: 1000,
+  initialFundsRange: 1500,
+  adultCost: 30,
+  childCost: 20,
+  carUpkeep: 8,
+  houseUpkeep: [0, 10, 18, 30],
+  housePrice: [0, 0, 1800, 4000],
+  carPrice: [0, 1200, 2200, 3600],
+  tradeInShare: 0.5,
+  reserveDays: 7,
+  wealthMargin: 800,
+  commuteValuePerMinute: 0.5,
+  switchMargin: 10,
+  localWage: 32,
+  localGroceryPrice: 4,
+  westbrookWage: 16,
+  eastfordWage: 30,
+  regionalGroceryPrice: 6,
+} as const;
