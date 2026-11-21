@@ -497,4 +497,12 @@ test('a neighbourhood park welcomes visitors after work',async({page})=>{
     return true;
   },null,{timeout:50000});
   await page.screenshot({path:'artifacts/screens/park-visitors.png'});
+  await page.evaluate(()=>{
+    const game=window.__towns!;
+    const home=game.town()!.households.find(h=>(h.nearbyPark?.happinessPoints ?? 0)>0);
+    if (!home) throw new Error('Expected a household benefiting from the park');
+    game.selectHouse(home.home);
+  });
+  await expect(page.getByRole('region',{name:'Household'})).toContainText(/Parks add [1-9][0-9]* happiness points/);
+  await page.screenshot({path:'artifacts/screens/park-happiness.png'});
 });

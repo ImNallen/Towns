@@ -29,6 +29,7 @@ const { values } = parseArgs({
     json: { type: 'boolean', default: false },
     paint: { type: 'string' },
     park: { type:'string' },
+    'park-size': { type: 'string', default: '2' },
     zebra: { type: 'string' },
     'parking-lot': { type: 'string' },
     connect: { type: 'boolean', default: false },
@@ -64,6 +65,8 @@ const town = (view: TownView): string => {
   const clock = `${String(Math.floor(view.minuteOfDay / 60)).padStart(2, '0')}:${String(view.minuteOfDay % 60).padStart(2, '0')}`;
   return [
     `  town day ${view.day} ${clock}`,
+    `covered=${view.households.filter(h=>h.nearbyPark).length}`,
+    `park-gain=${(view.households.reduce((sum,h)=>sum+(h.nearbyPark?.happinessPoints ?? 0),0)/Math.max(1,view.households.filter(h=>h.nearbyPark).length)).toFixed(1)}`,
     `park-visits=${view.parkVisits}`,
     `walked=${view.parking.walkedTrips} peak=${view.parking.peakWalkers}`,
     `trips=${view.parking.trips}`,
@@ -133,7 +136,9 @@ if (values.paint !== undefined) {
     zoning.set(key, values.paint === 'homes' || band < 3 ? 'residential' : band === 3 ? 'shops' : 'workplaces');
   }
   if (values.park) {
-    const footprint=parkFootprint(Number(values.park) as CellKey,2);
+    const size = Number(values['park-size']);
+    if (size !== 1 && size !== 2 && size !== 3) throw new Error('--park-size expects 1, 2 or 3');
+    const footprint=parkFootprint(Number(values.park) as CellKey,size);
     const plan=planZoneStroke(cells,new Map(),'park',footprint);
     if (!plan.ok) throw new Error(plan.reason);
     for (const key of footprint) zoning.set(key,'park');

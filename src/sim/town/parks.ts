@@ -2,7 +2,24 @@ import type { Vec2 } from '../math/vec';
 import { decodeCellKey, findCell, type CellKey, type ZoneCells } from '../zoning/cells';
 import type { Zoning } from '../zoning/paint';
 
-export const PARK_RADIUS = 450;
+export const PARK_BENEFITS = {
+  pocketReach: 420,
+  reachPerExtraCellWide: 140,
+  pocketHappiness: 0.15,
+  happinessPerExtraCellWide: 0.035,
+  maxWidth: 3,
+  residentialGrowth: 0.16,
+} as const;
+
+/** Larger parks attract walkers farther along the network. Neighbouring parks can
+ * share an entrance, but the amenities bonus saturates at a 3 × 3 park. */
+export function parkBenefit(cells: number, metres: number): number {
+  const c = PARK_BENEFITS;
+  const extraWidth = Math.min(c.maxWidth, Math.sqrt(cells)) - 1;
+  const reach = c.pocketReach + extraWidth * c.reachPerExtraCellWide;
+  const peak = c.pocketHappiness + extraWidth * c.happinessPerExtraCellWide;
+  return peak * Math.max(0, 1 - metres / reach);
+}
 export interface Park extends Vec2 {
   key: CellKey;
   cells: CellKey[];
