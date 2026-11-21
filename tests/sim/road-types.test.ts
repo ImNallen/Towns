@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { NetworkBuilder } from '../../src/sim/network/builder';
 import { ROAD_ORDER, ROAD_TYPES, edgeOffset } from '../../src/sim/network/roadTypes';
 import { buildStreetNetwork } from '../../src/sim/network/streets';
-import { meadowScenario, meadowTips, planMeadowRoad } from '../../src/sim/scenarios/meadow';
+import { meadowScenario, meadowTips, upgradeFailure, planMeadowRoad } from '../../src/sim/scenarios/meadow';
 import { editCost, undoCost } from '../../src/sim/town/budget';
 import { BUDGET } from '../../src/sim/town/economy';
 import { VEHICLE_LENGTH } from '../../src/sim/traffic/idm';
@@ -75,4 +75,32 @@ it('upgrades and undoes under traffic deterministically with no lost or overlapp
     return world.hash();
   }
   expect(run()).toBe(run());
+});
+
+it('refuses widening into a neighbouring road and permits it after removal', () => {
+  const row = (y: number) => ({ roadType: 'country' as const, points: [{ x: -20, y }, { x: 20, y }] });
+  const edits = [row(50), row(60)];
+  expect(upgradeFailure(edits, 2, 'parking')).toContain('space');
+  expect(upgradeFailure([...edits, { remove: 3 }], 2, 'parking')).toBeUndefined();
+});
+
+it('moves an occupied parcel to its new kerb and keeps the household', () => {
+  const scenario = meadowScenario();
+  const world = new World(scenario, 7);
+  const frontage = new Map<CellKey, 'residential'>();
+  for (const raw of scenario.zones!.keys) {
+    const key = raw as CellKey;
+    const { road, column } = decodeCellKey(key);
+    if (road === 1 && column >= 13) frontage.set(key, 'residential');
+  }
+  world.setZoning(frontage);
+  for (let i = 0; i < 28800; i++) world.step();
+  const resident = world.townView()!.households.find(h => h.lot);
+  expect(resident?.lot).toBeDefined();
+  const result = world.editNetwork(meadowScenario([{ upgrade: 0, roadType: 'parking' }]));
+  if (!result.ok) throw new Error(result.reason);
+  const moved = result.world.townView()!.households.find(h => h.id === resident!.id);
+  expect(moved?.members).toEqual(resident!.members);
+  expect(moved?.lot?.key).toBe(resident!.lot!.key);
+  expect(Math.abs(moved!.lot!.y - resident!.lot!.y)).toBeCloseTo(2.2);
 });

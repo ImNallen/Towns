@@ -4,7 +4,7 @@ import { editCost, shortage } from '../sim/town/budget';
 import * as THREE from 'three';
 import { offsetPolyline, polyline, slicePolyline, type Polyline } from '../sim/math/polyline';
 import { add, scale, distance, dot, projectOntoSegment, type Vec2 } from '../sim/math/vec';
-import { MEADOW_BUILD_BOUNDS, MEADOW_ROAD_WIDTH, meadowLayout, meadowNetwork, meadowRoadSections, snapToMeadowStreet, planMeadowRoad, isZoneStroke, type MeadowEdit } from '../sim/scenarios/meadow';
+import { MEADOW_BUILD_BOUNDS, MEADOW_ROAD_WIDTH, meadowLayout, meadowNetwork, meadowRoadSections, upgradeFailure, snapToMeadowStreet, planMeadowRoad, isZoneStroke, type MeadowEdit } from '../sim/scenarios/meadow';
 import { angleGuide, crossingAngleGuide, fitGuideToStreet, squareStreetGuide, type StreetPoint, type AngleGuide } from '../sim/network/angleSnap';
 import { JUNCTION_MOUTH } from '../sim/network/streets';
 import { cellsAlong, type CellKey, type ZoneCells } from '../sim/zoning/cells';
@@ -311,12 +311,17 @@ export class RoadEditor {
     this.highlightedSegment = segment;
     this.hint = segment === null ? '' : 'Click to remove this segment.';
     if (segment !== null && this.tool === 'upgrade') {
+      const reason = upgradeFailure(this.edits, segment, this.roadType);
+      if (reason) {
+        this.hint = reason;
+        return;
+      }
       const edit = { upgrade: segment, roadType: this.roadType };
       this.preview = buildRoads(meadowNetwork([...this.edits, edit]), 'dashed');
       this.scene.add(this.preview);
       this.setRoadVisibility(false);
       this.cost = editCost(this.edits, edit);
-      this.hint = 'Click to change this segment to ' + ROAD_TYPES[this.roadType].name + '.';
+      this.hint = shortage(this.balance, this.cost) ?? 'Click to change this segment to ' + ROAD_TYPES[this.roadType].name + '.';
     } else if (segment !== null) this.guide(polyline(this.segments[segment]!), PALETTE.editorInvalid, MEADOW_ROAD_WIDTH);
   }
 

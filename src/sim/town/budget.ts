@@ -48,7 +48,7 @@ export class Treasury {
     return undefined;
   }
 
-  close(upkeep: number): void {
+  close(roadMetres: number, upkeep = Math.round(roadMetres * BUDGET.upkeepPerMetre)): void {
     const day = this.today;
     day.upkeep = upkeep;
     this.balance += day.homes + day.shops + day.workplaces - day.upkeep;

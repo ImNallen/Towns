@@ -633,7 +633,7 @@ export class Town {
       this.funds[h] -= this.dailyCost(h) + tax;
       this.pantry[h] = Math.max(0, this.pantry[h]! - 1);
     }
-    this.treasury.close(this.dailyRoadUpkeep);
+    this.treasury.close(this.spec.roadMetres, this.dailyRoadUpkeep);
     this.jobMarket(routing, minute);
     for (let h = 0; h < this.spec.homes.length; h++) if (this.level[h]) this.purchase(h, minute);
     for (let p = 0; p < this.people; p++) if (!this.departed(p)) this.early[p] = this.rng.int(MAX_EARLY);

@@ -222,22 +222,46 @@ export function meadowSegmentInfo(edits: readonly MeadowEdit[]) {
   return replayMeadow(edits).sections.filter(s => removable(s.points));
 }
 
+export function upgradeFailure(edits: readonly MeadowEdit[], index: number, type: RoadType): string | undefined {
+  const sections = replayMeadow(edits).sections;
+  const selected = sections.filter(s => removable(s.points))[index];
+  if (!selected) return 'Select a street segment.';
+  if (selected.roadType === type) return 'This segment already has that road type.';
+  const half = edgeOffset(type, 'left');
+  if (half <= edgeOffset(selected.roadType, 'left')) return;
+  for (const other of sections) {
+    if (other === selected) continue;
+    const clearance = half + edgeOffset(other.roadType, 'left');
+    const joins = [selected.points[0]!, tip(selected.points)].filter(p => same(p, other.points[0]!) || same(p, tip(other.points)));
+    // For two non-crossing line segments a closest pair includes an endpoint.
+    for (const [a, b] of [[selected.points, other.points], [other.points, selected.points]] as const) {
+      for (const p of a) {
+        if (joins.some(join => distance(p, join) <= 2 * clearance)) continue;
+        if (b.some((q, i) => i > 0 && pointSegmentDistance(p, b[i - 1]!, q) < clearance - 1e-6)) {
+          return 'There is too little space beside this segment for the wider road.';
+        }
+      }
+    }
+  }
+}
+
 export function meadowSegments(edits: readonly MeadowEdit[]): readonly (readonly Vec2[])[] {
   return replayMeadow(edits).chains.filter(removable);
 }
 
 /** Coalesce smooth degree-two nodes while preserving sharp corners for lane connectors. */
 export function meadowStreets(edits: readonly MeadowEdit[]): Vec2[][] {
-  return coalesceStreets(replayMeadow(edits).chains);
+  const { chains, sections } = replayMeadow(edits);
+  return coalesceStreets(chains, sections.map(s => s.roadType));
 }
 
-function coalesceStreets(chains: Vec2[][], types?: RoadType[]): Vec2[][] {
+function coalesceStreets(chains: Vec2[][], types: RoadType[]): Vec2[][] {
   for (let i = 0; i < chains.length; i++) {
     let merged = false;
     for (const endpoint of [chains[i]![0]!, tip(chains[i]!)]) {
       if (degree(chains, endpoint) !== 2) continue;
       const j = chains.findIndex((chain, index) => index !== i && (same(chain[0]!, endpoint) || same(tip(chain), endpoint)));
-      if (j < 0 || types?.[j] !== types?.[i]) continue;
+      if (j < 0 || types[j] !== types[i]) continue;
       const first = same(tip(chains[i]!), endpoint) ? chains[i]! : [...chains[i]!].reverse();
       const second = same(chains[j]![0]!, endpoint) ? chains[j]! : [...chains[j]!].reverse();
       const incoming = normalize(sub(endpoint, first[first.length - 2]!));
@@ -245,7 +269,7 @@ function coalesceStreets(chains: Vec2[][], types?: RoadType[]): Vec2[][] {
       if (dot(incoming, outgoing) < 0.95) continue;
       chains[i] = [...first, ...second.slice(1)];
       chains.splice(j, 1);
-      types?.splice(j, 1);
+      types.splice(j, 1);
       merged = true;
       break;
     }
@@ -285,7 +309,7 @@ export function meadowConnected(edits: readonly MeadowEdit[]): boolean {
 export function meadowLayout(edits: readonly MeadowEdit[]) {
   const { chains, sections } = replayMeadow(edits);
   const segments = chains.filter(removable);
-  const streets = coalesceStreets(chains);
+  const streets = coalesceStreets(chains, sections.map(s => s.roadType));
   return { segments, segmentTypes: sections.filter(s => removable(s.points)).map(s => s.roadType), streets, tips: streetTips(streets), connected: portalsConnected(streets) };
 }
 

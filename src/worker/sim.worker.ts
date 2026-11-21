@@ -3,7 +3,7 @@
  * Posts a compact snapshot whenever the simulation has advanced.
  */
 import { buildScenario, type Scenario } from '../sim/scenarios';
-import { isZoneStroke, meadowScenario, meadowSegmentInfo, meadowZoning, planMeadowRoad, type MeadowEdit } from '../sim/scenarios/meadow';
+import { isZoneStroke, meadowScenario, meadowSegments, upgradeFailure, meadowZoning, planMeadowRoad, type MeadowEdit } from '../sim/scenarios/meadow';
 import { planZoneStroke } from '../sim/zoning/paint';
 import { editCost, shortage, undoCost } from '../sim/town/budget';
 import { DT, World } from '../sim/world';
@@ -60,13 +60,13 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
         }
         proposed = [...edits, plan.road];
       } else if (msg.type === 'bulldozeRoad' || msg.type === 'upgradeRoad') {
-        const segment = meadowSegmentInfo(edits)[msg.segment];
-        if (msg.editCount !== edits.length || !Number.isInteger(msg.segment) || !segment) {
+        if (msg.editCount !== edits.length || !Number.isInteger(msg.segment) || (msg.type === 'bulldozeRoad' && !meadowSegments(edits)[msg.segment])) {
           post({ type: 'editRejected', reason: 'Select a street segment.' });
           break;
         }
-        if (msg.type === 'upgradeRoad' && segment.roadType === msg.roadType) {
-          post({ type: 'editRejected', reason: 'This segment already has that road type.' });
+        const reason = msg.type === 'upgradeRoad' && upgradeFailure(edits, msg.segment, msg.roadType);
+        if (reason) {
+          post({ type: 'editRejected', reason });
           break;
         }
         proposed = [...edits, msg.type === 'upgradeRoad' ? { upgrade: msg.segment, roadType: msg.roadType } : { remove: msg.segment }];
