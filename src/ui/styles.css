@@ -235,7 +235,7 @@ button.bulldoze.active, button.bulldoze.active:hover { background: #904731; }
   .placement-info p { font-size: 11px; }
   .tool { flex-direction: column; gap: 2px; padding: 3px 1px; font-size: 10px; }
   .tool kbd, .tool-divider { display: none; }
-  .hud .tool-bar { width: min(560px, calc(100vw - 16px)); display: grid; gap: 1px; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .hud .tool-bar { width: min(560px, calc(100vw - 16px)); display: grid; gap: 1px; grid-template-columns: repeat(8, minmax(0, 1fr)); }
   .tool-tray .tool { min-width: 58px; }
   .hud .placement-info .mouse-help { display: none; }
 }
@@ -245,3 +245,8 @@ button.bulldoze.active, button.bulldoze.active:hover { background: #904731; }
 .traffic-key span { display: inline-flex; align-items: center; gap: 4px; text-transform: capitalize; }
 .traffic-key i { width: 9px; height: 9px; border-radius: 50%; }
 .traffic-key p { margin: 5px 0; }
+
+.save-menu { padding: 8px; font-size: 12px; }
+.save-menu fieldset { display: flex; align-items: center; justify-content: center; gap: 3px; padding: 0; margin: 0 0 4px; border: 0; }
+.save-menu select, .save-menu button { font: inherit; min-height: 36px; }
+.save-menu small { color: var(--muted); }

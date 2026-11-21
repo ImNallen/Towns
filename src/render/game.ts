@@ -36,6 +36,8 @@ export interface GameOptions {
 }
 
 export interface Game {
+  save(): Promise<string>;
+  load(json: string): Promise<void>;
   walkerPositions(): Float32Array;
   editor(): EditorState | null;
   setAngleSnapping(enabled: boolean): void;
@@ -134,7 +136,8 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   const worker = new Worker(new URL('../worker/sim.worker.ts', import.meta.url), { type: 'module' });
   const send = (msg: ToWorker): void => worker.postMessage(msg);
 
-  if (options.scenario === 'meadow') editor = new RoadEditor(canvas, mapCamera, scene, send, (visible) => {
+  let scenarioName: string = options.scenario;
+  const makeEditor = () => new RoadEditor(canvas, mapCamera, scene, send, (visible) => {
     if (roadLayer) roadLayer.visible = visible;
   }, {
     houseAt: (p) => (latestTown ? houses?.houseAt(p) ?? null : null),
@@ -150,7 +153,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     trafficLayer.group.visible = trafficVisible;
     scene.add(trafficLayer.group);
     laneNames = network.lanes.map(lane => {
-      if (options.scenario === 'mill') return ['West approach', 'Mill Street', 'Works Road', 'Mill Street', 'North Road', 'East approach'][lane.id]!;
+      if (scenarioName === 'mill') return ['West approach', 'Mill Street', 'Works Road', 'Mill Street', 'North Road', 'East approach'][lane.id]!;
       const p = lane.path.pts;
       const x = p[p.length - 2]!, y = p[p.length - 1]!;
       return Math.abs(x) > Math.abs(y) ? (x < 0 ? 'West approach' : 'East approach') : (y < 0 ? 'South approach' : 'North approach');
@@ -180,17 +183,40 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     editor.accept({ edits, cells, zoning });
   };
 
+  let decor: THREE.Group | null = null;
+  let requestId = 0;
+  const saves = new Map<number, (json: string) => void>();
+  const loads = new Map<number, { resolve(): void; reject(reason: Error): void }>();
   worker.onmessage = (e: MessageEvent<FromWorker>) => {
     const msg = e.data;
-    if (msg.type === 'ready') {
+    if (msg.type === 'saved') {
+      saves.get(msg.id)?.(msg.json);
+      saves.delete(msg.id);
+    } else if (msg.type === 'loaded' || msg.type === 'loadError') {
+      const load = loads.get(msg.id);
+      if (msg.type === 'loaded') load?.resolve();
+      else load?.reject(new Error(msg.reason));
+      loads.delete(msg.id);
+    } else if (msg.type === 'ready') {
       const { scenario } = msg;
-      scene.add(buildDecor(scenario.decor));
+      for (const layer of [decor, houses?.group, vehicles?.mesh, paintLayer, parkingLayer]) {
+        if (layer) disposeLayer(layer);
+      }
+      parkingLayer = paintLayer = null;
+      parkingSignature = '';
+      latestTown = null;
+      selectedHouse = null;
+      editor?.dispose();
+      scenarioName = scenario.name;
+      editor = scenarioName === 'meadow' ? makeEditor() : null;
+      decor = buildDecor(scenario.decor);
+      scene.add(decor);
       houses = new HouseLayer(scenario.decor.houses);
       scene.add(houses.group);
       drawNetwork(scenario.network);
       cells = scenario.zones;
       drawZones();
-      showEdits([]);
+      showEdits(msg.edits);
       vehicles = new VehicleLayer(msg.capacity);
       scene.add(vehicles.mesh);
       if (options.view) {
@@ -263,6 +289,16 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   raf = requestAnimationFrame(frame);
 
   const game: Game = {
+    save: () => new Promise(resolve => {
+      const id = ++requestId;
+      saves.set(id, resolve);
+      send({ type: 'save', id });
+    }),
+    load: json => new Promise((resolve, reject) => {
+      const id = ++requestId;
+      loads.set(id, { resolve, reject });
+      send({ type: 'load', id, json });
+    }),
     editor: () => editor?.state() ?? null,
     setAngleSnapping: (enabled) => editor?.setAngleSnapping(enabled),
     setActuated(value) { if (editor) editor.actuated = value; },

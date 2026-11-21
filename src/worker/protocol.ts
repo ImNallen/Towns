@@ -10,6 +10,8 @@ import type { LandUse } from '../sim/zoning/paint';
 
 /** Main thread → simulation worker. */
 export type ToWorker =
+  | { type: 'load'; id: number; json: string }
+  | { type: 'save'; id: number }
   | { type: 'init'; walkLimit?: number; scenario: ScenarioName; seed: number; speed: number }
   /** Simulation speed multiplier; 0 pauses. */
   | { type: 'setSpeed'; speed: number }
@@ -25,12 +27,15 @@ export type ToWorker =
 
 /** Simulation worker → main thread. */
 export type FromWorker =
+  | { type: 'loaded'; id: number }
+  | { type: 'loadError'; id: number; reason: string }
+  | { type: 'saved'; id: number; json: string }
   | { type: 'roadsChanged'; network: Network; zones: ZoneCells | undefined; edits: MeadowEdit[] }
   /** A stroke was added or undone. Roads and cells are still those of the last `ready` or `roadsChanged`. */
   | { type: 'zoningChanged'; edits: MeadowEdit[] }
   | { type: 'editWaiting' }
   | { type: 'editRejected'; reason: string }
-  | { type: 'ready'; scenario: Scenario; capacity: number }
+  | { type: 'ready'; scenario: Scenario; capacity: number; edits: MeadowEdit[] }
   /** Residents and their households, a few times a second while the map has a town. */
   | { type: 'town'; view: TownView }
   | {
