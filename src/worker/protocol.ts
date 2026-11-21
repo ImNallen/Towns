@@ -1,3 +1,4 @@
+import type { RoadType } from '../sim/network/roadTypes';
 import type { Vec2 } from '../sim/math/vec';
 import type { Network } from '../sim/network/types';
 import type { MeadowEdit } from '../sim/scenarios/meadow';
@@ -12,7 +13,8 @@ export type ToWorker =
   | { type: 'init'; scenario: ScenarioName; seed: number; speed: number }
   /** Simulation speed multiplier; 0 pauses. */
   | { type: 'setSpeed'; speed: number }
-  | { type: 'buildRoad'; start: Vec2; end: Vec2; bend?: Vec2 }
+  | { type: 'buildRoad'; roadType?: RoadType; start: Vec2; end: Vec2; bend?: Vec2 }
+  | { type: 'upgradeRoad'; segment: number; editCount: number; roadType: RoadType }
   | { type: 'bulldozeRoad'; segment: number; editCount: number }
   /** Cells the brush passed over; the worker plans the stroke against its own edits. `zone: null` erases. */
   | { type: 'paintZone'; zone: ZoneKind | null; cells: readonly CellKey[] }

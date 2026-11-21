@@ -1,3 +1,4 @@
+import { edgeOffset, type RoadType } from '../network/roadTypes';
 import { polyline, sampleAt, type PathSample } from '../math/polyline';
 import type { Vec2 } from '../math/vec';
 import type { Surface } from '../network/types';
@@ -8,7 +9,7 @@ export const CELL_WIDTH = 8;
 export const CELL_DEPTH = 8;
 export const ZONE_ROWS = 4;
 /** The front row starts this far from the street centreline: half the road plus a kerb gap. */
-export const ZONE_KERB = 4.5;
+export const ZONE_KERB = edgeOffset('town', 'left') + 0.5;
 const MIN_EDGE = 4;
 const MAX_EDGE = 14;
 /** Drawn road outline beyond a surface's width (see render/roads.ts). */
@@ -33,6 +34,7 @@ export type Side = 0 | 1;
 export type CellKey = number & { readonly __brand: 'CellKey' };
 
 export interface ZoneRoad {
+  readonly ranges?: readonly { from: number; to: number; roadType: RoadType }[];
   readonly index: RoadIndex;
   /** The whole road as built, never a split section. */
   readonly points: readonly Vec2[];
@@ -59,6 +61,7 @@ export interface ZoneCells {
   readonly keys: Float64Array;
   /** 8 numbers per cell: x0, y0 … x3, y3. */
   readonly corners: Float64Array;
+  readonly kerbs?: Float64Array;
 }
 
 export function cellKey(road: RoadIndex, column: number, side: Side, row: number): CellKey {
@@ -114,6 +117,7 @@ export function cellsAlong(cells: ZoneCells, a: Vec2, b: Vec2): CellKey[] {
 type Quad = Float64Array;
 
 interface Candidate {
+  kerb: number;
   key: CellKey;
   side: Side;
   /** Boundary points and outward normals (already signed for the side) at both column ends. */
@@ -137,7 +141,7 @@ export function buildZoneCells(roads: readonly ZoneRoad[], obstacles: ZoneObstac
   }
   const front = roads.flatMap((road) => columns(road));
   const cells = new Buckets<Quad>();
-  const accepted: { key: CellKey; quad: Quad }[] = [];
+  const accepted: { key: CellKey; quad: Quad; kerb: number }[] = [];
   let open = front;
   for (let row = 0; row < ZONE_ROWS; row++) {
     const next: Candidate[] = [];
@@ -145,7 +149,7 @@ export function buildZoneCells(roads: readonly ZoneRoad[], obstacles: ZoneObstac
       const quad = cellQuad(c, row);
       if (!fits(quad, obstacles, surfaces, cells)) continue;
       const key = (c.key + row) as CellKey;
-      accepted.push({ key, quad });
+      accepted.push({ key, quad, kerb: c.kerb });
       cells.insert(...quadBox(quad), quad);
       next.push(c);
     }
@@ -158,7 +162,7 @@ export function buildZoneCells(roads: readonly ZoneRoad[], obstacles: ZoneObstac
     keys[i] = key;
     corners.set(quad, i * 8);
   });
-  return { count: accepted.length, keys, corners };
+  return { count: accepted.length, keys, corners, kerbs: Float64Array.from(accepted, c => c.kerb) };
 }
 
 /** Covered columns of one road, both sides, in priority order (column, then side). */
@@ -189,9 +193,13 @@ function columns(road: ZoneRoad): Candidate[] {
     const start = boundaries[column]!;
     const end = boundaries[column + 1]!;
     for (const side of [0, 1] as const) {
+      const edgeSide = side === 0 ? 'left' : 'right';
+      const widths = road.ranges?.filter(r => r.from < to - 1e-6 && r.to > from + 1e-6)
+        .map(r => edgeOffset(r.roadType, edgeSide));
+      const kerb = widths?.length ? Math.max(...widths) + 0.5 : ZONE_KERB;
       const sign = side === 0 ? 1 : -1;
       out.push({
-        key: cellKey(road.index, column, side, 0), side,
+        kerb, key: cellKey(road.index, column, side, 0), side,
         a: start.p, b: end.p,
         na: { x: start.n.x * sign, y: start.n.y * sign }, nb: { x: end.n.x * sign, y: end.n.y * sign },
       });
@@ -202,7 +210,7 @@ function columns(road: ZoneRoad): Candidate[] {
 
 /** Counter-clockwise; corners 0→1 run along the kerb. The right side walks the road backwards. */
 function cellQuad(c: Candidate, row: number): Quad {
-  const near = ZONE_KERB + row * CELL_DEPTH;
+  const near = c.kerb + row * CELL_DEPTH;
   const far = near + CELL_DEPTH;
   const [p, q, np, nq] = c.side === 0 ? [c.a, c.b, c.na, c.nb] : [c.b, c.a, c.nb, c.na];
   return Float64Array.of(

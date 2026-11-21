@@ -71,6 +71,7 @@ export interface RegionSpec {
 
 export interface TownSpec {
   roadMetres: number;
+  roadUpkeep?: number;
   homes: HomeSpec[];
   regions: RegionSpec[];
 }

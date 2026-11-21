@@ -1,3 +1,4 @@
+import type { RoadType } from '../sim/network/roadTypes';
 import { SUN_DIRECTION, SUN_INTENSITY, AMBIENT_INTENSITY } from './lighting';
 import * as THREE from 'three';
 import type { Network } from '../sim/network/types';
@@ -32,6 +33,7 @@ export interface GameOptions {
 export interface Game {
   editor(): EditorState | null;
   setAngleSnapping(enabled: boolean): void;
+  setRoadType(type: RoadType): void;
   setTool(tool: MapTool): void;
   setBrush(brush: ZoneKind | null): void;
   undo(): void;
@@ -212,6 +214,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   const game: Game = {
     editor: () => editor?.state() ?? null,
     setAngleSnapping: (enabled) => editor?.setAngleSnapping(enabled),
+    setRoadType(type) { editor?.setRoadType(type); },
     setTool(tool) {
       editor?.setTool(tool);
       if (zoneLayer) zoneLayer.visible = gridVisible();

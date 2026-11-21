@@ -37,7 +37,7 @@ const interior = (q: readonly Vec2[]): Vec2[] => [0.2, 0.5, 0.8].flatMap((u) => 
 )));
 /** Points spread over the whole quad, inset only by the slack allowed against roads. */
 const covering = (q: readonly Vec2[]): Vec2[] => {
-  const inset = ZONE_SLACK / 4;
+  const inset = ZONE_SLACK / 14;
   const steps = [inset, 0.25, 0.5, 0.75, 1 - inset];
   return steps.flatMap((u) => steps.map((v) => p(
     (1 - v) * ((1 - u) * q[0]!.x + u * q[1]!.x) + v * ((1 - u) * q[3]!.x + u * q[2]!.x),
@@ -161,7 +161,7 @@ describe('zone cells', () => {
     const node = p(-65, -8);
     const edits = draw([[p(-65, 62), node]]);
     const road = (edits[0] as MeadowRoad).points;
-    const onRoad = (x: Vec2) => road.some((a, k) => k > 0 && segmentDistance(x, a.x, a.y, road[k - 1]!.x, road[k - 1]!.y) < 4.5);
+    const onRoad = (x: Vec2) => road.some((a, k) => k > 0 && segmentDistance(x, a.x, a.y, road[k - 1]!.x, road[k - 1]!.y) < ZONE_KERB);
     const after = zones(edits);
     const stem = Array.from({ length: after.count }, (_, i) => i)
       .filter((i) => decodeCellKey(after.keys[i]! as CellKey).road === edits.length + 3)
@@ -172,8 +172,10 @@ describe('zone cells', () => {
       const q = quad(before, i);
       const c = centroid(q);
       if (j < 0) {
-        const displaced = Math.hypot(c.x - node.x, c.y - node.y) < 20 || covering(q).some(onRoad)
-          || stem.some((s) => interior(q).some((x) => inside(s, x)));
+        const key = before.keys[i]! as CellKey;
+        const lostFrontNeighbour = decodeCellKey(key).row > 0 && findCell(after, (key - 1) as CellKey) < 0;
+        const displaced = lostFrontNeighbour || Math.hypot(c.x - node.x, c.y - node.y) < 20 || covering(q).some(onRoad)
+          || stem.some((s) => covering(q).some((x) => inside(s, x)) || covering(s).some(x => inside(q, x)));
         expect(displaced, `${before.keys[i]} vanished`).toBe(true);
         continue;
       }

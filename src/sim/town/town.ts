@@ -1,7 +1,7 @@
 import { BUDGET, ECONOMY } from './economy';
 import { Treasury, type BudgetView } from './budget';
 import { ZONE_KINDS, type ZoneKind } from '../zoning/paint';
-import type { Lot } from '../zoning/lots';
+import { sameParcel, type Lot } from '../zoning/lots';
 import { Rng } from '../rng';
 import type { TownSpec } from '../scenarios/types';
 import type { Routing } from '../traffic/routing';
@@ -170,6 +170,10 @@ const dayOf = (minute: number): number => Math.floor(minute / MINUTES_PER_DAY) +
  */
 export class Town {
   readonly treasury = new Treasury();
+  private get dailyRoadUpkeep(): number {
+    return this.spec.roadUpkeep ?? Math.round(this.spec.roadMetres * BUDGET.upkeepPerMetre);
+  }
+
   // Daily gross wages for homes and receipts for shops.
   private readonly taxable: Float64Array;
   private readonly taxesPaid: Float64Array;
@@ -342,7 +346,7 @@ export class Town {
     let closed = false;
     for (let h = 0; h < source.spec.homes.length; h++) {
       const old = source.spec.homes[h]!.lot;
-      if (!old || this.spec.homes[h]!.lot === old) continue;
+      if (!old || sameParcel(old, this.spec.homes[h]!.lot)) continue;
       // Preserve tax on earnings already recorded even if the payer leaves before settlement.
       if (source.level[h]) this.treasury.today.homes += source.dailyTax(h);
       if (source.open[h]) {
@@ -629,7 +633,7 @@ export class Town {
       this.funds[h] -= this.dailyCost(h) + tax;
       this.pantry[h] = Math.max(0, this.pantry[h]! - 1);
     }
-    this.treasury.close(this.spec.roadMetres);
+    this.treasury.close(this.spec.roadMetres, this.dailyRoadUpkeep);
     this.jobMarket(routing, minute);
     for (let h = 0; h < this.spec.homes.length; h++) if (this.level[h]) this.purchase(h, minute);
     for (let p = 0; p < this.people; p++) if (!this.departed(p)) this.early[p] = this.rng.int(MAX_EARLY);
@@ -890,7 +894,7 @@ export class Town {
       }
     }
     const budget = this.treasury.view();
-    budget.today.upkeep = Math.round(this.spec.roadMetres * BUDGET.upkeepPerMetre);
+    budget.today.upkeep = this.dailyRoadUpkeep;
     for (const household of households) budget.today.homes += this.dailyTax(household.home);
     const businesses: BusinessView[] = [];
     for (let h = 0; h < homes.length; h++) {

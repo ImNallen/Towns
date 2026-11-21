@@ -1,3 +1,5 @@
+import { edgeOffset, ROAD_ORDER, ROAD_TYPES } from '../sim/network/roadTypes';
+import { PALETTE } from '../render/palette';
 import { useEffect, useRef } from 'react';
 import { BLUEPRINTS } from '../buildings/catalogue';
 import { PreviewRenderer } from '../render/buildings/preview';
@@ -21,7 +23,7 @@ export function Catalogue() {
   return <main ref={root} className="catalogue">
     <header><span className="wordmark">Towns / Low density</span>
       <h1>Building catalogue</h1>
-      <nav aria-label="Catalogue sections">{['cheap', 'mid', 'expensive', 'shops', 'workplaces', 'street'].map(id =>
+      <nav aria-label="Catalogue sections">{['cheap', 'mid', 'expensive', 'shops', 'workplaces', 'street', 'roads'].map(id =>
         <a key={id} href={'#' + id}>{id === 'street' ? 'Sample street' : id}</a>)}</nav>
     </header>
     <p>Selected wall and roof combinations · Lot sizes in zone cells</p>
@@ -32,6 +34,20 @@ export function Catalogue() {
           <canvas width={1024} data-design={b.id} aria-label={b.name + ' colour and mirrored variants'} />
         </figure>)}</div>
     </section>)}
+    <section id="roads"><h2>Road cross-sections</h2>
+      <div className="design-grid">{ROAD_ORDER.map(type => {
+        const road = ROAD_TYPES[type];
+        const layers = (side: 'left' | 'right') => road.strips.filter(strip => strip.side === 'both' || strip.side === side);
+        const travel = { kind: 'lane' as const, width: road.laneWidth };
+        const bands = [...layers('left').reverse(), travel, travel, ...layers('right')];
+        return <figure key={type}><figcaption><strong>{road.name}</strong><span>{Math.round(3.6 * road.speedLimit)} km/h</span></figcaption>
+          <div className="road-section">{bands.map((band, i) => <span key={i} style={{ width: band.width * 20, background: band.kind === 'lane' ? PALETTE.roadSurface : PALETTE[band.kind] }}>
+            {band.kind === 'lane' ? (i === layers('left').length ? '↓' : '↑') : band.kind === 'parking' ? 'P' : 'Walk'}
+          </span>)}</div>
+          <small>{edgeOffset(type, 'left') + edgeOffset(type, 'right')} m wide · ${road.cost}/m · ${road.upkeep}/m daily upkeep</small>
+        </figure>;
+      })}</div>
+    </section>
     <section id="street"><h2>Sample street</h2><p>Garden Road · 16 lots</p>
       <canvas width={1920} aria-label="Sixteen generated residential lots lining Garden Road" />
     </section>

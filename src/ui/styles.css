@@ -16,7 +16,7 @@
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ground); }
 #map { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
 #map:active { cursor: grabbing; }
-#map:is([data-tool='road'], [data-tool='curve'], [data-tool='bulldoze'], [data-tool='zone']), #map:is([data-tool='road'], [data-tool='curve'], [data-tool='bulldoze'], [data-tool='zone']):active { cursor: crosshair; }
+#map:is([data-tool='road'], [data-tool='curve'], [data-tool='bulldoze'], [data-tool='upgrade'], [data-tool='zone']), #map:is([data-tool='road'], [data-tool='curve'], [data-tool='bulldoze'], [data-tool='upgrade'], [data-tool='zone']):active { cursor: crosshair; }
 #map[data-house], #map[data-house]:active { cursor: pointer; }
 #ui { position: fixed; inset: 0; pointer-events: none; }
 .hud { position: absolute; inset: 0; pointer-events: none; font-size: 12px; }
@@ -167,3 +167,5 @@ button.bulldoze.active, button.bulldoze.active:hover { background: #904731; }
 .budget li, .budget p { font-size: 10px; color: var(--muted); }
 .budget li strong { display: block; color: var(--ink); font-variant-numeric: tabular-nums; }
 .preview-cost { float: right; margin-left: 12px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.road-picker { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
+.road-picker select { font: inherit; padding: 3px 6px; border: 1px solid var(--line); background: var(--panel); color: inherit; border-radius: 3px; }

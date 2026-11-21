@@ -4,7 +4,7 @@ import type { BuildingPick, LotSize } from '../../buildings/types';
 import { add, normalize, scale, sub, type Vec2 } from '../math/vec';
 import { accessPoints } from '../scenarios/meadow';
 import type { Scenario } from '../scenarios/types';
-import { decodeCellKey, ZONE_KERB, type CellKey } from './cells';
+import { decodeCellKey, ZONE_KERB, type CellKey, type ZoneCells } from './cells';
 import type { Zoning } from './paint';
 
 export interface Lot extends LotSize {
@@ -16,6 +16,11 @@ export interface Lot extends LotSize {
   streetY: number;
   corners: Vec2[];
   designs: BuildingPick[];
+}
+
+export function sameParcel(old: Lot, current: Lot | undefined): boolean {
+  return current?.key === old.key && current.rows === old.rows && current.columns === old.columns
+    && current.designs[0]!.blueprint.zone === old.designs[0]!.blueprint.zone;
 }
 
 const COTTAGE = { columns: 1, rows: 1 } as const;
@@ -30,12 +35,12 @@ function footprint(key: CellKey, size: LotSize): CellKey[] {
 }
 
 /** Walk the kerb left-to-right, then the rear boundary in reverse. */
-function parcelGeometry(corners: Float64Array, indices: Map<CellKey, number>, key: CellKey, size: LotSize) {
+function parcelGeometry(cells: ZoneCells, indices: Map<CellKey, number>, key: CellKey, size: LotSize) {
   const { side } = decodeCellKey(key);
   const point = (column: number, row: number, corner: number): Vec2 => {
     const cell = indices.get((key + column * 8 + row) as CellKey)!;
     const offset = cell * 8 + corner * 2;
-    return { x: corners[offset]!, y: corners[offset + 1]! };
+    return { x: cells.corners[offset]!, y: cells.corners[offset + 1]! };
   };
   const columns = Array.from({ length: size.columns }, (_, i) => side === 0 ? i : size.columns - 1 - i);
   const front = columns.map(c => point(c, 0, 0));
@@ -50,7 +55,7 @@ function parcelGeometry(corners: Float64Array, indices: Map<CellKey, number>, ke
   const middle = scale(add(kerb, back), 0.5);
   // The larger designs have enough garden in front to move one metre closer to the kerb.
   const centre = size.rows === 2 ? add(middle, towardStreet) : middle;
-  const street = add(kerb, scale(towardStreet, ZONE_KERB));
+  const street = add(kerb, scale(towardStreet, cells.kerbs?.[indices.get(key)!] ?? ZONE_KERB));
   const tangent = sub(front.at(-1)!, front[0]!);
   return { ...centre, angle: Math.atan2(tangent.y, tangent.x), streetX: street.x, streetY: street.y,
     corners: [...front, ...rear.reverse()] };
@@ -78,7 +83,9 @@ export function zonedLots(scenario: Scenario, zoning: Zoning, occupied: Lot[] = 
     for (const k of footprint(lot.key, lot)) available.delete(k);
   };
   for (const lot of occupied) {
-    if (footprint(lot.key, lot).every(k => available.has(k) && zoning.get(k) === lot.designs[0]!.blueprint.zone)) reserve(lot);
+    if (footprint(lot.key, lot).every(k => available.has(k) && zoning.get(k) === lot.designs[0]!.blueprint.zone)) {
+      reserve({ ...lot, ...parcelGeometry(cells, available, lot.key, lot) });
+    }
   }
   for (const key of available.keys()) {
     const { road, column, row, side } = decodeCellKey(key);
@@ -87,7 +94,7 @@ export function zonedLots(scenario: Scenario, zoning: Zoning, occupied: Lot[] = 
     const detached = (zone === 'workplaces' || (column + side * 2) % 4 === 0)
       && footprint(key, DETACHED).every(k => available.has(k) && zoning.get(k) === zone);
     const size = detached ? DETACHED : COTTAGE;
-    const geometry = parcelGeometry(cells.corners, available, key, size);
+    const geometry = parcelGeometry(cells, available, key, size);
     if (!accessPoints(scenario.network, { x: geometry.streetX, y: geometry.streetY }).length) continue;
     const neighbours = lots.filter(l => {
       const other = decodeCellKey(l.key);

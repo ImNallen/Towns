@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { sampleAt, type PathSample, type Polyline } from '../sim/math/polyline';
+import { polyline, sampleAt, type PathSample, type Polyline } from '../sim/math/polyline';
 import type { Network } from '../sim/network/types';
 import { FlatMesh, flatMaterial } from './flat';
 import { PALETTE } from './palette';
@@ -19,10 +19,26 @@ export function buildRoads(network: Network, marking: 'dashed' | 'solid' = 'soli
   const centerLines = new FlatMesh(LAYER.marking);
   const giveWay = new FlatMesh(LAYER.marking);
 
+  const pavement = new FlatMesh(0.13);
+  const parking = new FlatMesh(0.12);
+  const bayMarks = new FlatMesh(0.15);
   for (const s of network.surfaces) {
     outline.ribbon(s.centerline, s.width + OUTLINE * 2);
+    if (s.style === 'pavement' || s.style === 'parking') {
+      const strip = s.style === 'pavement' ? pavement : parking;
+      strip.ribbon(s.centerline, s.width - 0.14);
+      if (s.style === 'parking') {
+        for (let at = 3; at < s.centerline.length - 1; at += 6) {
+          const p = sampleAt(s.centerline, at, sample);
+          const dx = -p.hy * s.width * 0.4, dy = p.hx * s.width * 0.4;
+          bayMarks.ribbon(polyline([{ x: p.x - dx, y: p.y - dy }, { x: p.x + dx, y: p.y + dy }]), 0.12);
+        }
+      }
+      continue;
+    }
     surface.ribbon(s.centerline, s.width);
     if (s.style === 'twoWay') {
+      if (s.roadType === 'country') continue;
       if (marking === 'dashed') centerLines.dashes(s.centerline, 0.22, 3, 6);
       else centerLines.ribbon(s.centerline, 0.3);
     }
@@ -73,6 +89,9 @@ export function buildRoads(network: Network, marking: 'dashed' | 'solid' = 'soli
   };
   add(outline, PALETTE.roadOutline);
   add(surface, PALETTE.roadSurface);
+  add(pavement, PALETTE.pavement);
+  add(parking, PALETTE.parking);
+  add(bayMarks, PALETTE.roadSurface);
   add(centerLines, PALETTE.centerLine);
   add(giveWay, PALETTE.giveWay);
   return group;

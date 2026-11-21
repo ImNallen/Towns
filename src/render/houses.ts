@@ -141,7 +141,7 @@ export class HouseLayer {
     for (const business of businesses) grown.set(business.home, business.lot);
     if (this.drawnLand === this.land && grown.size === this.grown.size && [...grown].every(([id, lot]) => {
       const old = this.grown.get(id);
-      return old?.key === lot.key && old.design === lot.design && old.columns === lot.columns && old.rows === lot.rows;
+      return old?.key === lot.key && old.x === lot.x && old.y === lot.y && old.design === lot.design && old.columns === lot.columns && old.rows === lot.rows;
     })) return;
     this.drawnLand = this.land;
     this.grown = grown;
