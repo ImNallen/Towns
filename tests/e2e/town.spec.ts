@@ -73,7 +73,12 @@ test('residents commute, a household card opens on click, and a new road sends t
   await page.mouse.wheel(0, -450);
   await page.screenshot({ path: 'artifacts/screens/town-cars.png' });
   await page.mouse.wheel(0, 450);
-  const commuter = (await town())!.households.find((h) => h.region === 'Westbrook' && h.members.some((m) => m.job === 'Eastford'));
+  const commuters = (await town())!.households.filter(h => h.region === 'Westbrook' && h.members.some(m => m.job === 'Eastford'));
+  let commuter;
+  for (const candidate of commuters) {
+    const point = screen(scenario.decor.houses[candidate.home]!);
+    if (await page.evaluate(p => document.elementFromPoint(p.x, p.y)?.id === 'map', point)) { commuter = candidate; break; }
+  }
   expect(commuter).toBeDefined();
   expect((await town())!.events.some((e) => (e.kind === 'changedJob' || e.kind === 'newJob') && e.region === 'Eastford' && e.day === 2)).toBe(true);
   await expect(residents.getByRole('listitem')).toHaveCount(3);

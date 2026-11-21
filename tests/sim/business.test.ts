@@ -78,14 +78,12 @@ it('rezoning a business mid-commute cancels the trip and releases its employees'
   const workers = view.households.flatMap(h => h.members).filter(p => p.job === business.name);
   for (let t = 0; t < day; t++) {
     world.step();
-    const v = world.vehicles;
-    const slot = v.alive.findIndex((alive, i) => !!alive && workers.some(p => p.id === v.owner[i])
-      && world.townView()!.households.some(h => h.members.some(p => p.id === v.owner[i] && p.activity === 'outbound' && p.place === business.name)));
-    if (slot < 0) continue;
+    const walker = workers.find(p => world.walkers!.goal[p.id] === business.home);
+    if (!walker) continue;
     const changed = new Map(zoning);
     changed.set(business.lot.key, 'residential');
     world.setZoning(changed);
-    expect(v.alive[slot]).toBe(0);
+    expect(world.walkers!.goal[walker.id]).toBe(-1);
     const after = world.townView()!;
     expect(after.households.flatMap(h => h.members).every(p => p.job !== business.name)).toBe(true);
     expect(after.events.filter(e => e.kind === 'lostJob' && e.region === business.name)).toHaveLength(workers.length);

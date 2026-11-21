@@ -124,6 +124,7 @@ export function sameEntrance(a: readonly AccessPoint[], b: readonly AccessPoint[
 }
 
 export class Parking {
+  walking?: import("../network/walking").WalkingNetwork;
   readonly occupant: Int32Array;
   constructor(
     readonly bays: Bay[],
@@ -139,6 +140,7 @@ export class Parking {
     open: Uint8Array,
     access: AccessPoint[],
     routing: Routing,
+    walkLimit = WALK_LIMIT,
   ): number {
     let best = -1,
       distance = Infinity,
@@ -150,9 +152,10 @@ export class Parking {
       if (b.kind === 'yard' && !open[b.home]) continue;
       const dx = b.x - door.x,
         dy = b.y - door.y;
-      const d = dx * dx + dy * dy;
+      const length = this.walking?.distance(this.firstDest - routing.sinks.length + i, home);
+      const d = length === undefined ? dx * dx + dy * dy : length * length;
       const preferred = b.home === home;
-      if (d > WALK_LIMIT * WALK_LIMIT || (!preferred && own) || (preferred === own && d >= distance)) continue;
+      if (d > walkLimit * walkLimit || (!preferred && own) || (preferred === own && d >= distance)) continue;
       if (!sameEntrance(access, b.access) && routing.bestAccess(access, this.firstDest + i) < 0) continue;
       best = i;
       distance = d;

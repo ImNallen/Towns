@@ -18,6 +18,7 @@ function readOptions(): GameOptions {
     return q.has(key) && Number.isFinite(v) ? v : fallback;
   };
   return {
+    walkLimit: q.has('walkLimit') ? Math.max(0, num('walkLimit', 600)) : undefined,
     scenario: isScenarioName(scenario) ? scenario : 'meadow',
     seed: num('seed', 1),
     speed: num('speed', 1),

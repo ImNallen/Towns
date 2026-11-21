@@ -135,8 +135,8 @@ test('painted residential frontage grows into a lived-in street', async ({ page 
   expect(errors).toEqual([]);
 });
 
-async function connectedStreet(page: Page) {
-  await page.goto('/?scenario=meadow&seed=1&speed=0&x=20&y=8&mpp=0.15');
+async function connectedStreet(page: Page, query = '') {
+  await page.goto('/?scenario=meadow&seed=1&speed=0&x=20&y=8&mpp=0.15' + query);
   const editor = () => page.evaluate(() => window.__towns?.editor());
   await expect.poll(editor).toMatchObject({ tool: 'road', pending: false });
   const box = (await page.locator('#map').boundingBox())!;
@@ -326,7 +326,7 @@ test('road type preview, upgrades and residential growth', async ({ page }) => {
 
 test('parking occupancy and a new lot serving the shops', async ({ page }) => {
   test.setTimeout(150_000);
-  const { at, drag, editor } = await connectedStreet(page);
+  const { at, drag, editor } = await connectedStreet(page, '&walkLimit=0');
   await page.keyboard.press('s');
   await drag(-21, 24, 6);
   await expect.poll(editor).toMatchObject({ pending: false });
@@ -382,4 +382,31 @@ test('drivers park on a street with side bays', async ({ page }) => {
     return true;
   }, null, { timeout: 55_000 });
   await page.screenshot({ path: 'artifacts/screens/parking-street.png' });
+});
+
+test('residents walk along the shop frontage', async ({ page }) => {
+  test.setTimeout(120_000);
+  const { drag, editor } = await connectedStreet(page);
+  for (const [brush,start,y,end] of [['h',-34,-8,76],['s',-34,24,16],['w',18,24,76]] as const) {
+    await page.keyboard.press(brush);
+    await drag(start,y,end);
+    await expect.poll(editor).toMatchObject({ pending: false });
+  }
+  await page.keyboard.press('v');
+  await page.mouse.move(0,0);
+  await page.evaluate(() => window.__towns!.setSpeed(160));
+  await page.waitForFunction(() => {
+    const game = window.__towns!;
+    const positions = game.walkerPositions();
+    const visible: number[] = [];
+    for (let i=0; i<positions.length; i+=3) {
+      const x = positions[i]!, y = positions[i+1]!;
+      if (x < -30 || x > 115 || Math.abs(y-8) > 7 || visible.some(v => Math.abs(v-x)<4)) continue;
+      visible.push(x);
+    }
+    if (visible.length < 4) return false;
+    game.setSpeed(0);
+    return true;
+  }, null, { timeout: 100_000 });
+  await page.screenshot({ path: 'artifacts/screens/pavement-walkers.png' });
 });

@@ -10,7 +10,7 @@ import type { LandUse } from '../sim/zoning/paint';
 
 /** Main thread → simulation worker. */
 export type ToWorker =
-  | { type: 'init'; scenario: ScenarioName; seed: number; speed: number }
+  | { type: 'init'; walkLimit?: number; scenario: ScenarioName; seed: number; speed: number }
   /** Simulation speed multiplier; 0 pauses. */
   | { type: 'setSpeed'; speed: number }
   | { type: 'buildRoad'; roadType?: RoadType; start: Vec2; end: Vec2; bend?: Vec2 }
@@ -38,6 +38,7 @@ export type FromWorker =
       slots: number;
       /** Per slot: x, y, heading (radians). */
       positions: Float32Array;
+      walkers: Float32Array;
       /** Per slot vehicle id, -1 for empty slots. */
       ids: Int32Array;
       /** Catalogue model for each occupied slot. */

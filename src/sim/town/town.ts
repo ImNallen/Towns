@@ -1,5 +1,9 @@
+import type { WalkRouting } from '../network/walkRouting';
+import { walkChance, WALK_CHOICE } from './mode';
+import { Walkers, WalkingNetwork, WALK_TRIP_LIMIT } from '../network/walking';
+import type { Network } from '../network/types';
 import { decodeCellKey } from '../zoning/cells';
-import { Parking, sameEntrance, WALK_LIMIT, walkMinutes, type Bay } from './parking';
+import { Parking, sameEntrance, WALK_LIMIT, type Bay } from './parking';
 import type { AccessPoint } from '../traffic/routing';
 import type { Vec2 } from '../math/vec';
 import { Model, vehicleType } from '../../vehicles/catalogue';
@@ -160,7 +164,7 @@ export interface BusinessView {
 export interface TownView {
   overflowCars: Array<Vec2 & { angle: number; model: number }>;
   bays: Array<Pick<Bay, 'kind' | 'x' | 'y' | 'angle'> & { model: number }>;
-  parking: { trips: number; parked: number; turnedAway: number; walkMetres: number };
+  parking: { walkedTrips: number; peakWalkers: number; trips: number; parked: number; turnedAway: number; walkMetres: number };
   budget: BudgetView;
   businesses: BusinessView[];
   demand: Demand;
@@ -277,18 +281,24 @@ export class Town {
   private readonly lotUpkeep: number;
   private readonly door: Vec2[];
   private readonly outside: AccessPoint[][];
+  readonly walkers: Walkers;
+  private readonly modeDay: Int32Array;
+  private readonly modeRoll: Float64Array;
+  private walkedTrips = 0;
   private trips = 0;
   private parked = 0;
   private turnedAway = 0;
   private walkMetres = 0;
 
-  constructor(spec: TownSpec, homeDest: number, seed: number, private readonly routing: Routing, readonly parking: Parking, houses: Vec2[], starterHomes = spec.homes.length) {
+  constructor(spec: TownSpec, homeDest: number, seed: number, private readonly routing: Routing, readonly parking: Parking, houses: Vec2[], network: Network, private readonly walkLimit = WALK_TRIP_LIMIT, starterHomes = spec.homes.length, previous?: WalkRouting) {
     this.spec = spec;
     this.homeDest = homeDest;
     this.rng = new Rng((seed ^ TOWN_SEED) >>> 0);
     const H = spec.homes.length;
     const P = H * MAX_MEMBERS;
     this.carBay = new Int32Array(H * 2).fill(-1);
+    this.modeDay = new Int32Array(P).fill(-1);
+    this.modeRoll = new Float64Array(P);
     this.driverCar = new Int32Array(P).fill(-1);
     this.target = new Int32Array(P).fill(-1);
     this.origin = new Int32Array(P).fill(-1);
@@ -298,6 +308,8 @@ export class Town {
     this.denied = new Uint16Array(H);
     this.frustration = new Uint8Array(H);
     this.door = spec.homes.map((h, i) => h.lot ?? houses[i] ?? { x: 0, y: 0 });
+    this.walkers = new Walkers(new WalkingNetwork(network, this.door, parking.bays, previous), P);
+    parking.walking = this.walkers.graph;
     this.outside = spec.regions.map(r => [{ lane: r.source, s: 0 }]);
     this.lotUpkeep = parking.bays.filter(b => b.kind === 'lot').length * BUDGET.upkeepPerBay;
     this.surname = new Uint16Array(H);
@@ -413,11 +425,14 @@ export class Town {
   }
 
   /** Preserve resident IDs and the random stream when edits resize the home and person arrays. */
-  copyFrom(source: Town, routing: Routing, minute: number): void {
+  copyFrom(source: Town, routing: Routing, minute: number): boolean {
+    let walkersPreserved = true;
     if (source.spec.homes.length > this.spec.homes.length || source.spec.regions.length !== this.spec.regions.length) {
       throw new Error('Town copy requires enough home slots and the same regions');
     }
     this.rng.copyFrom(source.rng);
+    this.walkedTrips = source.walkedTrips;
+    this.walkers.peak = source.walkers.peak;
     this.trips = source.trips;
     this.parked = source.parked;
     this.turnedAway = source.turnedAway;
@@ -433,7 +448,7 @@ export class Town {
     for (let p = 0; p < source.people; p++) this.target[p] = remap(source.target[p]!);
     this.treasury.copyFrom(source.treasury);
     for (const key of [
-      'origin', 'driverCar', 'failed', 'circled', 'due', 'denied', 'frustration',
+      'modeDay', 'modeRoll', 'origin', 'driverCar', 'failed', 'circled', 'due', 'denied', 'frustration',
       'taxable', 'taxesPaid', 'payroll', 'lastDailyCost', 'surname', 'funds', 'wages', 'level', 'cars', 'carModel', 'pantry', 'firstMember', 'memberCount', 'adults',
       'household', 'role', 'age', 'firstName', 'job', 'activity', 'errand', 'at', 'arrivedAt', 'until', 'workedDay',
       'deliveries', 'freightState', 'freightDue', 'open', 'customers', 'early', 'eventDay', 'eventMinute', 'eventHousehold', 'eventKind', 'eventDetail', 'eventPerson',
@@ -494,15 +509,49 @@ export class Town {
     this.carsBought = source.carsBought;
     this.houseUpgrades = source.houseUpgrades;
     this.carUpgrades = source.carUpgrades;
+    for (let p = 0; p < this.people; p++) {
+      if (source.walkers.goal[p]! < 0 || this.role[p] === VACANT || this.activity[p] === HOME) continue;
+      const old = source.walkers;
+      const goal = old.goal[p]!;
+      const bay = goal < source.door.length ? -1 : remap(goal - source.door.length);
+      const dest = goal < source.door.length ? goal : bay < 0 ? -1 : this.door.length + bay;
+      const n = old.node[p]!;
+      const a = old.graph.points[n]!;
+      const b = old.graph.points[old.graph.next[goal]![n]!] ?? a;
+      const t = old.along[p]! / (Math.hypot(b.x-a.x,b.y-a.y) || 1);
+      const x = a.x + t*(b.x-a.x), y = a.y + t*(b.y-a.y);
+      const graph = this.walkers.graph;
+      let nearest = -1, along = 0, distance = 0.05;
+      for (let i = 0; i < graph.points.length; i++) {
+        if (!Number.isFinite(graph.costs[dest]?.[i])) continue;
+        const point = graph.points[i]!;
+        const next = graph.points[graph.next[dest]![i]!] ?? point;
+        const dx = next.x-point.x, dy = next.y-point.y;
+        const length = Math.hypot(dx,dy);
+        const s = Math.min(length, Math.max(0, ((x-point.x)*dx+(y-point.y)*dy)/(length || 1)));
+        const ratio = s/(length || 1);
+        const d = Math.hypot(x-point.x-ratio*dx,y-point.y-ratio*dy);
+        if (d < distance) { distance = d; nearest = i; along = s; }
+      }
+      if (nearest < 0) {
+        walkersPreserved = false;
+        this.lost(p);
+        continue;
+      }
+      this.walkers.start(p, dest, dest, this.age[p]!);
+      this.walkers.node[p] = nearest;
+      this.walkers.along[p] = along;
+    }
     if (closed) this.jobMarket(routing, minute);
     else {
       this.filled.fill(0);
       for (let p = 0; p < this.people; p++) if (this.job[p]! >= 0) this.filled[this.job[p]!]++;
     }
+    return walkersPreserved;
   }
 
   /** Advance one game minute. `minute` counts from midnight before day 1. */
-  update(minute: number, roads: TownRoads): void {
+  update(minute: number, roads: TownRoads, allowDepartures: boolean): void {
     if (minute % 60 === 0) this.grow(minute, roads.routing);
     const clock = minute % MINUTES_PER_DAY;
     if (clock === 0) this.midnight(minute, roads.routing);
@@ -510,16 +559,22 @@ export class Town {
     const day = dayOf(minute);
     for (let p = 0; p < this.people; p++) {
       if (this.role[p] !== ADULT) continue;
-      if (minute < this.due[p]!) continue;
+      if (this.walkers.goal[p]! >= 0 || minute < this.due[p]!) continue;
       const phase = this.activity[p];
       if (phase === WALK_TO_CAR || phase === SEARCH) this.startDrive(p, roads, minute);
       else if (phase === WALK_TO_DOOR || phase === WALK_HOME) this.enterDoor(p, minute);
       else if (phase === RETURN_FAILED || phase === WALK_BACK || phase === SEEK_HOME) this.leaveRegion(p, roads, minute);
-      else if (this.activity[p] === HOME) this.leaveHome(p, day, clock, roads, minute);
+      else if (allowDepartures && this.activity[p] === HOME) this.leaveHome(p, day, clock, roads);
       else if (this.activity[p] === AWAY && minute >= this.until[p]!) {
         if (this.at[p]! < this.spec.regions.length) { this.leaveRegion(p, roads, minute); continue; }
-        this.activity[p] = WALK_BACK;
-        this.due[p] = minute + walkMinutes(this.walkDistance(p, false));
+        if (this.driverCar[p]! < 0) {
+          this.activity[p] = WALK_HOME;
+          this.walkLeg(p, this.at[p]! - this.spec.regions.length, this.household[p]!);
+          this.payWork(p);
+        } else {
+          this.activity[p] = WALK_BACK;
+          this.walkLeg(p, this.at[p]! - this.spec.regions.length, this.bayPlace(p, false));
+        }
       }
     }
   }
@@ -670,13 +725,14 @@ export class Town {
     const car = this.driverCar[p]!;
     if (bay >= 0 && this.parking.occupant[bay]! < 0) this.assign(car, bay);
     else this.assign(car, -1); // Home driveway apron.
-    const distance = this.walkDistance(p, back);
+    const from = this.bayPlace(p, back);
+    const distance = this.walkers.graph.distance(from, place);
     if (this.carBay[car]! >= 0) {
       this.parked++;
       this.walkMetres += distance;
     }
     this.activity[p] = back ? WALK_HOME : WALK_TO_DOOR;
-    this.due[p] = minute + walkMinutes(distance);
+    this.walkLeg(p, from, place);
   }
 
   private enterDoor(p: number, minute: number): void {
@@ -695,12 +751,13 @@ export class Town {
       ? (this.workedDay[p]! - 1) * MINUTES_PER_DAY + SHIFT_END : minute + SHOP_STAY;
   }
 
-  private walkDistance(p: number, home: boolean): number {
-    const b = this.parking.bays[this.carBay[this.driverCar[p]!]!];
-    const d = this.door[home ? this.household[p]! : this.at[p]! - this.spec.regions.length];
-    if (!b || !d) return 4;
-    const dx = b.x - d.x, dy = b.y - d.y;
-    return Math.sqrt(dx * dx + dy * dy);
+  private bayPlace(p: number, home: boolean): number {
+    const b = this.carBay[this.driverCar[p]!]!;
+    return b >= 0 ? this.door.length + b : home ? this.household[p]! : this.at[p]! - this.spec.regions.length;
+  }
+
+  private walkLeg(p: number, from: number, to: number): void {
+    if (!this.walkers.start(p, from, to, this.age[p]!)) this.lost(p);
   }
 
   private assign(car: number, bay: number): void {
@@ -743,24 +800,55 @@ export class Town {
 
   // --- Trips --------------------------------------------------------------------
 
-  private leaveHome(p: number, day: number, clock: number, roads: TownRoads, minute: number): void {
+  private leaveHome(p: number, day: number, clock: number, roads: TownRoads): void {
     const h = this.household[p]!;
-    if (this.freeCars(h) === 0) return;
+
     const job = this.job[p]!;
     if (job >= 0 && this.workedDay[p] !== day) {
       const travel = this.outTime(h, job, roads.routing);
       if (clock >= SHIFT_START - travel - this.early[p]! && clock + travel <= SHIFT_END - MIN_SHIFT) {
-        if (this.depart(p, WORK, job, minute)) this.workedDay[p] = day;
+        if (this.depart(p, WORK, job, day)) this.workedDay[p] = day;
         return;
       }
     }
     if (clock < SHOP_OPENS || clock >= SHOP_CLOSES || this.pantry[h]! >= PANTRY_LOW || this.shopping(h)) return;
     const shop = this.nearestShop(h, roads.routing);
-    if (shop >= 0) this.depart(p, SHOP, shop, minute);
+    if (shop >= 0) this.depart(p, SHOP, shop, day);
   }
 
-  private depart(p: number, errand: number, region: number, minute: number): boolean {
+  private depart(p: number, errand: number, region: number, day: number): boolean {
     const h = this.household[p]!;
+    const local = region - this.spec.regions.length;
+    const graph = this.walkers.graph;
+    const distance = graph.distance(h, local);
+    let youngFamily = false, carNearDestination = false;
+    for (let i = this.firstMember[h]!; i < this.firstMember[h]! + this.memberCount[h]!; i++) {
+      if (this.age[i]! < 8) youngFamily = true;
+    }
+    for (let car = 2*h; car < 2*h + this.cars[h]!; car++) {
+      const bay = this.carBay[car]!;
+      if (bay < 0) continue;
+      const origin = this.door.length + bay;
+      if (graph.distance(origin,local) < graph.distance(origin,h)) carNearDestination = true;
+    }
+    const chance = walkChance(distance, this.walkLimit, !this.cars[h], errand === SHOP, youngFamily, carNearDestination);
+    if (chance > 0 && this.modeDay[p] !== 2*day + errand) {
+      this.modeDay[p] = 2*day + errand;
+      this.modeRoll[p] = this.rng.next();
+    }
+    if (this.modeRoll[p]! < chance) {
+      this.errand[p] = errand;
+      this.at[p] = region;
+      this.failed[p] = 0;
+      this.activity[p] = WALK_TO_DOOR;
+      this.walkLeg(p, h, local);
+      this.walkedTrips++;
+      return true;
+    }
+    if (this.freeCars(h) <= 0) {
+      if (!this.cars[h]) this.frustration[h] = 2;
+      return false;
+    }
     let car = h * 2;
     for (let k = 0; k < this.memberCount[h]!; k++) {
       if (this.driverCar[this.firstMember[h]! + k] === car) { car++; break; }
@@ -773,7 +861,7 @@ export class Town {
     this.activity[p] = WALK_TO_CAR;
     this.errand[p] = errand;
     this.at[p] = region;
-    this.due[p] = minute + walkMinutes(this.walkDistance(p, true));
+    this.walkLeg(p, h, this.bayPlace(p, true));
     return true;
   }
 
@@ -822,7 +910,7 @@ export class Town {
     let dest = this.destination(place);
     this.target[p] = -1;
     if (local >= 0) {
-      const bay = this.parking.nearest(local, this.door[local]!, false, this.open, access, roads.routing);
+      const bay = this.parking.nearest(local, this.door[local]!, false, this.open, access, roads.routing, this.errand[p] === SHOP ? WALK_CHOICE.groceryParkingRange : WALK_LIMIT);
       if (bay >= 0) { this.target[p] = bay; dest = this.parking.firstDest + bay; }
       else if (this.activity[p] === SEARCH) {
         if (this.circleBlock(p, local, access, roads)) return;
@@ -866,6 +954,12 @@ export class Town {
     this.activity[p] = HOMEBOUND;
     if (here) this.arrived(p, minute);
     if (this.errand[p] !== WORK || this.failed[p] || reparking) return;
+    this.payWork(p);
+  }
+
+  private payWork(p: number): void {
+    if (this.errand[p] !== WORK) return;
+    const h = this.household[p]!, place = this.at[p]!;
     const start = this.until[p]! - (SHIFT_END - SHIFT_START);
     const hours = Math.max(0, this.until[p]! - Math.max(this.arrivedAt[p]!, start)) / 60;
     const pay = hours * this.wage(place);
@@ -888,7 +982,7 @@ export class Town {
   private freeCars(h: number): number {
     let out = 0;
     for (let p = this.firstMember[h]!; p < this.firstMember[h]! + this.memberCount[h]!; p++) {
-      if (this.activity[p] !== HOME) out++;
+      if (this.driverCar[p]! >= 0) out++;
     }
     return this.cars[h]! - out;
   }
@@ -902,19 +996,28 @@ export class Town {
 
   /** Free-flow minutes from home `h` to region `r` (Infinity when unreachable). */
   private outTime(h: number, r: number, routing: Routing): number {
+    const walking = this.walkTime(h, r);
+    if (!this.cars[h]) return walking;
     const access = this.spec.homes[h]!.access;
     const dest = this.destination(r);
     const k = routing.bestAccess(access, dest);
-    return k < 0 ? Infinity : routing.timeFrom(dest, access[k]!.lane, access[k]!.s);
+    return k < 0 ? walking : routing.timeFrom(dest, access[k]!.lane, access[k]!.s);
+  }
+
+  private walkTime(h: number, r: number): number {
+    const length = this.walkers.graph.distance(h, r - this.spec.regions.length);
+    return length <= this.walkLimit * (this.cars[h] ? 1 : WALK_CHOICE.carFreeRange) ? length / 1.35 : Infinity;
   }
 
   private roundTrip(h: number, r: number, routing: Routing): number {
+    const walk = 2 * this.walkTime(h, r);
+    if (!this.cars[h]) return walk;
     const region = this.spec.regions[r];
     const dest = this.homeDest + h;
     if (region) return this.outTime(h, r, routing) + routing.timeFrom(dest, region.source, 0);
     const access = this.spec.homes[r - this.spec.regions.length]!.access;
     const k = routing.bestAccess(access, dest);
-    return k < 0 ? Infinity : this.outTime(h, r, routing) + routing.timeFrom(dest, access[k]!.lane, access[k]!.s);
+    return k < 0 ? walk : this.outTime(h, r, routing) + routing.timeFrom(dest, access[k]!.lane, access[k]!.s);
   }
 
   private nearestShop(h: number, routing: Routing): number {
@@ -1152,6 +1255,8 @@ export class Town {
       mix(this.until[p]!);
       mix(this.workedDay[p]!);
       mix(this.early[p]!);
+      mix(this.modeDay[p]!);
+      mix(Math.round(this.modeRoll[p]!*0xffffffff));
     }
     for (const zone of ZONE_KINDS) if (this.growth[zone]) mix(this.growth[zone]);
     for (let h = 0; h < this.open.length; h++) {
@@ -1173,6 +1278,9 @@ export class Town {
     this.circled.forEach(mix);
     this.frustration.forEach(mix);
     this.denied.forEach(mix);
+    this.walkers.goal.forEach(mix);
+    for (let p=0; p<this.people; p++) if (this.walkers.goal[p]! >= 0) { mix(this.walkers.node[p]!); mix(Math.round(this.walkers.along[p]!*1000)); }
+    mix(this.walkedTrips);
     mix(this.trips);
     mix(this.parked);
     mix(this.turnedAway);
@@ -1298,7 +1406,7 @@ export class Town {
         const car = this.parking.occupant[i]!;
         return [{ x: b.x, y: b.y, angle: b.angle, kind: b.kind, model: car < 0 ? 0 : this.carModel[Math.floor(car / 2)]! }];
       }),
-      parking: { trips: this.trips, parked: this.parked, turnedAway: this.turnedAway, walkMetres: this.walkMetres },
+      parking: { walkedTrips: this.walkedTrips, peakWalkers: this.walkers.peak, trips: this.trips, parked: this.parked, turnedAway: this.turnedAway, walkMetres: this.walkMetres },
       budget,
       businesses,
       demand: { residential: this.demandFor('residential'), shops: this.demandFor('shops'), workplaces: this.demandFor('workplaces') },

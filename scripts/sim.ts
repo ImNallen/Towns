@@ -61,6 +61,7 @@ const town = (view: TownView): string => {
   const clock = `${String(Math.floor(view.minuteOfDay / 60)).padStart(2, '0')}:${String(view.minuteOfDay % 60).padStart(2, '0')}`;
   return [
     `  town day ${view.day} ${clock}`,
+    `walked=${view.parking.walkedTrips} peak=${view.parking.peakWalkers}`,
     `trips=${view.parking.trips}`,
     `parked=${view.parking.parked}`,
     `turned-away=${view.parking.turnedAway}`,
