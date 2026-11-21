@@ -210,7 +210,7 @@ export class RoadEditor {
     if (this.state().pending || this.edits.length === 0) return;
     this.finish();
     this.phase = { kind: 'pending' };
-    this.send({ type: 'undoRoad' });
+    this.send({ type: 'undo' });
   }
 
   cancel(): void {

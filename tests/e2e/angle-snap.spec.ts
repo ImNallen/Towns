@@ -43,7 +43,7 @@ test('the snapped and free previews build at their respective endpoints', async 
     await expect(status).toHaveText('Drag to the other end of your new road.');
     await page.mouse.up();
     await page.keyboard.press('Escape');
-    await page.getByRole('button', { name: 'Undo road' }).click();
+    await page.getByRole('button', { name: 'Undo' }).click();
     await expect.poll(editor).toMatchObject({ roadCount: 0, pending: false });
   }
 });
@@ -96,7 +96,7 @@ test('slide the cross street into alignment at both ends and run traffic through
   await expect(status).toContainText('four-way intersection');
   await page.keyboard.press('Escape');
   await page.mouse.up();
-  await page.getByRole('button', { name: 'Undo road' }).click();
+  await page.getByRole('button', { name: 'Undo' }).click();
   await expect.poll(editor).toMatchObject({ roadCount: 2, connected: false });
   await move(-65, 46);
   await page.mouse.down();
@@ -144,7 +144,7 @@ test('drag from a road end to a parallel street or its marked end', async ({ pag
   await expect(page.getByRole('status')).toHaveText('90° at junction · Release to connect the streets.');
   await page.mouse.up();
   await expect.poll(editor).toMatchObject({ roadCount: 3, connected: true });
-  await page.getByRole('button', { name: 'Undo road' }).click();
+  await page.getByRole('button', { name: 'Undo' }).click();
   await expect.poll(editor).toMatchObject({ roadCount: 2, connected: false });
   await drag(-65, 35, 65, 86);
   await expect(page.getByRole('status')).toHaveText('Release to connect the road ends.');
@@ -183,7 +183,7 @@ test('drag directly between angled road ends and fit a tight turn near the meado
     await page.mouse.up();
     await expect.poll(editor).toMatchObject({ roadCount: 3, connected: true, pending: false });
     for (const roadCount of [2, 1, 0]) {
-      await page.getByRole('button', { name: 'Undo road' }).click();
+      await page.getByRole('button', { name: 'Undo' }).click();
       await expect.poll(editor).toMatchObject({ roadCount, connected: false, pending: false });
     }
   }

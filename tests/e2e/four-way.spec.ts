@@ -30,7 +30,7 @@ test('cross a live street in one drag, undo it, and extend a T through the same 
   const arrived = (await stats())!.completed;
   await expect.poll(async () => (await stats())!.completed, { timeout: 30_000 }).toBeGreaterThan(arrived);
   await page.screenshot({ path: 'artifacts/screens/meadow-four-way.png' });
-  await page.getByRole('button', { name: 'Undo road' }).click();
+  await page.getByRole('button', { name: 'Undo' }).click();
   await expect.poll(editor, { timeout: 20_000 }).toMatchObject({ roadCount: 1, connected: true });
   await drag(-65, -8, -65, 48);
   await page.mouse.up();
@@ -39,7 +39,7 @@ test('cross a live street in one drag, undo it, and extend a T through the same 
   await expect(page.getByRole('status')).toHaveText('Straight · Release to build a four-way intersection.');
   await page.mouse.up();
   await expect.poll(editor, { timeout: 20_000 }).toMatchObject({ roadCount: 3, connected: true });
-  await page.getByRole('button', { name: 'Undo road' }).click();
+  await page.getByRole('button', { name: 'Undo' }).click();
   await expect.poll(editor, { timeout: 20_000 }).toMatchObject({ roadCount: 2, connected: true });
   expect((await stats())!.lost).toBe(0);
   expect(errors).toEqual([]);

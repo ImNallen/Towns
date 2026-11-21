@@ -38,7 +38,7 @@ test('bulldoze one crossing arm, preserve the opposite arm, and undo the removal
   await move(-65, -28);
   await expect(status).toHaveText('Click to remove this segment.');
   await page.screenshot({ path: 'artifacts/screens/meadow-bulldoze-t-junction.png' });
-  await page.getByRole('button', { name: 'Undo road' }).click();
+  await page.getByRole('button', { name: 'Undo' }).click();
   await expect.poll(editor).toMatchObject({ pending: false });
   await move(-65, 28);
   await expect(status).toHaveText('Click to remove this segment.');
@@ -111,11 +111,11 @@ test('remove a bypass while traffic follows the remaining bend, then restore it'
   const afterRebuild = (await stats())?.completed ?? 0;
   await expect.poll(async () => (await stats())?.completed ?? 0, { timeout: 30_000 }).toBeGreaterThan(afterRebuild);
   await page.screenshot({ path: 'artifacts/screens/meadow-bulldoze-rebuilt-bypass.png' });
-  await page.getByRole('button', { name: 'Undo road' }).click();
+  await page.getByRole('button', { name: 'Undo' }).click();
   await expect.poll(editor, { timeout: 20_000 }).toMatchObject({ roadCount: 2, connected: true, pending: false });
   await move(0, 28);
   await expect(page.getByRole('status')).not.toHaveText('Click to remove this segment.');
-  await page.getByRole('button', { name: 'Undo road' }).click();
+  await page.getByRole('button', { name: 'Undo' }).click();
   await expect.poll(editor, { timeout: 20_000 }).toMatchObject({ connected: true, pending: false });
   await move(0, 27.8);
   await expect(page.getByRole('status')).toHaveText('Click to remove this segment.');
@@ -144,7 +144,7 @@ test.describe('touch bulldozing', () => {
     await expect.poll(editor).toMatchObject({ pending: false, canUndo: true });
     await page.mouse.move(x, y(29));
     await expect(page.getByRole('status')).not.toHaveText('Click to remove this segment.');
-    await page.getByRole('button', { name: 'Undo road' }).tap();
+    await page.getByRole('button', { name: 'Undo' }).tap();
     await expect.poll(editor).toMatchObject({ pending: false });
     await page.mouse.move(x, y(28));
     await expect(page.getByRole('status')).toHaveText('Click to remove this segment.');

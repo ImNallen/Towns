@@ -4,7 +4,8 @@ import type { MeadowEdit } from '../sim/scenarios/meadow';
 import type { Scenario, ScenarioName } from '../sim/scenarios';
 import type { TownView } from '../sim/town/town';
 import type { SimStats } from '../sim/world';
-import type { ZoneCells } from '../sim/zoning/cells';
+import type { CellKey, ZoneCells } from '../sim/zoning/cells';
+import type { ZoneKind } from '../sim/zoning/paint';
 
 /** Main thread → simulation worker. */
 export type ToWorker =
@@ -13,12 +14,17 @@ export type ToWorker =
   | { type: 'setSpeed'; speed: number }
   | { type: 'buildRoad'; start: Vec2; end: Vec2; bend?: Vec2 }
   | { type: 'bulldozeRoad'; segment: number; editCount: number }
-  | { type: 'undoRoad' }
+  /** Cells the brush passed over; the worker plans the stroke against its own edits. `zone: null` erases. */
+  | { type: 'paintZone'; zone: ZoneKind | null; cells: readonly CellKey[] }
+  /** Removes the last edit: a road, a removal or a stroke. */
+  | { type: 'undo' }
   | { type: 'cancelRoadEdit' };
 
 /** Simulation worker → main thread. */
 export type FromWorker =
   | { type: 'roadsChanged'; network: Network; zones: ZoneCells | undefined; edits: MeadowEdit[] }
+  /** A stroke was added or undone. Roads and cells are still those of the last `ready` or `roadsChanged`. */
+  | { type: 'zoningChanged'; edits: MeadowEdit[] }
   | { type: 'editWaiting' }
   | { type: 'editRejected'; reason: string }
   | { type: 'ready'; scenario: Scenario; capacity: number }

@@ -52,7 +52,7 @@ export function App({ game }: { game: Game }) {
     setSelected(house);
   };
   const undo = (): void => {
-    game.undoRoad();
+    game.undo();
     setEditor(game.editor());
     setStats(game.stats());
   };
@@ -182,7 +182,7 @@ export function App({ game }: { game: Game }) {
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v16M2 10h16M7 5l3-3 3 3M7 15l3 3 3-3M5 7l-3 3 3 3m10-6 3 3-3 3" /></svg><span>Pan</span><kbd>V</kbd>
           </button>
           <span className="tool-divider" />
-          <button aria-label="Undo road" aria-keyshortcuts="Control+Z Meta+Z" className="tool undo" onClick={undo} disabled={!editor.canUndo || editor.pending} title="Undo road (Ctrl / ⌘ Z)">
+          <button aria-label="Undo" aria-keyshortcuts="Control+Z Meta+Z" className="tool undo" onClick={undo} disabled={!editor.canUndo || editor.pending} title="Undo (Ctrl / ⌘ Z)">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4 3 8l4 4M3 8h8a5 5 0 0 1 0 10" /></svg><span>Undo</span>
           </button>
         </div>

@@ -96,7 +96,7 @@ test('a drag builds one road without chaining, and a chain ends where it joins a
   await page.mouse.down();
   await page.mouse.up();
   await expect.poll(editor).toMatchObject({ chaining: true });
-  await page.getByRole('button', { name: 'Undo road' }).click();
+  await page.getByRole('button', { name: 'Undo' }).click();
   await expect.poll(editor).toMatchObject({ roadCount: 1, connected: false, chaining: false, pending: false });
 });
 

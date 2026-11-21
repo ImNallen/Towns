@@ -43,7 +43,7 @@ test('shape a winding route and build a bypass under live traffic', async ({ pag
   await page.screenshot({ path: 'artifacts/screens/meadow-t-junction.png' });
   await page.keyboard.press('l');
   await page.screenshot({ path: 'artifacts/screens/meadow-t-junction-lanes.png' });
-  await page.getByRole('button', { name: 'Undo road' }).click();
+  await page.getByRole('button', { name: 'Undo' }).click();
   await expect.poll(editor, { timeout: 30_000 }).toMatchObject({ roadCount: 1, connected: true });
   expect((await stats())!.lost).toBe(0);
   expect(errors).toEqual([]);

@@ -30,7 +30,8 @@ export interface Game {
   editor(): EditorState | null;
   setAngleSnapping(enabled: boolean): void;
   setTool(tool: MapTool): void;
-  undoRoad(): void;
+  /** Undoes the last edit: a road, a removal or a stroke. */
+  undo(): void;
   cancelRoadEdit(): void;
   stats(): SimStats | null;
   /** Residents and the town clock; null on maps without a town. */
@@ -196,7 +197,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     editor: () => editor?.state() ?? null,
     setAngleSnapping: (enabled) => editor?.setAngleSnapping(enabled),
     setTool: (tool) => editor?.setTool(tool),
-    undoRoad: () => editor?.undo(),
+    undo: () => editor?.undo(),
     cancelRoadEdit: () => editor?.cancel(),
     stats: () => (ready ? latestStats : null),
     town: () => latestTown,
