@@ -643,7 +643,11 @@ test('avenue lanes join a signalised junction', async ({page}) => {
   await page.evaluate(()=>window.__towns!.setSpeed(60));
   await page.waitForFunction(()=>{
     const game=window.__towns!, stats=game.stats();
-    if (stats && stats.tick>3000 && stats.stoppedShare>0.12) {
+    const queues = game.traffic()?.queue;
+    // Only the two main approaches carry through demand. Capture a red phase
+    // with a queue spread across at least three lanes, including the Avenue pair.
+    if (stats && stats.tick > 3000 && stats.tick % 1000 > 660 && stats.tick % 1000 < 900
+      && queues && queues.filter(count => count >= 2).length >= 3) {
       game.setSpeed(0);
       return true;
     }
