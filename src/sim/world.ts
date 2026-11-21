@@ -1,3 +1,4 @@
+import { parksOn } from './town/parks';
 import type { WalkRouting } from './network/walkRouting';
 import { endOf, sampleAt, startOf, type PathSample } from './math/polyline';
 import type { Lane, Network } from './network/types';
@@ -152,6 +153,8 @@ export class World {
     return this._tick * DT;
   }
 
+  pedestrianPositions() { return this.town?.pedestrianPositions() ?? new Float32Array(0); }
+
   get walkers() { return this.town?.walkers; }
 
   step(): void {
@@ -210,7 +213,7 @@ export class World {
     }
     const bays = parkingBays(this.scenario, homes, zoning);
     this.routing = new Routing(this.network, [...homes.map(home => home.access), ...bays.map(b => b.access)]);
-    this.town = new Town({ ...base, homes }, this.routing.sinks.length, 0, this.routing, new Parking(bays, this.routing.sinks.length + homes.length), this.scenario.decor.houses, this.network, this.walkLimit, base.homes.length, previous.walkers.graph.routing);
+    this.town = new Town({ ...base, homes }, this.routing.sinks.length, 0, this.routing, new Parking(bays, this.routing.sinks.length + homes.length), this.scenario.decor.houses, this.network, this.walkLimit, base.homes.length, previous.walkers.graph.routing, parksOn(this.scenario.zones,zoning));
     return this.town.copyFrom(previous, this.routing, this.minute());
   }
 

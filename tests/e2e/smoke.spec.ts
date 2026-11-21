@@ -478,3 +478,23 @@ test('pedestrians use the side-street crossing at a junction', async ({page})=>{
   },null,{timeout:120000});
   await page.screenshot({path:'artifacts/screens/junction-walker.png'});
 });
+
+test('a neighbourhood park welcomes visitors after work',async({page})=>{
+  const {at}=await connectedStreet(page);
+  await page.getByRole('button',{name:'Build park',exact:true}).click();
+  await page.getByLabel('Park size').selectOption('3');
+  await page.mouse.move(...at(8,17));
+  await expect(page.locator('.preview-cost')).toContainText('$315');
+  await page.mouse.click(...at(8,17));
+  await expect.poll(()=>page.evaluate(()=>window.__towns!.town()!.households.some(h=>!!h.nearbyPark))).toBe(true);
+  await page.keyboard.press('v');
+  await page.mouse.move(0,0);
+  await page.evaluate(()=>window.__towns!.setSpeed(120));
+  await page.waitForFunction(()=>{
+    const game=window.__towns!;
+    if ((game.town()?.parkVisitors ?? 0)<3) return false;
+    game.setSpeed(0);
+    return true;
+  },null,{timeout:50000});
+  await page.screenshot({path:'artifacts/screens/park-visitors.png'});
+});

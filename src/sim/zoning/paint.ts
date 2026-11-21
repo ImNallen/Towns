@@ -1,3 +1,4 @@
+import { parkFootprint } from '../town/parks';
 import { decodeCellKey, findCell, ZONE_ROWS, type CellKey, type ZoneCells } from './cells';
 
 export const ZONE_KINDS = ['residential', 'shops', 'workplaces'] as const;
@@ -8,7 +9,7 @@ export type ZoneKind = (typeof ZONE_KINDS)[number];
  * As made by `planZoneStroke`, `cells` is non-empty and ascending, every key was live when the stroke was
  * made, and every key's zone changed, so undoing a stroke always changes what the player sees.
  */
-export type LandUse = ZoneKind | 'parking';
+export type LandUse = ZoneKind | 'parking' | 'park';
 
 export interface ZoneStroke {
   readonly zone: LandUse | null;
@@ -25,10 +26,15 @@ export function planZoneStroke(
   const footprint = new Set<CellKey>();
   for (const key of touched) {
     if (findCell(cells, key) < 0) {
-      if (zone === 'parking') return { ok: false, reason: 'The whole lot needs open street frontage.' };
+      if (zone === 'parking' || zone === 'park') return { ok: false, reason: 'The whole lot needs open street frontage.' };
       continue;
     }
     const { row } = decodeCellKey(key);
+    if (zone === 'park') {
+      if (zoning.has(key) || cells.gardenCells?.[findCell(cells,key)]) return {ok:false,reason:'Choose open plots for the whole park.'};
+      footprint.add(key);
+      continue;
+    }
     if (zone === 'parking') {
       if (row !== 0 || zoning.has(key) || cells.gardenCells?.[findCell(cells, key)]) return { ok: false, reason: 'Choose empty frontage beside the street.' };
       footprint.add(key);
@@ -41,6 +47,14 @@ export function planZoneStroke(
       if (findCell(cells, k) >= 0) footprint.add(k);
     }
   }
+  if (zone === 'park') {
+    const size=Math.sqrt(footprint.size);
+    const first=Math.min(...footprint) as CellKey;
+    if (!(size===1 || size===2 || size===3) || !parkFootprint(first,size).every(key=>footprint.has(key))) {
+      return {ok:false,reason:'Choose a square park with its front row beside the street.'};
+    }
+  }
+  if (zone && [...footprint].some(k=>zoning.get(k)==='park')) return {ok:false,reason:'Clear the park first.'};
   if (zone && zone !== 'parking' && [...footprint].some(k => zoning.get(k) === 'parking')) {
     return { ok: false, reason: 'Clear the parking lot first.' };
   }

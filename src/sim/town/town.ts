@@ -1,3 +1,4 @@
+import { PARK_RADIUS, type Park } from './parks';
 import type { WalkRouting } from '../network/walkRouting';
 import { walkChance, WALK_CHOICE } from './mode';
 import { Walkers, WalkingNetwork, WALK_TRIP_LIMIT } from '../network/walking';
@@ -33,6 +34,7 @@ const OUTBOUND = 1;
 const AWAY = 2;
 const HOMEBOUND = 3;
 const WALK_TO_CAR = 4, WALK_TO_DOOR = 5, SEARCH = 6, WALK_BACK = 7, WALK_HOME = 8, RETURN_FAILED = 9, SEEK_HOME = 10;
+const TO_PARK=11, IN_PARK=12, FROM_PARK=13;
 const WORK = 0;
 const SHOP = 1;
 const ADULT = 0;
@@ -78,10 +80,10 @@ const LOST_JOB = 5;
 const MOVED_IN = 6;
 const PARKING_FAILED = 7, NO_WALK_ROUTE = 8;
 
-export type Activity = 'home' | 'outbound' | 'away' | 'homebound' | 'walking' | 'searching';
-export type Errand = 'work' | 'shop';
-const ACTIVITIES: readonly Activity[] = ['home', 'outbound', 'away', 'homebound', 'walking', 'walking', 'searching', 'walking', 'walking', 'searching', 'searching'];
-const ERRANDS: readonly Errand[] = ['work', 'shop'];
+export type Activity = 'home' | 'outbound' | 'away' | 'homebound' | 'walking' | 'searching' | 'park';
+export type Errand = 'work' | 'shop' | 'leisure';
+const ACTIVITIES: readonly Activity[] = ['home', 'outbound', 'away', 'homebound', 'walking', 'walking', 'searching', 'walking', 'walking', 'searching', 'searching','walking','park','walking'];
+const ERRANDS: readonly Errand[] = ['work', 'shop', 'leisure'];
 
 /** Each 0..1, where 1 is fully met. */
 export interface Needs {
@@ -128,6 +130,7 @@ export interface HouseholdView {
   pantry: number;
   needs: Needs;
   /** Mean of the needs. */
+  nearbyPark?: { name: string; metres: number };
   walkIssue?: string;
   happiness: number;
   members: PersonView[];
@@ -166,6 +169,8 @@ export interface BusinessView {
 export interface TownView {
   overflowCars: Array<Vec2 & { angle: number; model: number }>;
   bays: Array<Pick<Bay, 'kind' | 'x' | 'y' | 'angle'> & { model: number }>;
+  parkVisits: number;
+  parkVisitors: number;
   parking: { walkedTrips: number; peakWalkers: number; trips: number; parked: number; turnedAway: number; walkMetres: number };
   budget: BudgetView;
   businesses: BusinessView[];
@@ -284,6 +289,10 @@ export class Town {
   private readonly door: Vec2[];
   private readonly outside: AccessPoint[][];
   readonly walkers: Walkers;
+  private readonly nearestPark: Int32Array;
+  private readonly visitPark: Int32Array;
+  private readonly leisureDay: Int32Array;
+  private parkVisits=0;
   private readonly walkIssue: Int32Array;
   private readonly modeDay: Int32Array;
   private readonly modeRoll: Float64Array;
@@ -293,13 +302,16 @@ export class Town {
   private turnedAway = 0;
   private walkMetres = 0;
 
-  constructor(spec: TownSpec, homeDest: number, seed: number, private readonly routing: Routing, readonly parking: Parking, houses: Vec2[], network: Network, private readonly walkLimit = WALK_TRIP_LIMIT, starterHomes = spec.homes.length, previous?: WalkRouting) {
+  constructor(spec: TownSpec, homeDest: number, seed: number, private readonly routing: Routing, readonly parking: Parking, houses: Vec2[], network: Network, private readonly walkLimit = WALK_TRIP_LIMIT, starterHomes = spec.homes.length, previous?: WalkRouting, readonly parks: Park[] = []) {
     this.spec = spec;
     this.homeDest = homeDest;
     this.rng = new Rng((seed ^ TOWN_SEED) >>> 0);
     const H = spec.homes.length;
     const P = H * MAX_MEMBERS;
     this.carBay = new Int32Array(H * 2).fill(-1);
+    this.nearestPark=new Int32Array(H).fill(-1);
+    this.visitPark=new Int32Array(P).fill(-1);
+    this.leisureDay=new Int32Array(P).fill(-1);
     this.walkIssue = new Int32Array(H).fill(-1);
     this.modeDay = new Int32Array(P).fill(-1);
     this.modeRoll = new Float64Array(P);
@@ -312,10 +324,17 @@ export class Town {
     this.denied = new Uint16Array(H);
     this.frustration = new Uint8Array(H);
     this.door = spec.homes.map((h, i) => h.lot ?? houses[i] ?? { x: 0, y: 0 });
-    this.walkers = new Walkers(new WalkingNetwork(network, this.door, parking.bays, previous), P);
+    this.walkers = new Walkers(new WalkingNetwork(network, this.door, parking.bays, previous, parks), P);
     parking.walking = this.walkers.graph;
+    for (let h=0; h<H; h++) {
+      let best=PARK_RADIUS;
+      for (let i=0; i<parks.length; i++) {
+        const d=this.walkers.graph.distance(h,this.parkPlace(i));
+        if (d < best) { best=d; this.nearestPark[h]=i; }
+      }
+    }
     this.outside = spec.regions.map(r => [{ lane: r.source, s: 0 }]);
-    this.lotUpkeep = parking.bays.filter(b => b.kind === 'lot').length * BUDGET.upkeepPerBay;
+    this.lotUpkeep = parks.reduce((sum,park)=>sum+park.cells.length*BUDGET.parkUpkeep,0) + parking.bays.filter(b => b.kind === 'lot').length * BUDGET.upkeepPerBay;
     this.surname = new Uint16Array(H);
     this.funds = new Float64Array(H);
     this.taxable = new Float64Array(H);
@@ -419,6 +438,8 @@ export class Town {
   private moveOut(h: number): void {
     for (let p = this.firstMember[h]!; p < this.firstMember[h]! + this.memberCount[h]!; p++) {
       this.role[p] = VACANT;
+      this.activity[p] = HOME;
+      this.visitPark[p] = -1;
       this.job[p] = -1;
     }
     for (let car = 2 * h; car < 2 * h + this.cars[h]!; car++) this.assign(car, -1);
@@ -435,6 +456,8 @@ export class Town {
       throw new Error('Town copy requires enough home slots and the same regions');
     }
     this.rng.copyFrom(source.rng);
+    this.parkVisits=source.parkVisits;
+    this.leisureDay.set(source.leisureDay);
     this.walkedTrips = source.walkedTrips;
     this.walkers.peak = source.walkers.peak;
     this.trips = source.trips;
@@ -514,11 +537,17 @@ export class Town {
     this.houseUpgrades = source.houseUpgrades;
     this.carUpgrades = source.carUpgrades;
     for (let p = 0; p < this.people; p++) {
+      const oldPark=source.parks[source.visitPark[p]!];
+      if (oldPark && this.activity[p]! >= TO_PARK) {
+        this.visitPark[p]=this.parks.findIndex(park=>park.key===oldPark.key);
+        if (this.visitPark[p]! < 0) this.activity[p]=HOME;
+      }
       if (source.walkers.goal[p]! < 0 || this.role[p] === VACANT || this.activity[p] === HOME) continue;
       const old = source.walkers;
       const goal = old.goal[p]!;
-      const bay = goal < source.door.length ? -1 : remap(goal - source.door.length);
-      const dest = goal < source.door.length ? goal : bay < 0 ? -1 : this.door.length + bay;
+      const parkGoal=goal>=source.parkPlace(0);
+      const bay = goal < source.door.length || parkGoal ? -1 : remap(goal - source.door.length);
+      const dest = parkGoal ? this.parkPlace(this.visitPark[p]!) : goal < source.door.length ? goal : bay < 0 ? -1 : this.door.length + bay;
       const n = old.node[p]!;
       const a = old.graph.points[n]!;
       const b = old.graph.points[old.graph.next[goal]![n]!] ?? a;
@@ -562,6 +591,37 @@ export class Town {
     this.dispatchFreight(minute, roads);
     const day = dayOf(minute);
     for (let p = 0; p < this.people; p++) {
+      if (this.role[p] === VACANT) continue;
+      if (this.activity[p]! >= TO_PARK) {
+        if (this.walkers.goal[p]! >= 0) continue;
+        const park=this.visitPark[p]!;
+        if (this.activity[p]===TO_PARK) {
+          this.parkVisits++;
+          this.activity[p]=IN_PARK;
+          this.until[p]=minute+35+p%20;
+        } else if (this.activity[p]===IN_PARK && minute>=this.until[p]!) {
+          this.activity[p]=FROM_PARK;
+          this.walkLeg(p,this.parkPlace(park),this.household[p]!);
+        } else if (this.activity[p]===FROM_PARK) {
+          this.activity[p]=HOME;
+          this.visitPark[p]=-1;
+        }
+        continue;
+      }
+      const park=this.nearestPark[this.household[p]!]!;
+      if (allowDepartures && park>=0 && this.activity[p]===HOME && this.leisureDay[p]!==day) {
+        const opening=day%7===6 || day%7===0 ? 11*60 : 18*60;
+        const departure=opening + (p*19)%100;
+        if (clock>=departure && clock < departure+60 && this.pantry[this.household[p]!]!>=PANTRY_LOW) {
+          this.leisureDay[p]=day;
+          this.visitPark[p]=park;
+          this.activity[p]=TO_PARK;
+          this.errand[p]=2;
+          this.walkLeg(p,this.household[p]!,this.parkPlace(park));
+          this.walkedTrips++;
+          continue;
+        }
+      }
       if (this.role[p] !== ADULT) continue;
       if (this.walkers.goal[p]! >= 0 || minute < this.due[p]!) continue;
       const phase = this.activity[p];
@@ -753,6 +813,26 @@ export class Town {
     this.arrivedAt[p] = minute;
     this.until[p] = this.errand[p] === WORK
       ? (this.workedDay[p]! - 1) * MINUTES_PER_DAY + SHIFT_END : minute + SHOP_STAY;
+  }
+
+  private parkPlace(i: number): number { return this.door.length+this.parking.bays.length+i; }
+
+  pedestrianPositions(): Float32Array {
+    const moving=this.walkers.positions();
+    let visiting=0;
+    for(let p=0;p<this.people;p++) if (this.activity[p]===IN_PARK) visiting++;
+    if (!visiting) return moving;
+    const positions=new Float32Array(moving.length+3*visiting);
+    positions.set(moving);
+    let k=moving.length;
+    for(let p=0;p<this.people;p++) if (this.activity[p]===IN_PARK) {
+      const park=this.parks[this.visitPark[p]!]!;
+      const spread=Math.sqrt(park.cells.length);
+      positions[k++]=park.x+(p%5-2)*0.8*spread;
+      positions[k++]=park.y+((p*7)%9-4)*0.42*spread;
+      positions[k++]=p;
+    }
+    return positions;
   }
 
   private bayPlace(p: number, home: boolean): number {
@@ -1293,6 +1373,7 @@ export class Town {
     this.denied.forEach(mix);
     this.walkers.goal.forEach(mix);
     for (let p=0; p<this.people; p++) if (this.walkers.goal[p]! >= 0) { mix(this.walkers.node[p]!); mix(Math.round(this.walkers.along[p]!*1000)); }
+    if (this.parks.length) { this.visitPark.forEach(mix); this.leisureDay.forEach(mix); mix(this.parkVisits); }
     mix(this.walkedTrips);
     mix(this.trips);
     mix(this.parked);
@@ -1330,7 +1411,7 @@ export class Town {
           activity: ACTIVITIES[this.activity[p]!]!,
           leg: this.driving(p) ? 'drive' : ACTIVITIES[this.activity[p]!] === 'walking' ? 'walk' : ACTIVITIES[this.activity[p]!] === 'searching' ? 'park' : null,
           errand: home ? null : ERRANDS[this.errand[p]!]!,
-          place: home ? null : regionName(this.at[p]!),
+          place: home ? null : this.activity[p]! >= TO_PARK ? this.parks[this.visitPark[p]!]!.name : regionName(this.at[p]!),
         });
         if (adult) adults++;
         if (job >= 0) {
@@ -1345,6 +1426,10 @@ export class Town {
       cars += this.cars[h]!;
       funds += this.funds[h]!;
       const parcel = homes[h]!.lot;
+      const parkIndex=this.nearestPark[h]!;
+      const park=this.parks[parkIndex];
+      const metres=park ? this.walkers.graph.distance(h,this.parkPlace(parkIndex)) : Infinity;
+      const benefit=0.08*Math.max(0,1-metres/PARK_RADIUS);
       households.push({
         id: h,
         home: h,
@@ -1364,7 +1449,8 @@ export class Town {
         pantry: this.pantry[h]!,
         needs,
         walkIssue: this.walkIssue[h]! >= 0 && this.spec.homes[this.walkIssue[h]! - this.spec.regions.length]?.lot ? this.placeName(this.walkIssue[h]!) : undefined,
-        happiness: Math.max(0, (needs.food + needs.comfort + needs.mobility + needs.security) / 4 - this.frustration[h]! * 0.04),
+        nearbyPark: park ? { name:park.name,metres:Math.round(metres) } : undefined,
+        happiness: Math.min(1, Math.max(0, benefit + (needs.food + needs.comfort + needs.mobility + needs.security) / 4 - this.frustration[h]! * 0.04)),
         members,
       });
     }
@@ -1421,6 +1507,8 @@ export class Town {
         const car = this.parking.occupant[i]!;
         return [{ x: b.x, y: b.y, angle: b.angle, kind: b.kind, model: car < 0 ? 0 : this.carModel[Math.floor(car / 2)]! }];
       }),
+      parkVisits:this.parkVisits,
+      parkVisitors:this.activity.reduce((sum,a)=>sum+Number(a===IN_PARK),0),
       parking: { walkedTrips: this.walkedTrips, peakWalkers: this.walkers.peak, trips: this.trips, parked: this.parked, turnedAway: this.turnedAway, walkMetres: this.walkMetres },
       budget,
       businesses,

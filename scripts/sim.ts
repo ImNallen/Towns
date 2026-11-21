@@ -1,3 +1,4 @@
+import { parkFootprint } from '../src/sim/town/parks';
 /**
  * Headless simulation runner.
  *
@@ -27,6 +28,7 @@ const { values } = parseArgs({
     every: { type: 'string', default: '0' },
     json: { type: 'boolean', default: false },
     paint: { type: 'string' },
+    park: { type:'string' },
     zebra: { type: 'string' },
     'parking-lot': { type: 'string' },
     connect: { type: 'boolean', default: false },
@@ -62,6 +64,7 @@ const town = (view: TownView): string => {
   const clock = `${String(Math.floor(view.minuteOfDay / 60)).padStart(2, '0')}:${String(view.minuteOfDay % 60).padStart(2, '0')}`;
   return [
     `  town day ${view.day} ${clock}`,
+    `park-visits=${view.parkVisits}`,
     `walked=${view.parking.walkedTrips} peak=${view.parking.peakWalkers}`,
     `trips=${view.parking.trips}`,
     `parked=${view.parking.parked}`,
@@ -129,6 +132,13 @@ if (values.paint !== undefined) {
     const band = (column + side * 2) % 6;
     zoning.set(key, values.paint === 'homes' || band < 3 ? 'residential' : band === 3 ? 'shops' : 'workplaces');
   }
+  if (values.park) {
+    const footprint=parkFootprint(Number(values.park) as CellKey,2);
+    const plan=planZoneStroke(cells,new Map(),'park',footprint);
+    if (!plan.ok) throw new Error(plan.reason);
+    for (const key of footprint) zoning.set(key,'park');
+    pay(editCost([],plan.stroke));
+  }
   if (values['parking-lot']) {
     // Reserve these consecutive frontage cells before applying the mixed paint preset.
     const start = Number(values['parking-lot']);
@@ -138,7 +148,7 @@ if (values.paint !== undefined) {
     pay(editCost([], plan.stroke));
     for (const key of keys) zoning.set(key, 'parking');
   }
-  pay([...zoning.values()].filter(use => use !== 'parking').length * BUDGET.zonePerCell);
+  pay([...zoning.values()].filter(use => use !== 'parking' && use !== 'park').length * BUDGET.zonePerCell);
   world.setZoning(zoning);
 }
 let customers = 0;
@@ -164,6 +174,7 @@ const summary = {
   stats: world.stats(),
   parking: finalTown?.parking,
   crossings: world.walkers?.graph.crossings.map(c => ({zebra:c.zebra, served:c.served, yieldingTicks:c.yieldingTicks})),
+  parkVisits:finalTown?.parkVisits,
   customers,
   happiness: finalTown ? happiness(finalTown) : undefined,
 };

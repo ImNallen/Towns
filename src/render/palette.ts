@@ -51,7 +51,10 @@ export const PALETTE = {
   editorInvalid: '#bb5941',
   buildBoundary: '#aaa99b',
   zoneGrid: '#d9d8cf',
-  zonePaint: { parking: '#84aaa9', residential: '#d4e3ad', shops: '#9bcbd3', workplaces: '#e3be85' } satisfies Record<LandUse, string>,
+  parkBench: '#976b49',
+  parkPath: '#dbcfad',
+  parkLawn: '#a9c887',
+  zonePaint: { park: '#b6ca98', parking: '#84aaa9', residential: '#d4e3ad', shops: '#9bcbd3', workplaces: '#e3be85' } satisfies Record<LandUse, string>,
   editorPaper: '#fffdf4',
   selection: '#21705d',
 

@@ -1,3 +1,4 @@
+import { buildParks } from './parks';
 import * as THREE from 'three';
 import type { Vec2 } from '../sim/math/vec';
 import { findCell, type ZoneCells } from '../sim/zoning/cells';
@@ -39,6 +40,7 @@ export function buildZonePaint(cells: ZoneCells, zoning: Zoning): THREE.Group {
   const fills = new Map<LandUse, FlatMesh>();
   const paving = new FlatMesh(0.155);
   for (const [key, kind] of zoning) {
+    if (kind === 'park') continue;
     if (kind === 'parking') {
       const i = findCell(cells, key);
       const [a, b, c, d] = cellQuad(cells, i);
@@ -62,6 +64,7 @@ export function buildZonePaint(cells: ZoneCells, zoning: Zoning): THREE.Group {
   }
   const group = new THREE.Group();
   group.name = 'zone-paint';
+  group.add(buildParks(cells,zoning));
   if (!paving.empty) group.add(new THREE.Mesh(paving.build(), flatMaterial(PALETTE.parking)));
   for (const [kind, fill] of fills) {
     const mesh = new THREE.Mesh(fill.build(), flatMaterial(PALETTE.zonePaint[kind]));

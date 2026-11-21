@@ -123,6 +123,7 @@ export function App({ game }: { game: Game }) {
     : editor?.tool === 'curve' ? 'Drag between two points, then place the bend.'
             : editor?.tool === 'footpath' ? 'Drag across open ground to connect walking routes.'
             : editor?.tool === 'zebra' ? 'Click a paved street to add a zebra crossing.'
+            : editor?.tool === 'park' ? 'Choose a park size and click empty frontage.'
             : editor?.tool === 'parking' ? 'Choose a size, then click empty frontage beside a street.'
     : editor?.tool === 'zone' ? (editor.brush
       ? 'Drag along the plots beside a street to zone them. Plots fill in toward the street.'
@@ -208,6 +209,9 @@ export function App({ game }: { game: Game }) {
             game.cancelRoadEdit();
             setEditor(game.editor());
           }}>Finish road</button>}
+          {editor.tool === 'park' && <label className="road-picker">Park size <select value={editor.lotColumns} onChange={e => { game.setLotColumns(Number(e.target.value)); setEditor(game.editor()); }}>
+            {[1,2,3].map(n=><option key={n} value={n}>{n} × {n} · {money(n*n*BUDGET.parkPerCell)}</option>)}
+          </select></label>}
           {editor.tool === 'parking' && <label className="road-picker">Lot size <select value={editor.lotColumns} onChange={e => { game.setLotColumns(Number(e.target.value)); setEditor(game.editor()); }}>
             {[1, 2, 3].map(n => <option key={n} value={n}>{n * 2} spaces · {money(n * BUDGET.parkingPerCell)}</option>)}
           </select></label>}
@@ -239,6 +243,7 @@ export function App({ game }: { game: Game }) {
           <button aria-label="Bulldoze road" aria-pressed={editor.tool === 'bulldoze'} aria-keyshortcuts="B" className={editor.tool === 'bulldoze' ? 'active tool bulldoze' : 'tool bulldoze'} onClick={() => changeTool('bulldoze')} title="Bulldoze road (B)">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 12V8h6l2 4M5 8V5h4l1 3m2 5 3 1m1-6v6l2 2h-3l-1-3"/><rect x="2" y="12" width="10" height="4" rx="2"/></svg><span>Bulldoze</span><kbd>B</kbd>
           </button>
+          <button aria-label="Build park" aria-pressed={editor.tool === 'park'} className={'tool' + (editor.tool === 'park' ? ' active' : '')} onClick={() => changeTool('park')}><b>♧</b><span>Park</span></button>
           <button aria-label="Build footpath" aria-pressed={editor.tool === 'footpath'} onClick={() => changeTool('footpath')} className={'tool' + (editor.tool === 'footpath' ? ' active' : '')}><b>⌁</b><span>Path</span></button>
           <button aria-label="Build zebra crossing" aria-pressed={editor.tool === 'zebra'} onClick={() => changeTool('zebra')} className={'tool' + (editor.tool === 'zebra' ? ' active' : '')}><b>▥</b><span>Crossing</span></button>
           <button aria-label="Build parking lot" aria-pressed={editor.tool === 'parking'} className={editor.tool === 'parking' ? 'active tool' : 'tool'} onClick={() => changeTool('parking')} title="Build parking lot"><b>P</b><span>Parking</span></button>
