@@ -31,3 +31,28 @@ test('map renders and traffic flows', async ({ page }) => {
 
   expect(errors).toEqual([]);
 });
+
+test('painted plots read at map zoom', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  const view = { x: 0, y: 0, mpp: 0.27 };
+  await page.goto(`/?scenario=meadow&seed=1&speed=0&x=${view.x}&y=${view.y}&mpp=${view.mpp}`);
+  const editor = () => page.evaluate(() => window.__towns?.editor());
+  await expect.poll(editor).toMatchObject({ pending: false });
+  const box = await page.locator('#map').boundingBox();
+  if (!box) throw new Error('Missing map');
+  const at = (x: number, y: number) => [box.x + box.width / 2 + (x - view.x) / view.mpp, box.y + box.height / 2 - (y - view.y) / view.mpp] as const;
+  await page.keyboard.press('z');
+  for (const [from, to, y] of [[-140, -60, 24.5], [60, 140, -24.5]] as const) {
+    await page.mouse.move(...at(from, y));
+    await page.mouse.down();
+    await page.mouse.move(...at(to, y), { steps: 10 });
+    await page.mouse.up();
+    await expect.poll(editor).toMatchObject({ pending: false });
+  }
+  expect((await editor())?.zoned).toBeGreaterThan(60);
+  await page.keyboard.press('v');
+  await page.mouse.move(0, 0);
+  await page.screenshot({ path: 'artifacts/screens/meadow-zone-paint-map.png' });
+  expect(errors).toEqual([]);
+});
