@@ -32,9 +32,9 @@ export function buildingGeometry(blueprint: Blueprint, variant: Variant): THREE.
   for (const p of blueprint.parts) {
     switch (p.kind) {
       case 'block': case 'wing': case 'garage': {
-        add(box(p.width, p.height, p.depth), PALETTE.building[variant.wall], p.x, p.height / 2, p.y);
+        add(box(p.width, p.height, p.depth), PALETTE.building.walls[variant.wall], p.x, p.height / 2, p.y);
         if (p.roof.kind === 'flat') {
-          add(box(p.width + 0.3, 0.25, p.depth + 0.3), PALETTE.building[variant.roof], p.x, p.height + 0.125, p.y);
+          add(box(p.width + 0.3, 0.25, p.depth + 0.3), PALETTE.building.roofs[variant.roof], p.x, p.height + 0.125, p.y);
           break;
         }
         const alongX = p.roof.ridge === 'x';
@@ -47,7 +47,7 @@ export function buildingGeometry(blueprint: Blueprint, variant: Variant): THREE.
         const roof = new THREE.BufferGeometry();
         roof.setAttribute('position', new THREE.Float32BufferAttribute([a,e,b,b,e,f,b,f,c,c,f,d,d,f,e,d,e,a].flat(), 3));
         if (!alongX) roof.rotateY(Math.PI / 2);
-        add(roof, PALETTE.building[variant.roof], p.x, p.height, p.y);
+        add(roof, PALETTE.building.roofs[variant.roof], p.x, p.height, p.y);
         break;
       }
       case 'pool':
@@ -59,7 +59,7 @@ export function buildingGeometry(blueprint: Blueprint, variant: Variant): THREE.
         add(new THREE.IcosahedronGeometry(p.radius, 1), PALETTE.building.hedge, p.x, p.height, p.y);
         break;
       case 'hedge': case 'fence': case 'porch': case 'chimney':
-        add(box(p.width, p.height, p.depth), p.kind === 'hedge' ? PALETTE.building.hedge : p.kind === 'chimney' ? PALETTE.building.clay : PALETTE.building.trim, p.x, p.height / 2, p.y);
+        add(box(p.width, p.height, p.depth), p.kind === 'hedge' ? PALETTE.building.hedge : p.kind === 'chimney' ? PALETTE.building.chimney : PALETTE.building.trim, p.x, p.height / 2, p.y);
         break;
       default: { const exhaustive: never = p; throw new Error(`Unknown part ${exhaustive}`); }
     }

@@ -4,8 +4,8 @@ import { disposeLayer } from '../dispose';
 import { AMBIENT_INTENSITY, SUN_DIRECTION, SUN_INTENSITY } from '../lighting';
 import { PALETTE } from '../palette';
 import { buildBuildingLayer, type BuildingInstance } from './mesh';
-import type { Blueprint, Tier } from './types';
-import { pickBuilding, variants } from './variation';
+import type { Blueprint, BuildingPick, Tier } from './types';
+import { pickBuilding, catalogueVariants } from './variation';
 
 function ground(group: THREE.Group, x: number, y: number, width: number, depth: number, color: string, height = -0.02) {
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, depth), new THREE.MeshLambertMaterial({ color }));
@@ -53,7 +53,7 @@ export class PreviewRenderer {
     const width = blueprint.lot.columns * CELL_WIDTH;
     const depth = blueprint.lot.rows * CELL_DEPTH;
     const pitch = Math.max(width, depth * 0.88) + 2;
-    const finishes = variants(blueprint);
+    const finishes = catalogueVariants(blueprint);
     const instances = finishes.map((variant, i) => {
       const x = (i - (finishes.length - 1) / 2) * pitch;
       ground(group, x, 0, width, depth, PALETTE.gardens[0]);
@@ -73,12 +73,12 @@ export class PreviewRenderer {
     ground(group, 0, 0, length + 18, 8, PALETTE.roadSurface, -0.01);
     for (const side of [-1, 1]) {
       let edge = -length / 2;
-      let previous: string[] = [];
+      let previous: BuildingPick[] = [];
       for (let i = 0; i < columns.length; i++) {
         const j = side === 1 ? i : columns.length - 1 - i;
         const lot = { columns: columns[j], rows: columns[j] === 3 ? 4 : columns[j] };
         const pick = pickBuilding(`garden-road/${side}/${i}`, tiers[j], lot, previous);
-        previous = [pick.blueprint.id];
+        previous = [pick];
         const width = lot.columns * CELL_WIDTH;
         const depth = lot.rows * CELL_DEPTH;
         const x = edge + width / 2;
