@@ -51,7 +51,7 @@ function conflicts(a: Polyline, b: Polyline): boolean {
 export function buildStreetNetwork(
   builder: NetworkBuilder, streets: readonly (readonly Vec2[])[], portals: readonly Vec2[],
   crossings: readonly StreetCrossing[] = [],
-): { network: Network; demand: Demand[] } {
+): { network: Network; demand: Demand[]; entries: number[] } {
   const headings = new Map<string, Vec2[]>();
   for (const points of streets) {
     if (points.length < 2) throw new Error('A street needs at least two points');
@@ -128,5 +128,6 @@ export function buildStreetNetwork(
   const routing = new Routing(network);
   const connected = portals.length === 2 && portalArms.length === 2
     && portalArms.every((arm, i) => routing.canReach(1 - i, arm.outgoing));
-  return { network, demand: connected ? portalArms.map((arm) => ({ lane: arm.outgoing, rate: 0.16 })) : [] };
+  const entries = portalArms.map((arm) => arm.outgoing);
+  return { network, demand: connected ? entries.map((lane) => ({ lane, rate: 0.16 })) : [], entries };
 }

@@ -121,7 +121,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
       editor?.waitForTraffic();
     } else if (msg.type === 'editRejected') {
       editor?.reject(msg.reason);
-    } else {
+    } else if (msg.type === 'frame') {
       vehicles?.push(msg, performance.now());
       latestStats = msg.stats;
     }

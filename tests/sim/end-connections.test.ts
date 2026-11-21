@@ -55,7 +55,7 @@ it.each([false, true])('connects two staggered ends and carries traffic both way
   expect(Math.max(...turn.road.points.map(p => p.y))).toBeLessThan(b.y + 13);
   const scenario = meadowScenario(roads);
   expect(scenario.demand).toHaveLength(2);
-  const world = new World({ ...scenario, demand: [] }, 1);
+  const world = new World({ ...scenario, demand: [], town: undefined }, 1);
   for (const [i, entry] of scenario.demand.entries()) world.vehicles.spawn(entry.lane, 0, 8, 1 - i, 0);
   for (let tick = 0; tick < 120 / DT; tick++) world.step();
   expect(world.stats()).toMatchObject({ active: 0, completed: 2, lost: 0 });
@@ -107,7 +107,7 @@ it.each([false, true])('joins angled marked ends on clear ground and carries tra
   extend(roads, vec2(65, 8), b);
   extend(roads, reverse ? b : a, reverse ? a : b);
   const scenario = meadowScenario(roads);
-  const world = new World({ ...scenario, demand: [] }, 1);
+  const world = new World({ ...scenario, demand: [], town: undefined }, 1);
   for (const [i, entry] of scenario.demand.entries()) world.vehicles.spawn(entry.lane, 0, 8, 1 - i, 0);
   for (let tick = 0; tick < 120 / DT; tick++) world.step();
   expect(world.stats()).toMatchObject({ active: 0, completed: 2, lost: 0 });

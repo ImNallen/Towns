@@ -5,9 +5,12 @@ import type { Scenario } from './scenarios/types';
 import { IDM, VEHICLE_LENGTH, idmAccel } from './traffic/idm';
 import { Routing } from './traffic/routing';
 import { Vehicles } from './traffic/vehicles';
+import { CLOCK_START, Town, type TownView } from './town/town';
 
 /** Fixed simulation timestep, seconds (20 Hz). */
 export const DT = 1 / 20;
+/** The town clock runs one game minute per simulated second. */
+const TICKS_PER_MINUTE = 20;
 
 /** How far ahead a driver looks along their route for leaders, slow lanes and give-ways (m). */
 const LOOKAHEAD = 90;
@@ -20,6 +23,8 @@ const PRIORITY_SCAN = 60;
 /** Priority vehicles arriving within [tMe - BEFORE, tMe + AFTER] of us block the merge (s). */
 const CONFLICT_BEFORE = 1.5;
 const CONFLICT_AFTER = 2.5;
+/** A new car needs the car ahead this far beyond its own front bumper (m). */
+const SPAWN_SPACING = VEHICLE_LENGTH + IDM.minGap + 3;
 
 export interface SimStats {
   tick: number;
@@ -57,6 +62,7 @@ export class World {
   private readonly lanes: Lane[];
   private readonly yieldingMovements: number[][];
   private readonly rng: Rng;
+  private town: Town | null;
   private _tick = 0;
   private admissionsOpen = true;
 
@@ -91,9 +97,10 @@ export class World {
     for (const lane of this.lanes) {
       for (const priority of lane.crossingYieldTo) this.yieldingMovements[priority]!.push(lane.id);
     }
-    this.routing = new Routing(this.network);
+    this.routing = new Routing(this.network, scenario.town?.homes.map((home) => home.access));
     this.vehicles = new Vehicles(capacity);
     this.rng = new Rng(seed);
+    this.town = scenario.town ? new Town(scenario.town, this.routing.sinks.length, seed, this.routing) : null;
 
     const n = this.lanes.length;
     this.laneLen = Float64Array.from(this.lanes, (l) => l.length);
@@ -128,11 +135,17 @@ export class World {
   }
 
   step(): void {
+    if (this.town && this._tick % TICKS_PER_MINUTE === 0) this.town.update(this.minute(), this);
     this.buildBuckets();
     this.computeAccelerations();
     this.integrate();
     this.spawn();
     this._tick++;
+  }
+
+  /** Game minutes since midnight before day 1. */
+  private minute(): number {
+    return Math.floor(this._tick / TICKS_PER_MINUTE) + CLOCK_START;
   }
 
   /** Pause new arrivals while existing trips drain before retrying a deferred edit. */
@@ -147,9 +160,18 @@ export class World {
    */
   editNetwork(scenario: Scenario): { ok: true; world: World } | { ok: false; reason: string } {
     const edited = new World(scenario, 0, this.vehicles.capacity, this.tick);
+    if (this.town && edited.town?.spec.homes.length !== this.town.spec.homes.length) {
+      return { ok: false, reason: 'The edited map must keep every home.' };
+    }
     const V = this.vehicles;
-    const destinations = this.routing.sinks.map((sink) => {
-      const oldEnd = endOf(this.lanes[sink]!.path);
+    const sinkCount = this.routing.sinks.length;
+    const destinations = Array.from({ length: this.routing.destinations }, (_, dest) => {
+      if (dest >= sinkCount) {
+        // Buildings keep their index across edits; only the lanes that reach them change.
+        const target = edited.routing.sinks.length + dest - sinkCount;
+        return target < edited.routing.destinations ? target : -1;
+      }
+      const oldEnd = endOf(this.lanes[this.routing.sinks[dest]!]!.path);
       return edited.routing.sinks.findIndex((candidate) => {
         const end = endOf(edited.lanes[candidate]!.path);
         return Math.hypot(end.x - oldEnd.x, end.y - oldEnd.y) <= 0.25
@@ -214,6 +236,8 @@ export class World {
       }
     }
     edited.rng.copyFrom(this.rng);
+    if (this.town) edited.town!.copyFrom(this.town);
+    else edited.town = null;
     edited.admissionsOpen = this.admissionsOpen;
     edited.spawned = this.spawned;
     edited.completed = this.completed;
@@ -425,7 +449,8 @@ export class World {
 
   private integrate(): void {
     const V = this.vehicles;
-    const { s, v, lane, dest, acc } = V;
+    const { s, v, lane, dest, acc, owner } = V;
+    const minute = this.minute();
     for (let i = 0; i < V.highWater; i++) {
       if (!V.alive[i]) continue;
       let vi = v[i]! + acc[i]! * DT;
@@ -433,11 +458,19 @@ export class World {
       v[i] = vi;
       let si = s[i]! + vi * DT;
       let L = lane[i]!;
-      while (si >= this.laneLen[L]!) {
-        const nh = this.routing.nextHop(dest[i]!, L);
+      const d = dest[i]!;
+      for (;;) {
+        if (si >= this.routing.exit(d, L)) {
+          this.recordArrival(i);
+          if (owner[i]! >= 0) this.town?.arrived(owner[i]!, minute);
+          V.despawn(i);
+          break;
+        }
+        if (si < this.laneLen[L]!) break;
+        const nh = this.routing.nextHop(d, L);
         if (nh < 0) {
-          if (L === this.routing.sinks[dest[i]!]) this.recordArrival(i);
-          else this.lost++;
+          this.lost++;
+          if (owner[i]! >= 0) this.town?.lost(owner[i]!);
           V.despawn(i);
           break;
         }
@@ -455,14 +488,13 @@ export class World {
   }
 
   private spawn(): void {
-    const minSpacing = VEHICLE_LENGTH + IDM.minGap + 3;
     for (const sp of this.spawners) {
       // Always draw both numbers so the random stream does not depend on traffic state.
       const arrival = this.rng.next();
       const pick = this.rng.next();
       if (!this.admissionsOpen) continue;
       if (arrival >= sp.rate * DT || sp.destinations.length === 0) continue;
-      if (this.laneMinS[sp.lane]! < minSpacing) continue;
+      if (this.laneMinS[sp.lane]! < SPAWN_SPACING) continue;
       const dest = sp.destinations[Math.floor(pick * sp.destinations.length)]!;
       // Enter no faster than allows a comfortable stop behind whoever is already on the lane.
       const room = this.laneMinS[sp.lane]! - VEHICLE_LENGTH - IDM.minGap;
@@ -474,6 +506,42 @@ export class World {
         this.laneMinS[sp.lane] = 0;
       }
     }
+  }
+
+  /**
+   * Start a resident's car at rest at `s` on `lane`, heading for `dest`. Refused while
+   * admissions are closed, when `dest` cannot be reached from there, or when a car is too
+   * close ahead or could not stop comfortably behind it.
+   */
+  trySpawnAt(lane: number, s: number, dest: number, owner: number): boolean {
+    if (!this.admissionsOpen || this.routing.timeFrom(dest, lane, s) === Infinity || this.crowded(lane, s)) return false;
+    const slot = this.vehicles.spawn(lane, s, 0, dest, this.time, owner);
+    if (slot < 0) return false;
+    this.spawned++;
+    if (s < this.laneMinS[lane]!) this.laneMinS[lane] = s;
+    return true;
+  }
+
+  /** Would a car standing at `s` on `lane` be too close to another? Also checks adjacent lanes. */
+  private crowded(lane: number, s: number): boolean {
+    const V = this.vehicles;
+    const { next, prev } = this.lanes[lane]!;
+    for (let j = 0; j < V.highWater; j++) {
+      if (!V.alive[j]) continue;
+      const other = V.lane[j]!;
+      let front: number;
+      if (other === lane) front = V.s[j]!;
+      else if (next.includes(other)) front = this.laneLen[lane]! + V.s[j]!;
+      else if (prev.includes(other)) front = V.s[j]! - this.laneLen[other]!;
+      else continue;
+      if (front >= s) {
+        if (front - s < SPAWN_SPACING) return true;
+        continue;
+      }
+      const room = s - VEHICLE_LENGTH - IDM.minGap - front;
+      if (room < 0 || V.v[j]! * V.v[j]! > 2 * IDM.decel * room) return true;
+    }
+    return false;
   }
 
   // --- Stats & output -----------------------------------------------------------
@@ -540,6 +608,11 @@ export class World {
     return V.highWater;
   }
 
+  /** The residents, their households and the clock; null on maps without a town. Allocates. */
+  townView(): TownView | null {
+    return this.town?.view(this.minute()) ?? null;
+  }
+
   /** FNV-1a hash of the full dynamic state. Equal hashes ⇒ identical simulations. */
   hash(): string {
     let h = 0x811c9dc5;
@@ -559,7 +632,9 @@ export class World {
       mix(V.lane[i]!);
       mix(Math.round(V.s[i]! * 1e4));
       mix(Math.round(V.v[i]! * 1e4));
+      if (this.town) mix(V.owner[i]!);
     }
+    this.town?.hash(mix);
     return (h >>> 0).toString(16).padStart(8, '0');
   }
 }

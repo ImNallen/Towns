@@ -10,6 +10,8 @@ import type { FromWorker, ToWorker } from './protocol';
 const CAPACITY = 4096;
 /** Cap catch-up work per pump so a slow frame cannot snowball. */
 const MAX_STEPS_PER_PUMP = 40;
+/** Wall-clock ms between town views. */
+const TOWN_INTERVAL = 250;
 
 let edits: MeadowEdit[] = [];
 let waiting: { edits: MeadowEdit[]; scenario: Scenario } | null = null;
@@ -17,6 +19,7 @@ let world: World | null = null;
 let speed = 1;
 let accumulator = 0;
 let last = performance.now();
+let lastTown = -Infinity;
 
 const post = (msg: FromWorker, transfer: Transferable[] = []): void => self.postMessage(msg, { transfer });
 
@@ -33,6 +36,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       last = performance.now();
       post({ type: 'ready', scenario, capacity: CAPACITY });
       postFrame(world);
+      postTown(world);
       break;
     }
     case 'bulldozeRoad':
@@ -91,6 +95,7 @@ function applyEdit(edit: { edits: MeadowEdit[]; scenario: Scenario }): boolean {
   waiting = null;
   post({ type: 'roadsChanged', network: edit.scenario.network, edits });
   postFrame(world);
+  postTown(world);
   return true;
 }
 
@@ -99,6 +104,13 @@ function postFrame(w: World): void {
   const ids = new Int32Array(w.vehicles.highWater);
   const slots = w.writeSnapshot(positions, ids);
   post({ type: 'frame', tick: w.tick, slots, positions, ids, stats: w.stats() }, [positions.buffer, ids.buffer]);
+}
+
+function postTown(w: World): void {
+  const view = w.townView();
+  if (!view) return;
+  lastTown = performance.now();
+  post({ type: 'town', view });
 }
 
 setInterval(() => {
@@ -117,5 +129,6 @@ setInterval(() => {
   if (steps > 0) {
     if (waiting && (world.vehicles.count === 0 || Math.floor(world.tick / 20) !== Math.floor((world.tick - steps) / 20)) && applyEdit(waiting)) return;
     postFrame(world);
+    if (now - lastTown >= TOWN_INTERVAL) postTown(world);
   }
 }, 1000 / 60);

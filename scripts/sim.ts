@@ -4,9 +4,12 @@
  *   pnpm sim                                   # roundabout, seed 1, 10 sim-minutes
  *   pnpm sim --scenario straight --ticks 2400 --seed 7 --every 1200
  *   pnpm sim --json                            # machine-readable summary only
+ *   pnpm sim --scenario meadow --connect --ticks 288000 --every 28800   # ten town days, one road built
  */
 import { parseArgs } from 'node:util';
-import { buildScenario, isScenarioName, SCENARIOS } from '../src/sim/scenarios';
+import { buildScenario, isScenarioName, SCENARIOS, type Scenario } from '../src/sim/scenarios';
+import { meadowScenario, meadowTips, planMeadowRoad } from '../src/sim/scenarios/meadow';
+import type { TownView } from '../src/sim/town/town';
 import { DT, World, type SimStats } from '../src/sim/world';
 
 const { values } = parseArgs({
@@ -17,6 +20,7 @@ const { values } = parseArgs({
     seed: { type: 'string', default: '1' },
     every: { type: 'string', default: '0' },
     json: { type: 'boolean', default: false },
+    connect: { type: 'boolean', default: false },
   },
 });
 
@@ -41,11 +45,45 @@ const fmt = (st: SimStats): string =>
     `lost=${st.lost}`,
   ].join('  ');
 
-const world = new World(buildScenario(scenarioName), seed);
+const town = (view: TownView): string => {
+  const { totals: t } = view;
+  const clock = `${String(Math.floor(view.minuteOfDay / 60)).padStart(2, '0')}:${String(view.minuteOfDay % 60).padStart(2, '0')}`;
+  return [
+    `  town day ${view.day} ${clock}`,
+    `people=${t.population}`,
+    `employed=${t.employed}/${t.adults}`,
+    `cross=${t.crossCommuters}`,
+    `cars=${t.cars}`,
+    `upgrades=${t.houseUpgrades + t.carUpgrades}`,
+    `funds=${t.meanFunds.toFixed(0)}`,
+    ...[...new Set(view.households.map((h) => h.region))].map((region) => {
+      const side = view.households.filter((h) => h.region === region);
+      const mean = (f: (h: (typeof side)[number]) => number) => (side.reduce((sum, h) => sum + f(h), 0) / side.length).toFixed(0);
+      return `${region}: funds=${mean((h) => h.funds)} wages=${mean((h) => h.wages)}`;
+    }),
+  ].join('  ');
+};
+
+/** Meadow Vale with one road joining the two neighbourhoods. */
+function connectedMeadow(): Scenario {
+  const [west, east] = meadowTips([]);
+  const road = planMeadowRoad([], west!, east!);
+  if (!road.ok) throw new Error(road.reason);
+  return meadowScenario([road.road]);
+}
+
+if (values.connect && scenarioName !== 'meadow') {
+  console.error('--connect only applies to --scenario meadow');
+  process.exit(1);
+}
+const world = new World(values.connect ? connectedMeadow() : buildScenario(scenarioName), seed);
 const started = performance.now();
 for (let t = 0; t < ticks; t++) {
   world.step();
-  if (!values.json && every > 0 && world.tick % every === 0) console.log(fmt(world.stats()));
+  if (values.json || every <= 0 || world.tick % every !== 0) continue;
+  console.log(fmt(world.stats()));
+  const view = world.townView();
+  if (view) console.log(town(view));
 }
 const elapsedMs = performance.now() - started;
 
@@ -63,5 +101,7 @@ if (values.json) {
   console.log(JSON.stringify(summary, null, 2));
 } else {
   console.log(`\n${scenarioName} seed=${seed}: ${fmt(summary.stats)}`);
+  const view = world.townView();
+  if (view) console.log(town(view));
   console.log(`hash=${summary.hash}  ${summary.msPerTick}ms/tick  (${(elapsedMs / 1000).toFixed(2)}s wall)`);
 }
