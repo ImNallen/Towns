@@ -33,11 +33,14 @@ test('each lot fits a repeatable design even between two different neighbours', 
 test('upgrades fit the same parcel and each preview stays inside the authored lot', () => {
   expect(new Set(BLUEPRINTS.map(b => b.id)).size).toBe(BLUEPRINTS.length);
   for (const blueprint of BLUEPRINTS) {
-    if (blueprint.tier !== 'expensive') {
+    const nextTier = tiers[tiers.indexOf(blueprint.tier) + 1];
+    const hasUpgrade = BLUEPRINTS.some(b => b.tier === nextTier
+      && b.lot.columns === blueprint.lot.columns && b.lot.rows === blueprint.lot.rows);
+    expect(Boolean(blueprint.upgradesTo)).toBe(hasUpgrade);
+    if (blueprint.upgradesTo) {
       const next = BLUEPRINTS.find(b => b.id === blueprint.upgradesTo);
-      expect(next?.tier).toBe(tiers[tiers.indexOf(blueprint.tier) + 1]);
-      expect(next!.lot.columns).toBeLessThanOrEqual(blueprint.lot.columns);
-      expect(next!.lot.rows).toBeLessThanOrEqual(blueprint.lot.rows);
+      expect(next?.tier).toBe(nextTier);
+      expect(next!.lot).toEqual(blueprint.lot);
     }
     for (const finish of catalogueVariants(blueprint)) {
       const geometry = buildingGeometry(blueprint, finish);

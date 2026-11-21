@@ -44,7 +44,7 @@ export const BLUEPRINTS: readonly Blueprint[] = [
   design('cedar', 'Cedar house', 'mid', 2, 2, [block(0, 1, 9, 6, hip(), 4), wing(-3, -3, 3, 4, hip('y')), garage(5, 1, 3, 5), tree(-5, 5)], 'laurel'),
   design('rowan', 'Rowan cross gable', 'mid', 2, 2, [block(0, 1, 10, 5, gable(), 4), wing(0, -2, 4, 6, gable('y')), garage(-4, -3, 3, 4), tree(5, 5)], 'olive'),
   design('hazel', 'Hazel modern', 'mid', 2, 2, [block(-2, 1, 6, 8, flat, 5), wing(3, 3, 5, 4, flat), garage(3, -2), porch(-2, -4, 6), tree(5, 6)], 'olive', modern),
-  design('willow', 'Willow garden house', 'mid', 2, 3, [block(-1, -3, 8, 7, hip(), 4.5), wing(3, 2, 4, 6, gable('y')), garage(-4, 3), tree(-4, 8), tree(4, 8)], 'laurel'),
+  design('willow', 'Willow garden house', 'mid', 2, 3, [block(-1, -3, 8, 7, hip(), 4.5), wing(3, 2, 4, 6, gable('y')), garage(-4, 3), tree(-4, 8), tree(4, 8)]),
   design('jewel', 'Jewel villa', 'expensive', 1, 1, [block(0, 0.7, 5.3, 4, hip(), 5.5), porch(0, -2, 5.5), hedge(0, 3.3, 6, 0.5), tree(-2.8, -2.7, 0.6)]),
   design('pavilion', 'Pocket pavilion', 'expensive', 1, 1, [block(-1, 0, 3.3, 5.3, hip('y'), 5), wing(1.7, 1.3, 2, 2.6, flat), pool(1.9, -1.4, 1.3, 2.3)]),
   design('terrace', 'Terrace villa', 'expensive', 1, 1, [block(0, 1.5, 5.6, 2.6, flat, 5.5), wing(-1.9, -0.8, 1.8, 3.5, flat), pool(1.3, -1, 2, 2.8), hedge(0, -3.4, 6, 0.4)]),
