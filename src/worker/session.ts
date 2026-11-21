@@ -1,5 +1,5 @@
 import { buildScenario, type Scenario } from '../sim/scenarios';
-import { planWalk, isZoneStroke, meadowScenario, meadowSegments, upgradeFailure, meadowZoning, planMeadowRoad, type MeadowEdit } from '../sim/scenarios/meadow';
+import { editableScenario, isZoneStroke, meadowZoning, type MeadowEdit } from '../sim/scenarios/meadow';
 import { planZoneStroke } from '../sim/zoning/paint';
 import { editCost, shortage, undoCost } from '../sim/town/budget';
 import { World } from '../sim/world';
@@ -10,6 +10,7 @@ export const CAPACITY = 4096;
 export type Session = ReturnType<typeof createSession>;
 
 export function createSession(initial: InitialTown, post: (msg: FromWorker) => void) {
+  const map = editableScenario(initial.scenario);
   let edits: MeadowEdit[] = [];
   type RoadChange = { edits: MeadowEdit[]; scenario: Scenario; cost: number; allowLaneShift: boolean };
   let waiting: RoadChange | null = null;
@@ -24,8 +25,8 @@ export function createSession(initial: InitialTown, post: (msg: FromWorker) => v
       case 'buildWalk':
       case 'buildRoad':
       case 'undo': {
-        if (world.scenario.name !== 'meadow') {
-          post({ type: 'editRejected', reason: 'Open Meadow Vale to build a road.' });
+        if (!map) {
+          post({ type: 'editRejected', reason: 'Open a town map to build a road.' });
           break;
         }
         if (waiting) break;
@@ -39,22 +40,22 @@ export function createSession(initial: InitialTown, post: (msg: FromWorker) => v
           proposed = [...edits, { lights: junction.point, actuated: msg.actuated }];
         } else if (msg.type === 'buildWalk') {
           const cells = world.scenario.zones!;
-          const plan = planWalk(world.network, msg.walk, msg.start, msg.end, { cells, zoning: meadowZoning(edits,cells) });
+          const plan = map.planWalk(world.network, msg.walk, msg.start, msg.end, { cells, zoning: meadowZoning(edits,cells) });
           if (typeof plan === 'string') { post({ type: 'editRejected', reason: plan }); break; }
           proposed = [...edits,plan];
         } else if (msg.type === 'buildRoad') {
-          const plan = planMeadowRoad(edits, msg.start, msg.end, msg.bend, msg.roadType);
+          const plan = map.planMeadowRoad(edits, msg.start, msg.end, msg.bend, msg.roadType);
           if (!plan.ok) {
             post({ type: 'editRejected', reason: plan.reason });
             break;
           }
           proposed = [...edits, plan.road];
         } else if (msg.type === 'bulldozeRoad' || msg.type === 'upgradeRoad') {
-          if (msg.editCount !== edits.length || !Number.isInteger(msg.segment) || (msg.type === 'bulldozeRoad' && !meadowSegments(edits)[msg.segment])) {
+          if (msg.editCount !== edits.length || !Number.isInteger(msg.segment) || (msg.type === 'bulldozeRoad' && !map.meadowSegments(edits)[msg.segment])) {
             post({ type: 'editRejected', reason: 'Select a street segment.' });
             break;
           }
-          const reason = msg.type === 'upgradeRoad' && upgradeFailure(edits, msg.segment, msg.roadType);
+          const reason = msg.type === 'upgradeRoad' && map.upgradeFailure(edits, msg.segment, msg.roadType);
           if (reason) {
             post({ type: 'editRejected', reason });
             break;
@@ -62,15 +63,15 @@ export function createSession(initial: InitialTown, post: (msg: FromWorker) => v
           proposed = [...edits, msg.type === 'upgradeRoad' ? { upgrade: msg.segment, roadType: msg.roadType } : { remove: msg.segment }];
         } else if (edits.length && isZoneStroke(edits.at(-1)!)) {
           const next = edits.slice(0, -1);
-          commitZoning(next, undoCost(edits));
+          commitZoning(next, undoCost(edits, map));
           break;
         } else {
           proposed = edits.slice(0, -1);
         }
         if (!edits.length && msg.type === 'undo') break;
-        const cost = msg.type === 'undo' ? undoCost(edits) : editCost(edits, proposed.at(-1)!);
+        const cost = msg.type === 'undo' ? undoCost(edits, map) : editCost(edits, proposed.at(-1)!, map);
         const changed = (msg.type === 'undo' ? edits : proposed).at(-1)!;
-        const edit = { allowLaneShift: 'upgrade' in changed, edits: proposed, scenario: meadowScenario(proposed), cost };
+        const edit = { allowLaneShift: 'upgrade' in changed, edits: proposed, scenario: map.meadowScenario(proposed), cost };
         if (!applyEdit(edit)) {
           waiting = edit;
           world.setAdmissions(false);
@@ -79,14 +80,14 @@ export function createSession(initial: InitialTown, post: (msg: FromWorker) => v
         break;
       }
       case 'paintZone': {
-        const cells = world.scenario.name === 'meadow' ? world.scenario.zones : undefined;
-        if (!cells) {
-          post({ type: 'editRejected', reason: 'Open Meadow Vale to zone plots.' });
+        const cells = world.scenario.zones;
+        if (!map || !cells) {
+          post({ type: 'editRejected', reason: 'Open a town map to zone plots.' });
           break;
         }
         if (waiting) break;
         const plan = planZoneStroke(cells, meadowZoning(edits, cells), msg.zone, msg.cells);
-        if (plan.ok) commitZoning([...edits, plan.stroke], editCost(edits, plan.stroke));
+        if (plan.ok) commitZoning([...edits, plan.stroke], editCost(edits, plan.stroke, map));
         else post({ type: 'editRejected', reason: plan.reason });
         break;
       }

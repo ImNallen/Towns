@@ -1,3 +1,4 @@
+import { frameMessage } from './frame';
 import { DT, type World } from '../sim/world';
 import { createSession, CAPACITY, replay, type Session } from './session';
 import { parseSave } from './save';
@@ -38,13 +39,17 @@ function ready(): void {
   postTown(session.world);
 }
 
+export function startSimulation(initial: Session, multiplier: number): void {
+  session = initial;
+  speed = multiplier;
+  ready();
+}
+
 self.onmessage = async (e: MessageEvent<ToWorker>) => {
   const msg = e.data;
   switch (msg.type) {
     case 'init':
-      session = createSession({ scenario: msg.scenario, seed: msg.seed, walkLimit: msg.walkLimit }, notify);
-      speed = msg.speed;
-      ready();
+      startSimulation(createSession({ scenario: msg.scenario, seed: msg.seed, walkLimit: msg.walkLimit }, notify), msg.speed);
       break;
     case 'cancelLoad':
       loading?.abort(new Error('Load cancelled.'));
@@ -78,13 +83,9 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
 };
 
 function postFrame(w: World): void {
-  const positions = new Float32Array(w.vehicles.highWater * 3);
-  const ids = new Int32Array(w.vehicles.highWater);
-  const models = new Uint8Array(w.vehicles.highWater);
-  const paint = new Uint8Array(w.vehicles.highWater);
-  const slots = w.writeSnapshot(positions, ids, models, paint);
-  const walkers = w.pedestrianPositions();
-  post({ type: 'frame', signalClocks: w.signalClocks, walkers, traffic: w.traffic.view(), tick: w.tick, slots, positions, ids, models, paint, stats: w.stats() }, [walkers.buffer, positions.buffer, ids.buffer, models.buffer, paint.buffer]);
+  const frame = frameMessage(w);
+  const { walkers, positions, ids, models, paint } = frame;
+  post(frame, [walkers.buffer, positions.buffer, ids.buffer, models.buffer, paint.buffer]);
 }
 
 function postTown(w: World): void {

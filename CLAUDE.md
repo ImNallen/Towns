@@ -1,6 +1,6 @@
 # Towns
 
-Towns is a top-down city builder with a flat, orthographic 3D map. Meadow Vale is the playable town. Mill Street, Roundabout, and Straight are traffic scenarios.
+Towns is a top-down city builder with a flat, orthographic 3D map. Meadow Vale and North Valley are editable towns. North Valley has a 2 km × 2 km map with three entrances and a starter road on the west edge. Mill Street, Roundabout, and Straight are traffic scenarios.
 
 ## Commands
 
@@ -27,9 +27,11 @@ Run studies with `pnpm exec tsx scripts/<name>.ts`.
 | `traffic-study` | Measured versus free-flow routing on Mill Street |
 | `junction-comparison` | Queues, delay, and throughput under give-way, fixed, and actuated control. Add `--peak` for heavier demand. |
 | `avenue-comparison` | Lane use on an Avenue approach and traffic in mixed-zone Meadow |
+| `grow` | Builds a North Valley town and reports simulation costs, memory, frame bytes and hashes near 150, 500 and 1,000 homes. |
+| `valley-browser` | Measures live FPS and worker ticks/s at the same milestones. Start `pnpm dev --port 5198` first. |
 | `walker-benchmark` | Time per update for 300 moving walkers |
 
-Browser options live in `src/main.tsx`. Use `?scenario=meadow` (also `mill`, `roundabout`, or `straight`), `seed=1`, and `speed=1` (0 pauses). Combine parameters with `&`. Use `lanes=1` for the lane graph, `zones=1` for the zoning grid, and `walkLimit` for the base walking range in metres (default 600). Set `mpp` (metres per pixel) to enable the initial camera override with centre `x` and `y` in metres. Open `?catalogue=1` to browse buildings, road cross-sections, and vehicles.
+Browser options live in `src/main.tsx`. Use `?scenario=meadow` (also `valley`, `mill`, `roundabout`, or `straight`), `seed=1`, and `speed=1` (0 pauses). Combine parameters with `&`. Use `lanes=1` for the lane graph, `zones=1` for the zoning grid, and `walkLimit` for the base walking range in metres (default 600). Set `mpp` (metres per pixel) to enable the initial camera override with centre `x` and `y` in metres. Open `?catalogue=1` to browse buildings, road cross-sections, and vehicles.
 
 ## Architecture
 
@@ -38,7 +40,7 @@ Browser options live in `src/main.tsx`. Use `?scenario=meadow` (also `mill`, `ro
 | `src/sim/world.ts`, `rng.ts` | World advances at 20 Hz, owns simulation state, remaps trips after edits, and computes stats and the state hash. Rng supplies seeded randomness. |
 | `src/sim/math/`, `network/` | Geometry and arc-length paths. The network builds street cross-sections, connector lanes, junctions, signals, pavement graphs, and walking routes. |
 | `src/sim/traffic/` | Typed vehicle arrays, Intelligent Driver Model (IDM), pedestrian conflicts, lane choice, measured traffic conditions, and next-hop routing. |
-| `src/sim/scenarios/`, `zoning/` | Maps and demand. Meadow replays edits. Zoning identifies roadside cells, applies paint, and fits building lots. |
+| `src/sim/scenarios/`, `zoning/` | Maps and demand. Meadow Vale and North Valley share the editable-map planner. Zoning identifies roadside cells, applies paint, and fits building lots. |
 | `src/sim/town/` | Households, jobs, trips, mode choice, growth, parking, parks, happiness, edit invoices, and the town treasury. |
 | `src/buildings/`, `src/vehicles/` | Shared building blueprints and deterministic design and finish selection. Vehicle catalogue with dimensions and driving characteristics. |
 | `src/worker/` | Simulation worker and typed message protocol. |
@@ -47,7 +49,7 @@ Browser options live in `src/main.tsx`. Use `?scenario=meadow` (also `mill`, `ro
 
 `main.tsx` calls `createGame`. The worker builds the scenario and World, sends `ready` for the initial map, then publishes frames after batches of fixed ticks. The renderer interpolates positions. Town messages supply household, business, demand, and budget data for the HUD.
 
-The editor and worker share placement planners. The worker checks funds and owns Meadow's ordered edit history. A road edit builds a candidate network and projects vehicles onto reachable lanes. If a vehicle loses its route or safe spacing, the worker holds new arrivals and retries. Walkers transfer to reachable pavements or return home and increment `walkersCleared`. Both threads derive paint from live cell keys and the edit history. Painting or undoing a stroke updates zoning in place.
+The editor and worker share placement planners. The worker checks funds and owns each town’s ordered edit history. A road edit builds a candidate network and projects vehicles onto reachable lanes. If a vehicle loses its route or safe spacing, the worker holds new arrivals and retries. Walkers transfer to reachable pavements or return home and increment `walkersCleared`. Both threads derive paint from live cell keys and the edit history. Painting or undoing a stroke updates zoning in place.
 
 ## Rules (enforced by tests/architecture.test.ts where possible)
 
@@ -85,6 +87,6 @@ The editor and worker share placement planners. The worker checks funds and owns
 
 ## Roadmap
 
-1. Consolidate the systems tuned on Meadow Vale. Test a larger town, add save/load behind `src/platform/`, refresh the docs, then playtest and balance.
+1. Consolidate the systems tuned on Meadow Vale. Use North Valley for scale tests and the Saves tray for replay checks, then playtest and balance.
 2. Polish the game and add progression. New towns start small with a light tutorial. Population, happiness, budget, and solving traffic jams unlock tools at milestones. Sandbox mode starts with every tool unlocked.
 3. Add medium-density buildings and highrises, then public transport.

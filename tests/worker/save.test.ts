@@ -80,3 +80,18 @@ it('restores a deferred bulldoze with admissions closed and then cancelled', asy
   expect(session.pending).toBe(false);
   await roundTrip(session);
 });
+
+it('restores North Valley streets, occupied homes and subsequent simulation ticks', async () => {
+  const session = createSession({ scenario: 'valley', seed: 7 }, message => {
+    if (message.type === 'editRejected') throw new Error(message.reason);
+  });
+  session.command({ type: 'buildRoad', start: { x: -870, y: 0 }, end: { x: -700, y: 0 } });
+  session.world.step();
+  const cells = Array.from(session.world.scenario.zones!.keys, key => key as CellKey);
+  session.command({ type: 'paintZone', zone: 'residential', cells });
+  while (session.world.tick < 1200) session.world.step();
+  expect(session.edits).toHaveLength(2);
+  expect(session.world.townView()!.households.length).toBeGreaterThan(0);
+  expect(session.world.stats().lost).toBe(0);
+  await roundTrip(session);
+});

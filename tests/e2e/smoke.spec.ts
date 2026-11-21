@@ -712,3 +712,43 @@ test('autosaves with the tray closed and can cancel a long import', async ({ pag
   await expect(menu.getByRole('status')).toHaveText('Load cancelled.');
   expect(await page.evaluate(() => window.__towns!.save())).toBe(original);
 });
+
+test('North Valley opens with an editable starter street and three entrances', async ({page}) => {
+  await page.goto('/?scenario=valley&speed=0&x=-120&y=0&mpp=2.55');
+  await expect(page.getByRole('heading', {name:'North Valley'})).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.__towns?.town()?.households.length)).toBe(0);
+  await page.screenshot({path:'artifacts/screens/valley-empty.png'});
+});
+
+test('loads an edited North Valley from the Saves tray in Meadow Vale', async ({ page }) => {
+  await page.goto('/?scenario=valley&speed=0');
+  await expect.poll(() => page.evaluate(() => window.__towns?.town()?.households.length)).toBe(0);
+  const [start, end] = await page.evaluate(() =>
+    [-870, -700].map(x => window.__towns!.worldToScreen({ x, y: 0 })),
+  );
+  await page.mouse.move(start!.x, start!.y);
+  await page.mouse.down();
+  await page.mouse.move(end!.x, end!.y, { steps: 5 });
+  await page.mouse.up();
+  const roadCount = () => page.evaluate(() => window.__towns?.editor()?.roadCount);
+  await expect.poll(roadCount).toBe(1);
+
+  const tray = page.getByRole('region', { name: 'Town saves' });
+  const toggle = page.getByRole('button', { name: 'Save and load' });
+  await toggle.click();
+  await tray.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(tray.getByRole('status')).toHaveText('Town 1 saved.');
+  const saved = await page.evaluate(() => window.__towns!.save());
+
+  await page.goto('/?scenario=meadow&speed=0');
+  await expect(page.getByRole('heading', { name: 'Meadow Vale' })).toBeVisible();
+  await toggle.click();
+  await tray.getByRole('button', { name: 'Load', exact: true }).click();
+  await expect(tray.getByRole('status')).toHaveText('Town 1 loaded.');
+  await expect(page.getByRole('heading', { name: 'North Valley' })).toBeVisible();
+  await expect.poll(roadCount).toBe(1);
+  expect(await page.evaluate(() => window.__towns!.save())).toBe(saved);
+  await toggle.click();
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect.poll(roadCount).toBe(0);
+});

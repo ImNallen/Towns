@@ -166,6 +166,7 @@ export function App({ game }: { game: Game }) {
     return () => window.removeEventListener('keydown', onKey, true);
   });
 
+  const valley = game.scenario === 'valley';
   const instruction = editor?.hint || (editor?.pending
     ? 'Updating roads…'
     : editor?.tool === 'pan' ? 'Drag the map to pan.'
@@ -181,6 +182,7 @@ export function App({ game }: { game: Game }) {
       ? 'Drag along the plots beside a street to zone them. Plots fill in toward the street.'
       : 'Drag across zoned plots to clear them and the plots behind.')
     : editor?.connected ? 'Drag across a street for a crossing or from its side for a branch, or click points one by one.'
+    : valley ? 'Extend the western street and zone the frontage for homes.'
     : 'Drag between marked ends to connect them, or click points one by one.');
   const household = selected === null ? undefined : town?.households.find((h) => h.home === selected);
   const business = town?.businesses.find(b => b.home === selected);
@@ -217,7 +219,7 @@ export function App({ game }: { game: Game }) {
     reveal();
     return () => observer.disconnect();
   }, [game, selected, inspecting, tray]);
-  const tripStatus = editor?.pending ? 'Updating roads' : speed === 0 ? 'Paused' : editor && !editor.connected ? 'Waiting for a connection' : 'Traffic running';
+  const tripStatus = editor?.pending ? 'Updating roads' : speed === 0 ? 'Paused' : editor && !editor.connected && !valley ? 'Waiting for a connection' : 'Traffic running';
 
   const openGroup = GROUPS.find(group => group.name === tray);
   const savesButton = <button className="tool" aria-label="Save and load" aria-expanded={tray === 'Saves'}
@@ -246,14 +248,14 @@ export function App({ game }: { game: Game }) {
           <header className="map-heading">
             <span className="wordmark">Towns</span>
           </header>
-          <h1>{editor ? 'Meadow Vale' : 'Traffic study'}</h1>
+          <h1>{valley ? 'North Valley' : editor ? 'Meadow Vale' : 'Traffic study'}</h1>
           {editor && <div className={`objective${editor.connected ? ' is-complete' : ''}`}>
             <span className="objective-marker" aria-hidden="true">{editor.connected ? '✓' : '○'}</span>
-            <h2>{editor.connected ? 'Neighborhoods connected' : 'Connect the two neighborhoods'}</h2>
+            <h2>{valley ? (editor.connected ? 'Valley entrances connected' : 'Connect the valley entrances') : editor.connected ? 'Neighborhoods connected' : 'Connect the two neighborhoods'}</h2>
           </div>}
           <div className="trip-summary">
             <div><strong>{stats?.completed ?? 0}</strong><span>{stats?.completed === 1 ? 'trip' : 'trips'} completed</span></div>
-            <span className="traffic-status"><i className={speed > 0 && (!editor || editor.connected) && !editor?.pending ? 'running' : ''} aria-hidden="true" />{tripStatus}</span>
+            <span className="traffic-status"><i className={speed > 0 && (!editor || editor.connected || valley) && !editor?.pending ? 'running' : ''} aria-hidden="true" />{tripStatus}</span>
           </div>
         </section>
         {town && <TownPanel town={town} jam={jam} />}

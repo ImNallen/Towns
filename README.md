@@ -9,6 +9,8 @@ pnpm dev
 
 Open the local address printed by Vite. Select **Road** (`R`) and drag from one marked street end to the other. Watch the preview, then release to build. Select **Zone** (`Z`) and paint roadside plots. Homes and businesses grow as demand builds. Click a home or business to see who lives or works there.
 
+For a larger town, open `?scenario=valley`. North Valley starts with a short street on the western edge of a 2 km × 2 km map. Extend the street and zone its frontage to start a neighbourhood. The **Saves** tray saves and loads either town.
+
 ## Map tools
 
 | Tool or tray | How to use it |
@@ -23,5 +25,7 @@ Open the local address printed by Vite. Select **Road** (`R`) and drag from one 
 **Bulldoze** (`B`) removes the highlighted street segment. **Undo** (`Ctrl+Z` or `⌘Z`) reverses the last edit and its invoice. Check the placement price before building and open **Town budget** to see taxes and upkeep.
 
 Right-drag to pan or select **Pan** (`V`). Scroll to zoom. `Esc` closes the open tray, cancels a draft, or finishes a road chain. `Space` pauses or resumes. Keys `1`, `2`, `3`, and `4` set 1×, 2×, 4×, and 8× speed.
+
+To benchmark North Valley at 150, 500, and 1,000 homes, run `pnpm exec tsx scripts/grow.ts`. For browser FPS and simulation ticks per second, start `pnpm dev --port 5198` and run `pnpm exec tsx scripts/valley-browser.ts` in another terminal.
 
 For simulation commands, architecture, and contributor rules, see [CLAUDE.md](CLAUDE.md).

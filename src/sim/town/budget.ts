@@ -1,16 +1,16 @@
 import { ROAD_TYPES } from '../network/roadTypes';
 import { polyline } from '../math/polyline';
-import { isZoneStroke, meadowSegmentInfo, type MeadowEdit } from '../scenarios/meadow';
+import { isZoneStroke, meadow, type MeadowEdit } from '../scenarios/meadow';
 
 import { BUDGET } from './economy';
 
 /** Signed cost in whole dollars, based on the geometry before the edit. */
-export function editCost(previous: readonly MeadowEdit[], edit: MeadowEdit): number {
+export function editCost(previous: readonly MeadowEdit[], edit: MeadowEdit, map = meadow): number {
   if ('lights' in edit) return 160;
   if ('walk' in edit) return edit.walk === 'zebra' ? 45 : Math.ceil(Math.hypot(edit.a.x-edit.b.x,edit.a.y-edit.b.y)*2);
   if (isZoneStroke(edit)) return edit.zone ? edit.cells.length * (edit.zone === 'park' ? BUDGET.parkPerCell : edit.zone === 'parking' ? BUDGET.parkingPerCell : BUDGET.zonePerCell) : 0;
   if ('remove' in edit || 'upgrade' in edit) {
-    const segment = meadowSegmentInfo(previous)['remove' in edit ? edit.remove : edit.upgrade]!;
+    const segment = map.meadowSegmentInfo(previous)['remove' in edit ? edit.remove : edit.upgrade]!;
     const before = ROAD_TYPES[segment.roadType].cost;
     const after = 'remove' in edit ? 0 : ROAD_TYPES[edit.roadType].cost;
     const delta = (segment.to - segment.from) * (after - before);
@@ -20,9 +20,9 @@ export function editCost(previous: readonly MeadowEdit[], edit: MeadowEdit): num
 }
 
 /** Undo uses the same pre-edit geometry that determined the original invoice. */
-export function undoCost(edits: readonly MeadowEdit[]): number {
+export function undoCost(edits: readonly MeadowEdit[], map = meadow): number {
   const last = edits.at(-1);
-  return last ? -editCost(edits.slice(0, -1), last) : 0;
+  return last ? -editCost(edits.slice(0, -1), last, map) : 0;
 }
 
 export const dollars = (n: number): string => (n < 0 ? '−$' : '$') + Math.abs(Math.round(n)).toLocaleString('en-US');

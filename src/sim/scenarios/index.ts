@@ -1,11 +1,12 @@
 import { millStreet } from './millStreet';
-import { meadowScenario } from './meadow';
+import { meadowScenario, valley } from './meadow';
 import { roundaboutTown } from './roundabout';
 import { straightRoad } from './straight';
 import type { Scenario } from './types';
 
 export const SCENARIOS = {
   meadow: meadowScenario,
+  valley: valley.meadowScenario,
   mill: millStreet,
   roundabout: roundaboutTown,
   straight: straightRoad,

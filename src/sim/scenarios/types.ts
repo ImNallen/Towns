@@ -74,6 +74,8 @@ export interface RegionSpec {
 }
 
 export interface TownSpec {
+  /** Minutes between regional development applications. Meadow Vale uses hourly applications. */
+  growthInterval?: number;
   roadMetres: number;
   roadUpkeep?: number;
   homes: HomeSpec[];
