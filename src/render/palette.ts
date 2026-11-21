@@ -37,6 +37,7 @@ export const PALETTE = {
   carModels: ['#a08465', '#2f6d55', '#a8324a'],
 
   gardens: ['#d8dfc8', '#e2e6d2', '#dbe2cb'],
+  yardGravel: '#d6c9b3',
   orchard: ['#829b79', '#94ab87', '#a2b491'],
   cottageRoofs: ['#bc8876', '#94a6aa', '#d0ad83', '#a3aaa1'],
 
