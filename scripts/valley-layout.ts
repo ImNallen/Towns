@@ -48,33 +48,47 @@ export function plantValley() {
   }
 
   const cells = world.scenario.zones!;
-  const byUse = new Map<LandUse, CellKey[]>();
-  for (const raw of cells.keys) {
-    const key = raw as CellKey;
-    const { row, column, side, road } = decodeCellKey(key);
-    if (row !== 0) continue;
-    const use: LandUse =
-      column % 61 === 10 && side === 1
-        ? 'parking'
-        : column % 30 === 5
-          ? 'shops'
-          : column % 19 === 2
-            ? 'workplaces'
-            : road === 4 && column === 10 && side === 0
-              ? 'park'
-              : 'residential';
-    if (!byUse.has(use)) byUse.set(use, []);
-    byUse.get(use)!.push(key);
+  const released = new Set<CellKey>();
+  function releaseDistrict(target: number) {
+    const byUse = new Map<LandUse, CellKey[]>();
+    for (let i = 0; i < cells.count; i++) {
+      const key = cells.keys[i]! as CellKey;
+      if (released.has(key)) continue;
+      const { row, column, side } = decodeCellKey(key);
+      if (row !== 0) continue;
+      const x = cells.corners[i * 8]!;
+      const y = cells.corners[i * 8 + 1]!;
+      if (target <= 150 && (x > -480 || y < -225)) continue;
+      if (target <= 500 && (x > -140 || y < -425)) continue;
+      released.add(key);
+      let use: LandUse = 'residential';
+      if (column % 61 === 10 && side === 1) use = 'parking';
+      else if (column % 30 === 5) use = 'shops';
+      else if (column % 19 === 2) use = 'workplaces';
+      const keys = byUse.get(use) ?? [];
+      // Two-deep paint leaves room for detached homes, yards, and business bays.
+      keys.push(use === 'parking' ? key : ((key + 1) as CellKey));
+      byUse.set(use, keys);
+    }
+    const residential = byUse.get('residential')!;
+    const park = (residential.shift()! - 1) as CellKey;
+    const paint = (use: LandUse, keys: CellKey[]) => {
+      const plan = planZoneStroke(cells, meadowZoning(edits, cells), use, keys);
+      if (!plan.ok) throw new Error(plan.reason);
+      apply(plan.stroke);
+    };
+    paint('park', [park]);
+    for (const use of ['parking', 'shops', 'workplaces', 'residential'] as const) {
+      const keys = byUse.get(use);
+      if (keys?.length) paint(use, keys);
+    }
   }
-  for (const [use, keys] of byUse) {
-    const plan = planZoneStroke(cells, meadowZoning(edits, cells), use, keys);
-    if (!plan.ok) throw new Error(plan.reason);
-    apply(plan.stroke);
-  }
-  return { world, edits };
+  return { world, edits, releaseDistrict };
 }
 
-export function growTo(world: World, target: number) {
+export function growTo(town: ReturnType<typeof plantValley>, target: number) {
+  const { world } = town;
+  town.releaseDistrict(target);
   let count = 0;
   while (count < target) {
     for (let i = 0; i < 400; i++) world.step();

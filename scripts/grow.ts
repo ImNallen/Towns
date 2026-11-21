@@ -3,9 +3,10 @@ import { serialize } from 'node:v8';
 import { plantValley, growTo } from './valley-layout';
 import { frameMessage } from '../src/worker/frame';
 
-const { world } = plantValley();
+const town = plantValley();
+const { world } = town;
 for (const target of [150, 500, 1000]) {
-  const count = growTo(world, target);
+  const count = growTo(town, target);
   const times = [];
   let routingMs = 0;
   const refresh = world.routing.refresh;

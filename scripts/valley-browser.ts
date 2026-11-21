@@ -65,12 +65,12 @@ try {
             .querySelector('canvas')!
             .dispatchEvent(new WheelEvent('wheel', { clientX: 510, clientY: 515, deltaY: d }));
         }, deltaY);
-      await zoom(-650);
       await page.screenshot({ path: 'artifacts/screens/valley-500.png' });
+      await zoom(-430);
       await page.evaluate(() => window.__towns!.setTrafficView(true));
       await page.screenshot({ path: 'artifacts/screens/valley-traffic.png' });
       await page.evaluate(() => window.__towns!.setTrafficView(false));
-      await zoom(650);
+      await zoom(430);
     }
   }
 } finally {
