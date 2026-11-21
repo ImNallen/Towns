@@ -1,53 +1,57 @@
 # Towns
 
-A minimalist-looking city builder with a deep simulation. Top-down orthographic 3D in a flat, map-like style
-(white roads with thin outlines, flat colours, soft drop shadows, terraced hills). Built mostly by AI agents, so
-the rules below exist to keep the codebase verifiable.
+Towns is a top-down city builder with a flat, orthographic 3D map. Meadow Vale is the playable town. Mill Street, Roundabout, and Straight are traffic scenarios.
 
 ## Commands
 
-```bash
-pnpm dev            # http://localhost:5173 (see URL params below)
-pnpm check          # typecheck + unit tests. Run before saying anything is done.
-pnpm test           # vitest: sim tests + architecture guard (fast, headless)
-pnpm sim            # headless sim run, prints stats + state hash
-pnpm sim --scenario straight --ticks 2400 --seed 7 --every 600
-pnpm sim --scenario meadow --paint --ticks 288000 --every 28800  # paint all live cells residential, report daily
-pnpm sim --scenario meadow --paint mixed --ticks 288000 --every 28800  # homes, shops and workplaces
-pnpm e2e            # Playwright: boots the app, saves screenshots to artifacts/screens/
+```sh
+pnpm install
+pnpm dev                  # Vite prints the play URL
+pnpm check                # typecheck and Vitest, required before completion
+pnpm test                 # unit and architecture tests (test:watch for watch mode)
+pnpm build                # typecheck and build for production
+pnpm preview              # serve the production build
+pnpm sim                  # Roundabout, seed 1, 12,000 ticks, final stats and hash
+pnpm sim --scenario meadow --connect --paint mixed --ticks 288000 --every 28800
+pnpm exec playwright install chromium
+pnpm e2e                  # Playwright writes PNGs to artifacts/screens/
 ```
 
-URL params: `?scenario=meadow|roundabout|straight&seed=1&speed=0..8&lanes=1&zones=1&x=0&y=0&mpp=0.14`
-(`x`,`y` = view centre in metres, `mpp` = metres per pixel; `lanes=1` shows the lane graph; `zones=1` shows the zone cells).
+The Meadow example joins the neighbourhoods, paints homes, shops, and workplaces, and reports once per town day. Use bare `--paint` for homes only, `--seed N` to set the seed, or `--json` for a machine-readable final summary. On Meadow, `--zebra x,y` places a crossing. With paint, `--parking-lot CELL` reserves three frontage cells and `--park CELL --park-size 2` places a square park. Sizes are 1, 2, or 3.
+
+Run studies with `pnpm exec tsx scripts/<name>.ts`.
+
+| Script | What it measures |
+| --- | --- |
+| `town-study` | Happiness and growth across three mixed-zone layouts from `town-layout.ts` |
+| `traffic-study` | Measured versus free-flow routing on Mill Street |
+| `junction-comparison` | Queues, delay, and throughput under give-way, fixed, and actuated control. Add `--peak` for heavier demand. |
+| `avenue-comparison` | Lane use on an Avenue approach and traffic in mixed-zone Meadow |
+| `walker-benchmark` | Time per update for 300 moving walkers |
+
+Browser options live in `src/main.tsx`. Use `?scenario=meadow` (also `mill`, `roundabout`, or `straight`), `seed=1`, and `speed=1` (0 pauses). Combine parameters with `&`. Use `lanes=1` for the lane graph, `zones=1` for the zoning grid, and `walkLimit` for the base walking range in metres (default 600). Set `mpp` (metres per pixel) to enable the initial camera override with centre `x` and `y` in metres. Open `?catalogue=1` to browse buildings, road cross-sections, and vehicles.
 
 ## Architecture
 
-```
-src/sim/        Pure, deterministic simulation. No DOM, no Three.js, no React, no wall clock.
-  math/         Vec2, Polyline (arc-length paths as Float64Arrays), Bézier/arc sampling
-  network/      Lane graph (lanes, next/prev, give-way) + drawable surfaces; NetworkBuilder validates it
-  traffic/      IDM car-following, SoA vehicle storage, next-hop routing tables
-  scenarios/    Map definitions (network + demand + scenery)
-  zoning/       Zone cells beside every built road, paint strokes, and residential, shop and workplace lots beside the street (Meadow Vale only)
-  world.ts      World: fixed 20 Hz tick (DT = 1/20), stats, snapshot, hash
-src/buildings/  Shared low-density blueprint catalogue and deterministic design/finish picker
-src/worker/     Runs World in a Web Worker; protocol.ts defines every message
-src/render/     Three.js: camera, road meshes, scenery, instanced vehicles, debug overlay, game loop
-src/ui/         React HUD over the canvas
-scripts/sim.ts  Headless runner
-tests/          vitest (tests/**/*.test.ts) and Playwright (tests/e2e)
-```
+| Path | Responsibility |
+| --- | --- |
+| `src/sim/world.ts`, `rng.ts` | World advances at 20 Hz, owns simulation state, remaps trips after edits, and computes stats and the state hash. Rng supplies seeded randomness. |
+| `src/sim/math/`, `network/` | Geometry and arc-length paths. The network builds street cross-sections, connector lanes, junctions, signals, pavement graphs, and walking routes. |
+| `src/sim/traffic/` | Typed vehicle arrays, Intelligent Driver Model (IDM), pedestrian conflicts, lane choice, measured traffic conditions, and next-hop routing. |
+| `src/sim/scenarios/`, `zoning/` | Maps and demand. Meadow replays edits. Zoning identifies roadside cells, applies paint, and fits building lots. |
+| `src/sim/town/` | Households, jobs, trips, mode choice, growth, parking, parks, happiness, edit invoices, and the town treasury. |
+| `src/buildings/`, `src/vehicles/` | Shared building blueprints and deterministic design and finish selection. Vehicle catalogue with dimensions and driving characteristics. |
+| `src/worker/` | Simulation worker and typed message protocol. |
+| `src/render/`, `src/ui/` | Three.js map, editor previews, instanced vehicles and walkers. React tools, inspectors, budget, and catalogue. |
+| `tests/sim/`, `tests/e2e/` | Headless behaviour tests and browser tests. Import and determinism guards live in `tests/architecture.test.ts`. |
 
-Data flow: `main.tsx` → `createGame` starts the worker → worker builds the scenario and `World`, posts `ready`
-(the scenario, for drawing) and then a `frame` (positions, ids, stats) after each batch of ticks → the renderer
-interpolates between the last two frames. On Meadow Vale the worker also owns the ordered list of edits: roads,
-removals and zone strokes. The editor previews a placement with the same planner the worker uses to accept it.
-A zone stroke never changes the network, so the worker applies it and its undo without moving existing traffic. The World groups live painted cells into parcels and reserves driveway targets. Both
-threads derive the painted cells with `meadowZoning(edits, cells)`. Each road edit rebuilds the local lane network and maps active vehicles to their positions and destinations. If a trip cannot continue safely, the worker pauses new arrivals and retries as traffic clears.
+`main.tsx` calls `createGame`. The worker builds the scenario and World, sends `ready` for the initial map, then publishes frames after batches of fixed ticks. The renderer interpolates positions. Town messages supply household, business, demand, and budget data for the HUD.
+
+The editor and worker share placement planners. The worker checks funds and owns Meadow's ordered edit history. A road edit builds a candidate network and projects vehicles onto reachable lanes. If a vehicle loses its route or safe spacing, the worker holds new arrivals and retries. Walkers transfer to reachable pavements or return home and increment `walkersCleared`. Both threads derive paint from live cell keys and the edit history. Painting or undoing a stroke updates zoning in place.
 
 ## Rules (enforced by tests/architecture.test.ts where possible)
 
-1. **`src/sim` never imports** `three`, `react`, `src/render`, `src/ui`, `src/worker`, or touches `window`,
+1. **`src/sim` never imports** `three`, `react`, `src/render`, `src/ui`, `src/worker`, `src/platform`, or touches `window`,
    `document`, `self`, `globalThis`.
 2. **Determinism.** No `Math.random` (use `Rng`), no `Date`/`performance.now` in `src/sim`. Iterate in a stable
    order (slot index, lane id). Break sort ties by id. In per-tick code use only `+ - * /` and `Math.sqrt`
@@ -63,30 +67,24 @@ threads derive the painted cells with `meadowZoning(edits, cells)`. Each road ed
 7. **Every visual change gets looked at.** Run `pnpm e2e` and read the PNGs in `artifacts/screens/`.
    Add a screenshot to `tests/e2e/smoke.spec.ts` for anything new worth seeing.
 8. Colours live in `src/render/palette.ts` only. Lighting is calibrated so flat up-facing surfaces render at
-   exactly their palette colour; keep `AMBIENT + SUN·cosθ = π` if you touch lights (`src/render/game.ts`).
+   exactly their palette colour; keep `AMBIENT + SUN·cosθ = π` if you touch lights (`src/render/lighting.ts`, applied in `src/render/game.ts`).
 9. Anything that will need OS access later (saves, files) goes behind a small interface in `src/platform/`, so
    the desktop shell (Tauri or Electron) stays swappable.
 10. Pin dependency versions exactly. Check the installed version's API (node_modules or docs) instead of
     trusting memory. Three.js changes between releases.
 
-## Simulation model (current)
+## Simulation model
 
-- **Lanes** are polylines with a speed limit and `next` lanes. Junctions are connector lanes.
-  `NetworkBuilder.build()` throws if connected lanes do not touch or give-way rules are inconsistent.
-- **Car following**: IDM (`traffic/idm.ts`), looking ahead up to 90 m along the vehicle's route, through lane ends.
-  A car heading for a building slows to a turning speed (4 m/s) for its driveway; sinks are left at road speed.
-- **Give way**: a lane with `yieldTo` stops at its end unless no priority vehicle arrives within a time window
-  (`World.mergeBlocked`). Drivers within 1.5 m are committed, and cars on the priority road treat them as leaders.
-- **Routing**: per-destination next-hop tables (reverse Dijkstra on free-flow time). Vehicles store only a
-  destination index.
-- **Demand**: Poisson arrivals per source lane, random reachable destination (no immediate U-turns).
+- **Streets.** Country lanes have one lane each way and bare verges. Town streets add pavements. Town streets with parking add kerbside bays and a lower speed limit. Avenues have pavements and two lanes each way. Upgrades replace a segment in place. Its cross-section sets speed, frontage offset, construction cost, and upkeep.
+- **Junctions.** Lanes are directed polylines with a speed limit and links to adjacent lanes. Connector lanes encode turns and conflicts. On an Avenue, left turns use the inner lane and right turns use the outer lane. Through drivers choose the less occupied eligible lane before entry and stay in it along the link. Give-way approaches check conflicting traffic. Signals at T and four-way junctions use a fixed cycle or rest on main-road green until a side-street driver or pedestrian calls.
+- **Driving and routing.** IDM looks up to 90 m along the route for leaders, including across lane ends. Vehicle models set length, acceleration, braking, and top speed. Reverse Dijkstra computes next hops per destination. Smoothed lane delays adjust free-flow costs. The sim refreshes one destination at a time and retains established turns for small cost differences. The traffic overlay shows delay by direction.
+- **Trips.** Through traffic arrives at source lanes. Residents work locally or off-map, shop for groceries, and visit parks on foot. Walking uses pavement links, crossings, and player-built footpaths. Walkers wait for gaps at ordinary crossings, claim priority at zebras, and enter on parallel green at lights.
+- **Parking and freight.** A local driving trip can include a walk to the car, a drive, and a walk from a bay to the door. Drivers try destination bays, then nearby parking up to 250 m away (65 m for groceries). A driver can circle once and return home after a refusal. Business deliveries use vans or lorries and wait for shared loading access.
+- **Growth.** Painted frontage supplies vacant lots. Housing demand reflects jobs and vacancies, workplace demand reflects available labour, and shop demand reflects population and shop supply. Each use accumulates demand toward its next building. Households earn wages, buy groceries, cover daily costs, and can upgrade their home or car.
+- **Happiness and money.** Needs, commute time, traffic delay and noise, parking refusals, and walkable shops and parks affect satisfaction. Satisfaction affects upgrades and housing growth. Persistent unhappiness can empty a zoned home. The town charges construction at placement and reverses the invoice on undo. At day close it settles home, shop, and workplace taxes against infrastructure upkeep.
 
-## Roadmap (rough order)
+## Roadmap
 
-1. Meadow Vale supports road extensions, deliberate curves, T-junctions, four-way crossings, live edits, and undo.
-   The bulldozer removes individual segments and updates their junctions. Larger maps may need incremental routing.
-2. Traffic lights for busy intersections.
-3. Zoning + buildings as sim entities; trips generated from homes → jobs/shops instead of map edges.
-4. Congestion-aware routing (costs from measured lane speeds, recomputed across several ticks).
-5. Level of detail: aggregate flow for off-screen or distant areas.
-6. Save/load (`src/platform`), then the desktop shell.
+1. Consolidate the systems tuned on Meadow Vale. Test a larger town, add save/load behind `src/platform/`, refresh the docs, then playtest and balance.
+2. Polish the game and add progression. New towns start small with a light tutorial. Population, happiness, budget, and solving traffic jams unlock tools at milestones. Sandbox mode starts with every tool unlocked.
+3. Add medium-density buildings and highrises, then public transport.
