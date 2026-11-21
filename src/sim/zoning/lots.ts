@@ -18,8 +18,8 @@ export interface Lot extends LotSize {
   designs: BuildingPick[];
 }
 
-const sizes = [...new Map(BLUEPRINTS.map(b => [b.lot.columns * 10 + b.lot.rows, b.lot])).values()]
-  .sort((a, b) => b.columns * b.rows - a.columns * a.rows || b.columns - a.columns);
+const COTTAGE = { columns: 1, rows: 1 } as const;
+const DETACHED = { columns: 2, rows: 2 } as const;
 
 function footprint(key: CellKey, size: LotSize): CellKey[] {
   const keys: CellKey[] = [];
@@ -46,15 +46,18 @@ function parcelGeometry(corners: Float64Array, indices: Map<CellKey, number>, ke
   const mid = (edge: Vec2[]) => scale(add(edge[Math.floor(size.columns / 2)]!, edge[Math.ceil(size.columns / 2)]!), 0.5);
   const kerb = mid(front);
   const back = mid(rear);
-  const centre = scale(add(kerb, back), 0.5);
-  const street = add(kerb, scale(normalize(sub(kerb, back)), ZONE_KERB));
+  const towardStreet = normalize(sub(kerb, back));
+  const middle = scale(add(kerb, back), 0.5);
+  // The larger designs have enough garden in front to move one metre closer to the kerb.
+  const centre = size.rows === 2 ? add(middle, towardStreet) : middle;
+  const street = add(kerb, scale(towardStreet, ZONE_KERB));
   const tangent = sub(front.at(-1)!, front[0]!);
   return { ...centre, angle: Math.atan2(tangent.y, tangent.x), streetX: street.x, streetY: street.y,
     corners: [...front, ...rear.reverse()] };
 }
 
-/** Keep occupied parcels while all their cells survive. New parcels pack within three-column
- * blocks, so changing an end column cannot shift the partition down an entire street. */
+/** Keep occupied parcels while all their cells survive. Each four columns allow one
+ * detached house and two cottages. Stagger the wider lots on opposite sides of the street. */
 export function residentialLots(scenario: Scenario, zoning: Zoning, occupied: Lot[] = []): Lot[] {
   const cells = scenario.zones;
   if (!cells) return [];
@@ -80,8 +83,8 @@ export function residentialLots(scenario: Scenario, zoning: Zoning, occupied: Lo
   for (const key of available.keys()) {
     const { road, column, row, side } = decodeCellKey(key);
     if (row !== 0) continue;
-    const size = sizes.find(s => column % 3 + s.columns <= 3 && footprint(key, s).every(k => available.has(k)));
-    if (!size) continue;
+    const detached = (column + side * 2) % 4 === 0 && footprint(key, DETACHED).every(k => available.has(k));
+    const size = detached ? DETACHED : COTTAGE;
     const geometry = parcelGeometry(cells.corners, available, key, size);
     if (!accessPoints(scenario.network, { x: geometry.streetX, y: geometry.streetY }).length) continue;
     const neighbours = lots.filter(l => {
@@ -91,7 +94,8 @@ export function residentialLots(scenario: Scenario, zoning: Zoning, occupied: Lo
     }).map(l => l.designs[0]!);
     const designs = [pickBuilding(String(key), 'cheap', size, neighbours)];
     for (const tier of ['mid', 'expensive'] as const) {
-      const next = BLUEPRINTS.find(b => b.id === designs.at(-1)!.blueprint.upgradesTo);
+      const next = BLUEPRINTS.find(b => b.id === designs.at(-1)!.blueprint.upgradesTo
+        && b.lot.columns === size.columns && b.lot.rows === size.rows);
       designs.push(next ? finishBuilding(String(key), next) : pickBuilding(String(key), tier, size));
     }
     reserve({ ...size, ...geometry, key, designs });

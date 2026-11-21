@@ -1,9 +1,8 @@
 import { expect, it } from 'vitest';
-import { BLUEPRINTS } from '../../src/buildings/catalogue';
 import { accessPoints, meadowScenario, planMeadowRoad } from '../../src/sim/scenarios/meadow';
 import { VEHICLE_LENGTH } from '../../src/sim/traffic/idm';
 import { DT, World } from '../../src/sim/world';
-import { decodeCellKey, type CellKey } from '../../src/sim/zoning/cells';
+import { decodeCellKey, ZONE_KERB, type CellKey } from '../../src/sim/zoning/cells';
 import { residentialLots } from '../../src/sim/zoning/lots';
 
 const scenario = meadowScenario();
@@ -24,14 +23,19 @@ it('packs live street-front cells once, in key order, within blueprint dimension
   const used = new Set<number>();
   for (const lot of parcels) {
     expect(decodeCellKey(lot.key).row).toBe(0);
-    expect(BLUEPRINTS.some(b => b.lot.columns === lot.columns && b.lot.rows === lot.rows)).toBe(true);
+    expect(lot.rows).toBe(lot.columns);
+    expect([1, 2]).toContain(lot.rows);
+    for (const design of lot.designs) expect(design.blueprint.lot).toEqual({ columns: lot.columns, rows: lot.rows });
+    const setback = Math.hypot(lot.streetX - lot.x, lot.streetY - lot.y) - ZONE_KERB;
+    expect(setback).toBeCloseTo(lot.rows === 1 ? 4 : 7);
     for (let c = 0; c < lot.columns; c++) for (let r = 0; r < lot.rows; r++) {
       const k = (lot.key + c * 8 + r) as CellKey;
       expect(paint.has(k) && !used.has(k)).toBe(true);
       used.add(k);
     }
   }
-  expect(parcels.some(l => l.rows === 4 && l.columns === 3)).toBe(true);
+  expect(new Set(parcels.map(lot => lot.columns))).toEqual(new Set([1, 2]));
+  expect(parcels.length).toBeGreaterThan(12); // Full starter frontage held 12 parcels under the old rule.
   const smaller = new Map(paint);
   smaller.delete(parcels[0]!.key);
   const after = residentialLots(scenario, smaller);
@@ -64,6 +68,8 @@ it('grows four homes per day, commutes and upgrades deterministically', () => {
   }
   expect(sawDeparture).toBe(true);
   expect(minGap).toBeGreaterThanOrEqual(VEHICLE_LENGTH - 0.01);
+  // With more adults competing for the same off-map jobs, allow time to save for an upgrade.
+  step(world, 12 * day);
   const grown = world.townView()!.households.filter(h => h.lot);
   expect(grown.some(h => h.wages > 0)).toBe(true);
   const upgraded = grown.find(h => h.level === 2)!;
@@ -72,7 +78,7 @@ it('grows four homes per day, commutes and upgrades deterministically', () => {
   expect(upgraded.lot!.design).toBe(starter.blueprint.upgradesTo);
   expect(world.stats().lost).toBe(0);
   const replay = paintedWorld();
-  step(replay, 10 * day);
+  step(replay, 22 * day);
   expect(world.hash()).toBe(replay.hash());
   expect(world.townView()).toEqual(replay.townView());
 });
@@ -100,7 +106,7 @@ it('clears a demolished family and its moving car while preserving its neighbour
 
 it('a road over a parcel removes the home and undo leaves room to grow again', () => {
   const world = paintedWorld();
-  step(world, 4 * day);
+  step(world, Math.ceil(parcels.length / 4) * day);
   const plan = planMeadowRoad([], {x: -65,y: 62}, {x: -65,y: -8});
   if (!plan.ok) throw new Error(plan.reason);
   const result = world.editNetwork(meadowScenario([plan.road]));

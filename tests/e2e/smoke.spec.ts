@@ -107,3 +107,36 @@ test('painted residential frontage grows into a lived-in street', async ({ page 
   await page.screenshot({path: 'artifacts/screens/growth-day-four.png'});
   expect(errors).toEqual([]);
 });
+
+test('a fully grown painted street in Meadow Vale', async ({ page }) => {
+  test.setTimeout(160_000);
+  await page.goto('/?scenario=meadow&seed=1&speed=0&x=20&y=8&mpp=0.15');
+  const editor = () => page.evaluate(() => window.__towns?.editor());
+  await expect.poll(editor).toMatchObject({ tool: 'road', pending: false });
+  const box = (await page.locator('#map').boundingBox())!;
+  const at = (x: number, y: number) => [
+    box.x + box.width / 2 + (x - 20) / 0.15,
+    box.y + box.height / 2 - (y - 8) / 0.15,
+  ] as const;
+  const drag = async (x: number, y: number, end: number) => {
+    await page.mouse.move(...at(x, y));
+    await page.mouse.down();
+    await page.mouse.move(...at(end, y), { steps: 16 });
+    await page.mouse.up();
+  };
+  await drag(45, 8, -35);
+  await expect.poll(editor).toMatchObject({ roadCount: 1, pending: false });
+  await page.keyboard.press('z');
+  for (const y of [-8, 24]) {
+    await drag(-34, y, 76);
+    await expect.poll(editor).toMatchObject({ pending: false });
+  }
+  await page.getByRole('button', { name: 'Pan' }).click();
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => window.__towns!.setSpeed(120));
+  // Each end of the extension and the four adjoining starter-road columns are painted.
+  await expect.poll(() => page.evaluate(() => window.__towns!.town()!.households.filter(h => h.lot).length),
+    { timeout: 140_000 }).toBe(21);
+  await page.evaluate(() => window.__towns!.setSpeed(0));
+  await page.screenshot({ path: 'artifacts/screens/growth-full-street.png' });
+});
