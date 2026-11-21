@@ -1,3 +1,4 @@
+import { signalAspect } from './signals';
 import { crossingAt, observeCrossings, type Crossing } from '../traffic/pedestrianConflicts';
 import type { Vehicles } from '../traffic/vehicles';
 import { WalkRouting } from './walkRouting';
@@ -102,6 +103,7 @@ export class WalkingNetwork {
       const a = attach(link.a,0.05), b = attach(link.b,0.05);
       if (!link.crossing) { join(a,b); continue; }
       const crossing = crossingAt(network,link.a,link.b,!!link.zebra);
+      crossing.walkGroup = link.walkGroup;
       this.crossings.push(crossing);
       for (const zone of crossing.lanes) this.stops[zone.lane]!.push({crossing,from:zone.from,to:zone.to});
       join(a,b,crossing);
@@ -212,7 +214,7 @@ export class Walkers {
     this.peak = Math.max(this.peak, ++this.count);
     return true;
   }
-  step(dt: number, vehicles?: Vehicles): void {
+  step(dt: number, vehicles?: Vehicles, tick = 0): void {
     if (vehicles) observeCrossings(this.graph.crossings,vehicles);
     if (!this.count) return;
     this.crowd.fill(0);
@@ -226,8 +228,9 @@ export class Walkers {
       let edge = this.edge(i);
       if (edge?.crossing) {
         const c=edge.crossing;
-        c.requested=true;
-        if (!this.along[i] && c.blocked) continue;
+        const permitted = c.walkGroup === undefined || signalAspect(c.walkGroup, tick) === 'green';
+        c.requested ||= permitted;
+        if (!this.along[i] && (c.blocked || !permitted)) continue;
         c.occupied=true;
       }
       this.along[i] += (this.speed[i]! * dt) / (1 + 0.15 * Math.max(0, (edge ? this.crowd[edge.id]! : 0) - 1));

@@ -1,3 +1,4 @@
+import { signalAspect } from './network/signals';
 import { parksOn } from './town/parks';
 import type { WalkRouting } from './network/walkRouting';
 import { endOf, sampleAt, startOf, type PathSample } from './math/polyline';
@@ -95,6 +96,9 @@ export class World {
   /** Smallest rear bumper position on each lane after the last move; used for spawn spacing. */
   private readonly laneMinRear: Float64Array;
 
+  private readonly signalGroups: Int8Array;
+  private readonly enteredAt: Int32Array;
+
   private readonly spawners: Spawner[];
 
   private spawned = 0;
@@ -123,6 +127,13 @@ export class World {
     this.town = scenario.town ? new Town(scenario.town, this.routing.sinks.length, seed, this.routing, new Parking(bays, this.routing.sinks.length + homes.length), scenario.decor.houses, this.network, this.walkLimit, homes.length, previousWalking) : null;
 
     const n = this.lanes.length;
+    this.signalGroups = new Int8Array(n).fill(-1);
+    this.enteredAt = new Int32Array(n).fill(-1);
+    for (const j of this.network.junctions ?? []) if (j.lights) {
+      for (const arm of j.arms) for (const movement of this.lanes[arm.incoming]!.next) {
+        this.signalGroups[movement] = arm.group;
+      }
+    }
     this.laneLen = Float64Array.from(this.lanes, (l) => l.length);
     this.laneSpeed = Float64Array.from(this.lanes, (l) => l.speedLimit);
     this.bucketStart = new Int32Array(n + 1);
@@ -159,7 +170,7 @@ export class World {
   get walkers() { return this.town?.walkers; }
 
   step(): void {
-    this.walkers?.step(DT,this.vehicles);
+    this.walkers?.step(DT,this.vehicles,this.tick);
     if (this.town && this._tick % TICKS_PER_MINUTE === 0) this.town.update(this.minute(), this, this.admissionsOpen);
     this.buildBuckets();
     this.computeAccelerations();
@@ -402,7 +413,9 @@ export class World {
       let cur = L;
       let nxt = this.routing.nextHop(d, cur);
       while (nxt >= 0 && dist < LOOKAHEAD) {
-        if ((this.lanes[nxt]!.crossingYieldTo.length || this.yieldingMovements[nxt]!.length) && dist < YIELD_ZONE
+        if (this.signalGroups[nxt]! >= 0) {
+          if (this.signalBlocked(nxt)) a = Math.min(a, idmAccel(vi, v0, Math.max(0, dist - 4), vi, V.maxAccel[i]!, V.brake[i]!));
+        } else if ((this.lanes[nxt]!.crossingYieldTo.length || this.yieldingMovements[nxt]!.length) && dist < YIELD_ZONE
           && dist >= COMMIT_DISTANCE && this.junctionBlocked(nxt, dist, vi)) {
           a = Math.min(a, idmAccel(vi, v0, dist, vi, V.maxAccel[i]!, V.brake[i]!));
         }
@@ -470,6 +483,18 @@ export class World {
   }
 
   /** Reserve the conflict area before entry; vehicles already inside finish clearing it. */
+  private signalBlocked(movement: number): boolean {
+    if (signalAspect(this.signalGroups[movement]!, this.tick) !== 'green') return true;
+    for (const other of this.lanes[movement]!.crossingYieldTo) if (this.movementOccupied(other)) return true;
+    for (const other of this.yieldingMovements[movement]!) if (this.movementOccupied(other)) return true;
+    return false;
+  }
+
+  private movementOccupied(other: number): boolean {
+    return this.bucketCount[other]! > 0 || this.enteredAt[other] === this.tick
+      || this.laneMinRear[this.lanes[other]!.next[0]!]! < 0;
+  }
+
   private junctionBlocked(movement: number, distance: number, speed: number): boolean {
     for (const committed of this.yieldingMovements[movement]!) {
       if (this.bucketCount[committed]! > 0) return true;
@@ -544,7 +569,7 @@ export class World {
     let gap=Infinity;
     const stops=this.walkers?.graph.stops[lane];
     if (stops) for (const stop of stops) {
-      if (!stop.crossing.occupied && !(stop.crossing.zebra && stop.crossing.requested)) continue;
+      if (!stop.crossing.occupied && !((stop.crossing.zebra || stop.crossing.walkGroup !== undefined) && stop.crossing.requested)) continue;
       const line=Math.max(0,stop.from);
       if (front <= line) gap=Math.min(gap,line-front);
     }
@@ -590,12 +615,13 @@ export class World {
           break;
         }
         const enterRoom=this.crossingGap(nh,0);
-        if (si-this.laneLen[L]! >= enterRoom) {
+        if ((this.signalGroups[nh]! >= 0 && this.signalBlocked(nh)) || si-this.laneLen[L]! >= enterRoom) {
           si=this.laneLen[L]! - 0.0001;
           v[i]=0;
           break;
         }
         si -= this.laneLen[L]!;
+        if (this.signalGroups[nh]! >= 0) this.enteredAt[nh] = this.tick;
         L = nh;
       }
       s[i] = si;

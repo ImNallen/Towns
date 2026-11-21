@@ -18,7 +18,7 @@ import { PALETTE } from './palette';
 import { buildRoads } from './roads';
 import { buildStrokePreview } from './zones';
 
-export type MapTool = 'road' | 'curve' | 'upgrade' | 'bulldoze' | 'zone' | 'parking' | 'park' | 'pan' | 'footpath' | 'zebra';
+export type MapTool = 'road' | 'curve' | 'upgrade' | 'bulldoze' | 'zone' | 'parking' | 'park' | 'pan' | 'lights' | 'footpath' | 'zebra';
 export interface EditorState {
   tool: MapTool;
   roadType: RoadType;
@@ -390,6 +390,10 @@ export class RoadEditor {
     }
     if (this.phase.kind !== 'idle') return;
     const cursor = this.world(e);
+    if (this.tool === 'lights') {
+      this.send({ type: 'buildLights', point: cursor });
+      return;
+    }
     if (this.tool === 'footpath' || this.tool === 'zebra') {
       this.phase = { kind: 'walk', tool: this.tool, start: cursor, network: meadowScenario(this.edits).network, id: e.pointerId };
       this.canvas.setPointerCapture(e.pointerId);

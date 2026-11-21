@@ -6,6 +6,7 @@ import { BUDGET } from './economy';
 
 /** Signed cost in whole dollars, based on the geometry before the edit. */
 export function editCost(previous: readonly MeadowEdit[], edit: MeadowEdit): number {
+  if ('lights' in edit) return 160;
   if ('walk' in edit) return edit.walk === 'zebra' ? 45 : Math.ceil(Math.hypot(edit.a.x-edit.b.x,edit.a.y-edit.b.y)*2);
   if (isZoneStroke(edit)) return edit.zone ? edit.cells.length * (edit.zone === 'park' ? BUDGET.parkPerCell : edit.zone === 'parking' ? BUDGET.parkingPerCell : BUDGET.zonePerCell) : 0;
   if ('remove' in edit || 'upgrade' in edit) {

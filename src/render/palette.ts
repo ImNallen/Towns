@@ -25,6 +25,7 @@ export const PALETTE = {
   sand: '#f0e3ad',
   hills: ['#8f8e88', '#9c9b95', '#a9a8a2', '#b6b5af', '#c3c2bc'],
 
+  signal: { red: '#da5247', amber: '#f2ae32', green: '#42a874', case: '#343e41' },
   roadSurface: '#ffffff',
   coats: ['#9f4937', '#275c77', '#776395', '#d59936', '#28786c'],
   faces: ['#ecc69b', '#c79570', '#ab7757'],

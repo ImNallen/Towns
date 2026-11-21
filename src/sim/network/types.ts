@@ -36,8 +36,15 @@ export interface Surface {
   readonly width: number;
 }
 
+export interface Junction {
+  point: { x: number; y: number };
+  arms: { incoming: number; group: number }[];
+  lights: boolean;
+}
+
 export interface Network {
-  readonly pedestrianLinks?: { a: { x: number; y: number }; b: { x: number; y: number }; crossing: boolean; zebra?: boolean }[];
+  readonly junctions?: Junction[];
+  readonly pedestrianLinks?: { a: { x: number; y: number }; b: { x: number; y: number }; crossing: boolean; walkGroup?: number; zebra?: boolean }[];
   readonly lanes: Lane[];
   readonly surfaces: Surface[];
   /** Lanes with no predecessor: where vehicles enter the map. */

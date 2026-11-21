@@ -51,7 +51,7 @@ function conflicts(a: Polyline, b: Polyline): boolean {
 /** Build streets whose shared endpoints are nodes. Smooth degree-two nodes should be coalesced. */
 export function buildStreetNetwork(
   builder: NetworkBuilder, streets: readonly (readonly Vec2[])[], portals: readonly Vec2[],
-  crossings: readonly StreetCrossing[] = [], types: readonly RoadType[] = [],
+  crossings: readonly StreetCrossing[] = [], types: readonly RoadType[] = [], lights: readonly Vec2[] = [],
 ): { network: Network; demand: Demand[]; entries: number[] } {
   const headings = new Map<string, Vec2[]>();
   for (const points of streets) {
@@ -121,6 +121,7 @@ export function buildStreetNetwork(
       nodes.set(key(point), list);
     }
   }
+  const junctions: NonNullable<Network['junctions']> = [];
   const priorityAxes = new Map(crossings.map((c) => [key(c.point), c.priorityAxis]));
   for (const [node, arms] of nodes) {
     if (arms.length < 2) continue;
@@ -135,6 +136,10 @@ export function buildStreetNetwork(
       continue;
     }
     const main = throughArms(arms, priorityAxes.get(node));
+    const [x, y] = node.split(',').map(Number);
+    const point = { x: x!, y: y! };
+    junctions.push({ point, lights: lights.some(p => key(p) === node),
+      arms: arms.map(a => ({ incoming: a.incoming, group: main.includes(a) ? 0 : 1 })) });
     const movements = arms.flatMap((from) => arms.filter((to) => to !== from).map((to) => {
       const primary = main.includes(from);
       const through = main.includes(to) === primary;
@@ -150,18 +155,21 @@ export function buildStreetNetwork(
       builder.giveWayAtEntry(movement.id, priority.map((p) => p.id));
     }
   }
-  for (const arms of corners.values()) {
+  for (const [node, arms] of corners) {
+    const junction = junctions.find(j => key(j.point) === node && j.lights);
+    const walkGroups = arms.map((arm, i) => [arm, 1 - (junction?.arms[i]?.group ?? 0)] as const);
+    const groups = new Map(walkGroups);
     arms.sort((a, b) => a.heading - b.heading);
     for (let i = 0; i < arms.length; i++) {
       const { left, right } = arms[i]!;
       const neighbour = arms[(i + 1) % arms.length]!.right;
       if (arms.length > 1 && left && neighbour) pedestrianLinks.push({ a: left, b: neighbour, crossing: false });
-      if (arms.length !== 2 && left && right) pedestrianLinks.push({ a: left, b: right, crossing: true });
+      if (arms.length !== 2 && left && right) pedestrianLinks.push({ a: left, b: right, crossing: true, walkGroup: junction ? groups.get(arms[i]!) : undefined });
     }
   }
   const built = builder.build();
   const portalArms = portals.flatMap((p) => nodes.get(key(p)) ?? []);
-  const network: Network = { ...built, pedestrianLinks, sinks: portalArms.map((arm) => arm.incoming) };
+  const network: Network = { ...built, junctions, pedestrianLinks, sinks: portalArms.map((arm) => arm.incoming) };
   const routing = new Routing(network);
   const connected = portals.length === 2 && portalArms.length === 2
     && portalArms.every((arm, i) => routing.canReach(1 - i, arm.outgoing));

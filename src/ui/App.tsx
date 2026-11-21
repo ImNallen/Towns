@@ -28,6 +28,7 @@ const GROUPS: ToolGroup[] = [
   { name: 'Roads', icon: ROAD_ICON, tools: [
     { tool: 'road', label: 'Road', action: 'Build road', shortcut: 'R', path: ROAD_ICON },
     { tool: 'curve', label: 'Curve', action: 'Build curved road', shortcut: 'C', path: 'M2 16C13 16 5 4 18 4M2 12c7 0 1-12 16-12' },
+    { tool: 'lights', label: 'Lights', action: 'Build traffic lights', shortcut: 'J', path: 'M7 2h6v12H7zM10 14v4M9 5h2M9 8h2M9 11h2' },
     { tool: 'upgrade', label: 'Upgrade', action: 'Upgrade road', shortcut: 'U', path: 'M5 16V5m-3 3 3-3 3 3m7-4v11m-3-3 3 3 3-3' },
   ] },
   { name: 'People', icon: 'M11 5a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM5 12l3-4 3-1 2 4 4 1M10 8l-1 6-4 4m4-5 4 2 1 4', tools: [
@@ -131,6 +132,8 @@ export function App({ game }: { game: Game }) {
         changeBrush(ZONE_KINDS['hswe'.indexOf(e.key.toLowerCase())] ?? null);
       } else if (roadPicker && ['5', '6', '7'].includes(e.key)) {
         pickType(ROAD_ORDER[Number(e.key) - 5]!);
+      } else if (editor && e.key.toLowerCase() === 'j') {
+        changeTool('lights');
       } else if (editor && e.key.toLowerCase() === 'u') {
         changeTool('upgrade');
       } else if (editor && e.key.toLowerCase() === 'r') {
@@ -165,6 +168,7 @@ export function App({ game }: { game: Game }) {
     : editor?.tool === 'upgrade' ? 'Choose a road type, then click a segment.'
     : editor?.tool === 'curve' ? 'Drag between two points, then place the bend.'
             : editor?.tool === 'footpath' ? 'Drag across open ground to connect walking routes.'
+            : editor?.tool === 'lights' ? 'Click a T or four-way junction. $160 to build · $4/day.'
             : editor?.tool === 'zebra' ? 'Click a paved street to add a zebra crossing.'
             : editor?.tool === 'park' ? 'Choose a park size and click empty frontage.'
             : editor?.tool === 'parking' ? 'Choose a size, then click empty frontage beside a street.'

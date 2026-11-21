@@ -44,6 +44,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     }
     case 'upgradeRoad':
     case 'bulldozeRoad':
+    case 'buildLights':
     case 'buildWalk':
     case 'buildRoad':
     case 'undo': {
@@ -53,7 +54,14 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       }
       if (waiting) break;
       let proposed: MeadowEdit[];
-      if (msg.type === 'buildWalk') {
+      if (msg.type === 'buildLights') {
+        const junction = world.network.junctions?.find(j => Math.hypot(j.point.x-msg.point.x,j.point.y-msg.point.y) < 12);
+        if (!junction || junction.lights) {
+          post({ type: 'editRejected', reason: junction ? 'This junction already has lights.' : 'Select a T or four-way junction.' });
+          break;
+        }
+        proposed = [...edits, { lights: junction.point }];
+      } else if (msg.type === 'buildWalk') {
         const cells = world.scenario.zones!;
         const plan = planWalk(world.network, msg.walk, msg.start, msg.end, { cells, zoning: meadowZoning(edits,cells) });
         if (typeof plan === 'string') { post({ type: 'editRejected', reason: plan }); break; }

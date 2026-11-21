@@ -1,3 +1,4 @@
+import { signalAspect } from '../sim/network/signals';
 import * as THREE from 'three';
 import { polyline, sampleAt, type PathSample, type Polyline } from '../sim/math/polyline';
 import type { Network } from '../sim/network/types';
@@ -44,9 +45,19 @@ export function buildRoads(network: Network, marking: 'dashed' | 'solid' = 'soli
     }
   }
 
+  const signalApproaches = new Set(network.junctions?.filter(j => j.lights).flatMap(j => j.arms.map(a => a.incoming)));
+  for (const id of signalApproaches) {
+    const lane = network.lanes[id]!;
+    const p = sampleAt(lane.path, Math.max(0, lane.length - 4), sample);
+    giveWay.ribbon(polyline([
+      { x: p.x + p.hy * 1.55, y: p.y - p.hx * 1.55 },
+      { x: p.x - p.hy * 1.55, y: p.y + p.hx * 1.55 },
+    ]), 0.26);
+  }
   // Give-way line: short dashes across the lane where it reaches the edge of the priority road.
   for (const lane of network.lanes) {
     if (lane.yieldTo.length === 0 && lane.crossingYieldTo.length === 0) continue;
+    if (signalApproaches.has(lane.prev[0]!)) continue;
     if (lane.crossingYieldTo.length > 0) {
       const movements = network.lanes[lane.prev[0]!]!.next;
       // Paint one line across the side approach. A left turn yielding to oncoming
@@ -87,6 +98,25 @@ export function buildRoads(network: Network, marking: 'dashed' | 'solid' = 'soli
   }
   const group = new THREE.Group();
   group.name = 'roads';
+  const lamps: { group: number; material: THREE.MeshLambertMaterial }[] = [];
+  for (const junction of network.junctions ?? []) if (junction.lights) {
+    for (const arm of junction.arms) {
+      const lane = network.lanes[arm.incoming]!;
+      const p = sampleAt(lane.path, Math.max(0, lane.length - 4), sample);
+      const x = p.x + p.hy * 2.3, z = -p.y + p.hx * 2.3;
+      const housing = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 0.6, 16), flatMaterial(PALETTE.signal.case));
+      housing.position.set(x, 0.65, z);
+      const material = flatMaterial(PALETTE.signal.red);
+      const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.78, 0.1, 16), material);
+      lamp.position.set(x, 1.02, z);
+      group.add(housing, lamp);
+      lamps.push({ group: arm.group, material });
+    }
+  }
+  group.userData.updateSignals = (tick: number) => {
+    for (const lamp of lamps) lamp.material.color.set(PALETTE.signal[signalAspect(lamp.group, tick)]);
+  };
+  group.userData.updateSignals(0);
   const add = (mesh: FlatMesh, color: string): void => {
     if (mesh.empty) return;
     const m = new THREE.Mesh(mesh.build(), flatMaterial(color));

@@ -13,6 +13,7 @@ export type ToWorker =
   | { type: 'init'; walkLimit?: number; scenario: ScenarioName; seed: number; speed: number }
   /** Simulation speed multiplier; 0 pauses. */
   | { type: 'setSpeed'; speed: number }
+  | { type: 'buildLights'; point: Vec2 }
   | { type: 'buildWalk'; walk: 'footpath' | 'zebra'; start: Vec2; end: Vec2 }
   | { type: 'buildRoad'; roadType?: RoadType; start: Vec2; end: Vec2; bend?: Vec2 }
   | { type: 'upgradeRoad'; segment: number; editCount: number; roadType: RoadType }

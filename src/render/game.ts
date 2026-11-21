@@ -203,6 +203,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
       walkerPositions = msg.walkers;
       walkerLayer.update(walkerPositions);
       vehicles?.push(msg, performance.now());
+      roadLayer?.userData.updateSignals(msg.stats.tick);
       latestStats = msg.stats;
     }
   };

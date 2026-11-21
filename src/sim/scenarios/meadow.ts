@@ -21,7 +21,7 @@ export interface MeadowRoad {
 }
 
 export interface WalkEdit { walk: "footpath" | "zebra"; a: Vec2; b: Vec2 }
-export type MeadowEdit = WalkEdit | MeadowRoad | { readonly remove: number } | { readonly upgrade: number; readonly roadType: RoadType } | ZoneStroke;
+export type MeadowEdit = { lights: Vec2 } | WalkEdit | MeadowRoad | { readonly remove: number } | { readonly upgrade: number; readonly roadType: RoadType } | ZoneStroke;
 
 export const isZoneStroke = (edit: MeadowEdit): edit is ZoneStroke => 'zone' in edit;
 
@@ -153,7 +153,7 @@ function replayMeadow(edits: readonly MeadowEdit[]): Replay {
   const crossings: StreetCrossing[] = [];
   const removedArms: RemovedArm[] = [];
   for (const edit of edits) {
-    if (isZoneStroke(edit) || 'walk' in edit) {
+    if (isZoneStroke(edit) || 'walk' in edit || 'lights' in edit) {
       roads.push(undefined);
       continue;
     }
@@ -365,12 +365,12 @@ export function snapToMeadowStreet(chains: readonly (readonly Vec2[])[], point: 
 
 /** The roads alone, without zone cells: what the editor previews while a road is being placed. */
 export function meadowNetwork(roads: readonly MeadowEdit[]): Network {
-  return meadowWithoutZones(replayMeadow(roads)).network;
+  return meadowWithoutZones(replayMeadow(roads), roads).network;
 }
 
 export function meadowScenario(roads: readonly MeadowEdit[] = []): Scenario {
   const replay = replayMeadow(roads);
-  const scenario = meadowWithoutZones(replay);
+  const scenario = meadowWithoutZones(replay, roads);
   for (const edit of roads) {
     if (!('walk' in edit)) continue;
     if (edit.walk === 'footpath') {
@@ -458,11 +458,11 @@ export function planWalk(network: Network, walk: WalkEdit['walk'], start: Vec2, 
   return { walk, a, b };
 }
 
-function meadowWithoutZones(replay: Replay): Scenario {
+function meadowWithoutZones(replay: Replay, edits: readonly MeadowEdit[]): Scenario {
   const types = replay.sections.map(s => s.roadType);
   const streets = coalesceStreets([...replay.chains], types);
   const crossings = replay.crossings.filter((crossing) => degree(streets, crossing.point) === 4);
-  const { network, demand, entries } = buildStreetNetwork(new NetworkBuilder(), streets, PORTALS, crossings, types);
+  const { network, demand, entries } = buildStreetNetwork(new NetworkBuilder(), streets, PORTALS, crossings, types, edits.flatMap(e => 'lights' in e ? [e.lights] : []));
   const decor = scenery();
   const driveways = new NetworkBuilder();
   const homes = decor.houses.map((house) => ({ access: [] as AccessPoint[], region: house.x < 0 ? 0 : 1 }));
@@ -481,7 +481,7 @@ function meadowWithoutZones(replay: Replay): Scenario {
   const regions = REGIONS.map((region, i) => ({ ...region, sink: i, source: entries[i]! }));
   const roadMetres = replay.sections.reduce((n, s) => n + (s.to - s.from), 0);
   const roadUpkeep = Math.round(replay.sections.reduce((n, s) => n + (s.to - s.from) * ROAD_TYPES[s.roadType].upkeep, 0));
-  return { name: 'meadow', network, demand, bounds: { ...BOUNDS }, decor, town: { homes, regions, roadMetres, roadUpkeep } };
+  return { name: 'meadow', network, demand, bounds: { ...BOUNDS }, decor, town: { homes, regions, roadMetres, roadUpkeep: roadUpkeep + (network.junctions?.filter(j => j.lights).length ?? 0) * 4 } };
 }
 
 /** Where a driveway at `p` meets each directional road lane passing it. */
