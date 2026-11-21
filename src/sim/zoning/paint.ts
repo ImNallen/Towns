@@ -1,6 +1,5 @@
 import { decodeCellKey, findCell, ZONE_ROWS, type CellKey, type ZoneCells } from './cells';
 
-/** Every zone a player can paint, in display order. The palette and the brush picker are derived from it. */
 export const ZONE_KINDS = ['residential'] as const;
 export type ZoneKind = (typeof ZONE_KINDS)[number];
 
@@ -14,17 +13,10 @@ export interface ZoneStroke {
   readonly cells: readonly CellKey[];
 }
 
-/** Zone of every live painted cell, in ascending key order. Derived by `meadowZoning`, never stored. */
 export type Zoning = ReadonlyMap<CellKey, ZoneKind>;
 
 export type StrokePlan = { ok: true; stroke: ZoneStroke } | { ok: false; reason: string };
 
-/**
- * The stroke a drag over `touched` makes against the current cells and zoning; the editor previews with it
- * and the worker accepts with it. Painting a cell also paints the rows between it and the street, so one
- * drag along the back row zones a block. Erasing a cell also clears the rows behind it. Keys that are not
- * live cells are ignored, and only keys whose zone changes are kept.
- */
 export function planZoneStroke(
   cells: ZoneCells, zoning: Zoning, zone: ZoneKind | null, touched: readonly CellKey[],
 ): StrokePlan {

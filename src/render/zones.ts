@@ -7,9 +7,9 @@ import { PALETTE } from './palette';
 
 /** Above the gardens (0.03), below the road outline (0.05). */
 const HEIGHT = 0.04;
-/** Above water (0.02) and the build boundary (0.025), below the gardens, so starter gardens still read on top. */
+/** Above water (0.02) and the build boundary (0.025), below the gardens (0.03), so gardens read on top. */
 const PAINT_HEIGHT = 0.028;
-/** Over the grid lines, so a stroke reads with ?zones=1 too. */
+/** Above the grid lines, so a stroke still reads with ?zones=1. */
 const PREVIEW_HEIGHT = 0.045;
 /** Each cell draws its own border this far inside its edges, so neighbours read as separate plots. */
 const GAP = 0.35;
@@ -35,7 +35,6 @@ export function buildZoneLayer(cells: ZoneCells): THREE.Group {
   return group;
 }
 
-/** A flat fill of every painted plot, inset like the grid frames so neighbours read as separate plots. */
 export function buildZonePaint(cells: ZoneCells, zoning: Zoning): THREE.Group {
   const fills = new Map<ZoneKind, FlatMesh>();
   for (const [key, kind] of zoning) {
@@ -54,7 +53,6 @@ export function buildZonePaint(cells: ZoneCells, zoning: Zoning): THREE.Group {
   return group;
 }
 
-/** The plots a stroke would change: framed in the zone's colour when painting, tinted red when erasing. */
 export function buildStrokePreview(cells: ZoneCells, stroke: ZoneStroke): THREE.Group {
   const frames = new FlatMesh(PREVIEW_HEIGHT);
   const fills = new FlatMesh(PREVIEW_HEIGHT - 0.002);

@@ -32,9 +32,7 @@ export interface Game {
   editor(): EditorState | null;
   setAngleSnapping(enabled: boolean): void;
   setTool(tool: MapTool): void;
-  /** Zone tool brush: a kind to paint, or null to erase. */
   setBrush(brush: ZoneKind | null): void;
-  /** Undoes the last edit: a road, a removal or a stroke. */
   undo(): void;
   cancelRoadEdit(): void;
   stats(): SimStats | null;
@@ -95,7 +93,6 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   let laneOverlay: THREE.Group | null = null;
   let zoneLayer: THREE.Group | null = null;
   let paintLayer: THREE.Group | null = null;
-  /** Cells of the last ready or roadsChanged; strokes never change them. */
   let cells: ZoneCells | undefined;
   let showLanes = options.showLanes;
   let speed = options.speed;
@@ -134,7 +131,6 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     zoneLayer.visible = gridVisible();
     scene.add(zoneLayer);
   };
-  /** Zoning is derived from the edits and the current cells, the same way the worker derives it. */
   const showEdits = (edits: readonly MeadowEdit[]): void => {
     if (!editor || !cells) return;
     const zoning = meadowZoning(edits, cells);

@@ -16,7 +16,6 @@ export type ToWorker =
   | { type: 'bulldozeRoad'; segment: number; editCount: number }
   /** Cells the brush passed over; the worker plans the stroke against its own edits. `zone: null` erases. */
   | { type: 'paintZone'; zone: ZoneKind | null; cells: readonly CellKey[] }
-  /** Removes the last edit: a road, a removal or a stroke. */
   | { type: 'undo' }
   | { type: 'cancelRoadEdit' };
 

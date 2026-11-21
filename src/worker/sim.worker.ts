@@ -101,7 +101,6 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
   }
 };
 
-/** A stroke never changes roads or cells (meadowScenario ignores it), so the World keeps running untouched. */
 function commitZoning(next: MeadowEdit[]): void {
   edits = next;
   post({ type: 'zoningChanged', edits });

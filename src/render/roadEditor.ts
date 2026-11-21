@@ -25,13 +25,10 @@ export interface EditorState {
   canUndo: boolean;
   angleSnapping: boolean;
   chaining: boolean;
-  /** Zone tool brush: a kind to paint, or null to erase. */
   brush: ZoneKind | null;
-  /** Painted plots on the map. */
   zoned: number;
 }
 
-/** What the editor re-derives from after every accepted edit. */
 export interface MeadowView {
   readonly edits: readonly MeadowEdit[];
   readonly cells: ZoneCells;
@@ -57,8 +54,7 @@ type EditPhase =
   /** A press on a house (or, with the pan tool, on open ground) that selects it if released in place. */
   | { kind: 'selecting'; id: number; house: number | null; press: Vec2 }
   | { kind: 'bending'; start: Vec2; end: Vec2; id: number | null }
-  /** A brush drag; `touched` holds the cells the pointer passed over, `last` its previous position. */
-  | { kind: 'painting'; id: number; zone: ZoneKind | null; touched: Set<CellKey>; last: Vec2 }
+  | { kind: 'painting'; id: number; zone: ZoneKind | null; touched: Set<CellKey>; lastPointer: Vec2 }
   | { kind: 'chaining'; host: StreetPoint | undefined; start: Vec2; id: number | null }
   | { kind: 'pending'; chain?: { from: Vec2; to: Vec2 } }
   | { kind: 'waiting' };
@@ -352,7 +348,7 @@ export class RoadEditor {
     }
     if (this.tool === 'zone') {
       const touched = new Set(cellsAlong(this.cells, cursor, cursor));
-      this.phase = { kind: 'painting', id: e.pointerId, zone: this.brush, touched, last: cursor };
+      this.phase = { kind: 'painting', id: e.pointerId, zone: this.brush, touched, lastPointer: cursor };
       this.canvas.setPointerCapture(e.pointerId);
       this.previewStroke(touched, this.brush, 'Release');
       return;
@@ -418,8 +414,8 @@ export class RoadEditor {
     }
     if (phase.kind === 'painting') {
       if (phase.id !== e.pointerId) return;
-      for (const key of cellsAlong(this.cells, phase.last, cursor)) phase.touched.add(key);
-      phase.last = cursor;
+      for (const key of cellsAlong(this.cells, phase.lastPointer, cursor)) phase.touched.add(key);
+      phase.lastPointer = cursor;
       if (!release) {
         this.previewStroke(phase.touched, phase.zone, 'Release');
         return;
@@ -540,10 +536,6 @@ export class RoadEditor {
     }
   }
 
-  /**
-   * Shows exactly the stroke the worker will accept for `touched`, since both plan it with planZoneStroke.
-   * With nothing touched, clears the preview and the hint.
-   */
   private previewStroke(touched: Iterable<CellKey>, zone: ZoneKind | null, action: string): void {
     this.clearPreview();
     const keys = [...touched];

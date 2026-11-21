@@ -19,7 +19,6 @@ const OUTLINE = 0.45;
  */
 export const ZONE_SLACK = 0.6;
 const BUCKET = 16;
-/** Brush sampling step (m): shorter than any cell edge, so a drag never jumps a cell it crosses. */
 const BRUSH_STEP = 1;
 const COLUMN_BITS = 2 ** 16;
 

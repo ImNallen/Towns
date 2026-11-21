@@ -1,7 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
 type View = { x: number; y: number; mpp: number };
-/** The west starter street runs along y = -8; its north plots' back row is centred 32.5 m north of it. */
 const BACK_ROW = 24.5;
 const FRONT_ROW = 0.5;
 

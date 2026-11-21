@@ -134,7 +134,6 @@ interface Replay {
   chains: Vec2[][];
   /** Parallel to `chains`. */
   sections: Section[];
-  /** Built roads by index: the starter roads, then one slot per edit (empty for a removal or a stroke). */
   roads: (readonly Vec2[] | undefined)[];
   crossings: StreetCrossing[];
   removedArms: RemovedArm[];
@@ -194,11 +193,6 @@ function zoneRoads({ roads, sections }: Replay): ZoneRoad[] {
   return out;
 }
 
-/**
- * For each key, the zone of the last stroke naming it, kept if that zone is not null and the key is live in
- * `cells` (which must be `meadowScenario(edits).zones`). A road over painted cells hides them, and removing
- * that road by undo or bulldozer shows them again; a bulldozed street's own cells only return by undo.
- */
 export function meadowZoning(edits: readonly MeadowEdit[], cells: ZoneCells): Zoning {
   const named = new Map<CellKey, ZoneKind | null>();
   for (const edit of edits) {

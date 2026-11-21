@@ -29,7 +29,6 @@ const cellsOf = (edits: readonly MeadowEdit[]) => meadowScenario(edits).zones!;
 const zoningOf = (edits: readonly MeadowEdit[]): Zoning => meadowZoning(edits, cellsOf(edits));
 const plan = (edits: readonly MeadowEdit[], touched: readonly CellKey[], zone: ZoneKind | null = 'residential') =>
   planZoneStroke(cellsOf(edits), zoningOf(edits), zone, touched);
-/** What the worker does with a paint request: plan against the current state and append the stroke. */
 function paint(edits: readonly MeadowEdit[], touched: readonly CellKey[], zone: ZoneKind | null = 'residential'): MeadowEdit[] {
   const result = plan(edits, touched, zone);
   if (!result.ok) throw new Error(result.reason);
@@ -42,7 +41,6 @@ const strokeAt = (edits: readonly MeadowEdit[], i: number): ZoneStroke => {
 };
 const entries = (zoning: Zoning) => [...zoning];
 
-/** The west starter street (RoadIndex 1) runs east along y = -8, so side 0 is north; 16 columns, 4 rows. */
 const key = (column: number, row: number, road = 1, side: 0 | 1 = 0) => cellKey(road as RoadIndex, column, side, row);
 const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
 const backRow = (from: number, to: number) => range(from, to).map((c) => key(c, 3));
