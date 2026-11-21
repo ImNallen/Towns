@@ -1,3 +1,5 @@
+import { Model } from '../../vehicles/catalogue';
+import { QUALITY } from '../town/qualityOfLife';
 import type { Network } from '../network/types';
 import type { Vehicles } from './vehicles';
 
@@ -7,6 +9,8 @@ export class TrafficConditions {
   readonly ratio: Float32Array;
   readonly queue: Uint16Array;
   readonly jamMinutes: Uint16Array;
+  readonly noiseDensity: Float32Array;
+  private readonly weightedCount: Uint16Array;
   readonly volume: Float32Array;
   worst = -1;
   private readonly observedDelay: Float64Array;
@@ -21,6 +25,8 @@ export class TrafficConditions {
     this.approach = Uint8Array.from(network.lanes, lane => Number(lane.next.length > 1 || lane.yieldTo.length > 0 || lane.next.some(id => network.lanes[id]!.prev.length > 1 || network.lanes[id]!.kind === 'connector')));
     this.queue = new Uint16Array(n);
     this.jamMinutes = new Uint16Array(n);
+    this.noiseDensity = new Float32Array(n);
+    this.weightedCount = new Uint16Array(n);
     this.volume = new Float32Array(n);
     this.observedDelay = new Float64Array(n);
     this.count = new Uint16Array(n);
@@ -30,6 +36,7 @@ export class TrafficConditions {
   sample(v: Vehicles): void {
     this.queue.fill(0);
     this.count.fill(0);
+    this.weightedCount.fill(0);
     this.observedDelay.fill(0);
     this.worst = -1;
     let maxDelay = 0;
@@ -38,10 +45,12 @@ export class TrafficConditions {
       const lane = v.lane[i]!;
       this.observedDelay[lane] = Math.max(this.observedDelay[lane]!, v.laneDelay[i]!);
       this.count[lane]++;
+      this.weightedCount[lane] += v.model[i] === Model.Lorry ? QUALITY.lorryWeight : 1;
       if (v.v[i]! < 2) this.queue[lane]++;
     }
     for (const lane of this.network.lanes) {
       const i = lane.id;
+      this.noiseDensity[i] += (this.weightedCount[i]! / lane.length - this.noiseDensity[i]!) / 240;
       this.volume[i] += (this.count[i]! - this.volume[i]!) / 30;
       const observed = this.free[i]! + this.observedDelay[i]!;
       this.seconds[i] += (observed - this.seconds[i]!) / 10;

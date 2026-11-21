@@ -604,14 +604,16 @@ export class World {
       const room = this.crossingGap(lane[i]!,s[i]!);
       let si = s[i]! + Math.min(vi * DT,room);
       if (vi*DT >= room) v[i]=0;
-      V.laneDelay[i] += Math.max(0, DT - (si - s[i]!) / this.laneSpeed[lane[i]!]!);
+      const delay = Math.max(0, DT - (si - s[i]!) / this.laneSpeed[lane[i]!]!);
+      V.tripDelay[i] += delay;
+      V.laneDelay[i] += delay;
       let L = lane[i]!;
       const d = dest[i]!;
       for (;;) {
         if (si >= this.routing.exit(d, L)) {
           this.recordArrival(i);
           if (owner[i]! < -1 && this.town?.freightArrived(owner[i]!, minute)) this.deliveries++;
-          if (owner[i]! >= 0) this.town?.arrived(owner[i]!, minute);
+          if (owner[i]! >= 0) this.town?.arrived(owner[i]!, minute, V.tripDelay[i]!);
           V.despawn(i);
           break;
         }

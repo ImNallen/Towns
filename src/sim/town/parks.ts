@@ -1,3 +1,4 @@
+import { QUALITY } from './qualityOfLife';
 import type { Vec2 } from '../math/vec';
 import { decodeCellKey, findCell, type CellKey, type ZoneCells } from '../zoning/cells';
 import type { Zoning } from '../zoning/paint';
@@ -5,8 +6,8 @@ import type { Zoning } from '../zoning/paint';
 export const PARK_BENEFITS = {
   pocketReach: 420,
   reachPerExtraCellWide: 140,
-  pocketHappiness: 0.15,
-  happinessPerExtraCellWide: 0.035,
+  pocketHappiness: QUALITY.pocketHappiness,
+  happinessPerExtraCellWide: QUALITY.happinessPerExtraCellWide,
   maxWidth: 3,
   residentialGrowth: 0.16,
 } as const;
