@@ -102,7 +102,6 @@ kbd { font-family: inherit; font-size: 10px; opacity: .6; }
 button.bulldoze.active, button.bulldoze.active:hover { background: #904731; }
 .tool-divider { height: 24px; width: 1px; background: var(--line); margin: 0 3px; }
 
-
 @media (min-width: 641px) and (max-width: 1213px) {
   /* The bottom panels would meet the centred toolbar, so they stop above it, and residents shrink to a summary. */
   .hud-column { bottom: 170px; }
@@ -158,8 +157,6 @@ button.bulldoze.active, button.bulldoze.active:hover { background: #904731; }
   .inspecting .budget { max-height: 45%; overflow: auto; }
 }
 
-
-
 /* Let the toolbar reserve its actual height when tools and touch instructions wrap. */
 .hud:has(> .editor) {
   display: grid;
@@ -214,7 +211,11 @@ button.bulldoze.active, button.bulldoze.active:hover { background: #904731; }
   .hud .simulation, .hud .town, .hud .budget {
     position: static; width: 100%; margin: 0; padding: 4px 8px; max-height: 24dvh; overflow: auto; flex: none;
   }
-  .hud .hud-column.left > .town { flex: 0 1 auto; }
+  /* Leave a band of map between the upper panels and the inspector, even with every panel open. */
+  .hud.inspecting .hud-column.left { grid-area: 1 / 1 / 2 / 2; max-height: 44%; overflow: auto; }
+  .hud.inspecting .map-info { min-height: 0; overflow: auto; flex: 0 1 auto; }
+  .hud.inspecting .town { max-height: min(24dvh, 60%); }
+  .hud.inspecting .simulation, .hud.inspecting .budget { max-height: 21%; }
   .hud .simulation-heading { display: grid; gap: 1px; margin: 0; }
   .disclosure-title { position: relative; padding: 4px 16px 4px 0; min-height: 32px; align-content: center; }
   .phone-heading { display: flex; position: absolute; inset: 0; width: 100%; justify-content: flex-end; align-items: center; padding: 0; }
@@ -225,7 +226,7 @@ button.bulldoze.active, button.bulldoze.active:hover { background: #904731; }
   .hud .town-demand, .hud .town-feed { display: grid; }
   .hud .household {
     position: absolute; bottom: 0; right: 0; width: calc(100vw - 16px);
-    max-height: 28dvh; padding: 5px 12px; border-radius: 14px 14px 8px 8px;
+    max-height: min(28dvh, 38%); padding: 5px 12px; border-radius: 14px 14px 8px 8px;
   }
   .hud .household-name { font-size: 18px; margin: 2px 0; }
   .hud .household .close { height: 36px; width: 36px; margin: 0; }
@@ -237,5 +238,4 @@ button.bulldoze.active, button.bulldoze.active:hover { background: #904731; }
   .hud .tool-bar { width: min(560px, calc(100vw - 16px)); display: grid; gap: 1px; grid-template-columns: repeat(7, minmax(0, 1fr)); }
   .tool-tray .tool { min-width: 58px; }
   .hud .placement-info .mouse-help { display: none; }
-  .hud .budget[open] { max-height: 24dvh; }
 }
