@@ -134,7 +134,7 @@ export function HouseholdCard({ household, onClose }: { household: HouseholdView
         <Need label="Security" value={needs.security} />
         <Need label="Happiness" value={household.happiness} />
       </div>
-      {household.nearbyPark && <p>{household.nearbyPark.name} · {household.nearbyPark.metres} m on foot</p>}
+      {household.nearbyPark && <p>{household.nearbyPark.name} · {household.nearbyPark.metres} m on foot{household.nearbyPark.happinessPoints > 0 && <> · Parks add {household.nearbyPark.happinessPoints} happiness points</>}</p>}
       {household.walkIssue && <p>No safe way to walk to {household.walkIssue}.</p>}
       <ul className="members">
         {household.members.map((person) => (
