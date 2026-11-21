@@ -43,6 +43,7 @@ test('bulldoze one crossing arm, preserve the opposite arm, and undo the removal
   await move(-65, 28);
   await expect(status).toHaveText('Click to remove this segment.');
 
+  await page.getByRole('button', { name: 'Roads', exact: true }).click();
   await page.getByRole('button', { name: 'Build road', exact: true }).click();
   await move(65, 8);
   await page.mouse.down();
@@ -80,12 +81,14 @@ test('remove a bypass while traffic follows the remaining bend, then restore it'
     await move(endX, endY);
     await page.mouse.up();
   };
+  await page.getByRole('button', { name: 'Roads', exact: true }).click();
   await page.getByRole('button', { name: 'Build curved road' }).click();
   await drag(-65, -8, 65, 8);
   await move(0, 85);
   await page.mouse.down();
   await page.mouse.up();
   await expect.poll(editor).toMatchObject({ roadCount: 1, connected: true, pending: false });
+  await page.getByRole('button', { name: 'Roads', exact: true }).click();
   await page.getByRole('button', { name: 'Build road', exact: true }).click();
   await drag(-47.27, 27.85, 52.30, 27.74);
   await expect.poll(editor).toMatchObject({ roadCount: 2, connected: true, pending: false });
@@ -102,6 +105,7 @@ test('remove a bypass while traffic follows the remaining bend, then restore it'
   await move(0, 28);
   await expect(page.getByRole('status')).not.toHaveText('Click to remove this segment.');
   await page.screenshot({ path: 'artifacts/screens/meadow-bulldoze-live-bypass.png' });
+  await page.getByRole('button', { name: 'Roads', exact: true }).click();
   await page.getByRole('button', { name: 'Build road', exact: true }).click();
   await drag(-47.27, 27.85, 52.30, 27.74);
   await expect.poll(editor, { timeout: 20_000 }).toMatchObject({ roadCount: 3, connected: true, pending: false });

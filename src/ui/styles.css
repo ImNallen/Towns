@@ -102,26 +102,6 @@ kbd { font-family: inherit; font-size: 10px; opacity: .6; }
 button.bulldoze.active, button.bulldoze.active:hover { background: #904731; }
 .tool-divider { height: 24px; width: 1px; background: var(--line); margin: 0 3px; }
 
-@media (max-width: 640px) {
-  .hud-column.left { top: 12px; bottom: auto; justify-content: flex-start; left: 12px; width: min(280px, calc(100% - 24px)); }
-  .map-info { padding: 13px 14px 0; }
-  .town { padding: 9px 14px 6px; }
-  .town-stats { margin: 8px 0 4px; }
-  .town-stats div:nth-child(n + 4), .town-feed { display: none; }
-  h1 { font-size: 25px; margin-bottom: 13px; }
-  .objective { margin-bottom: 13px; }
-  .trip-summary { margin: 0 -14px; padding: 10px 14px; }
-  .hud-column.right { top: auto; bottom: max(160px, calc(env(safe-area-inset-bottom) + 148px)); right: 12px; width: calc(100% - 24px); max-height: calc(100% - 172px); flex-direction: column; justify-content: flex-end; }
-  .simulation { width: 190px; padding: 10px; }
-  .simulation-heading { margin-bottom: 6px; }
-  .traffic-details { margin-top: 7px; padding-top: 6px; }
-  .editor { bottom: max(12px, env(safe-area-inset-bottom)); max-width: calc(100% - 24px); gap: 7px; }
-  .placement-info { padding: 8px 12px; }
-  .placement-info p { font-size: 11px; }
-  .tool { padding: 0 10px; }
-  .tool kbd { display: none; }
-}
-
 @media (min-width: 641px) and (max-width: 1213px) {
   /* The bottom panels would meet the centred toolbar, so they stop above it, and residents shrink to a summary. */
   .hud-column { bottom: 170px; }
@@ -148,9 +128,6 @@ button.bulldoze.active, button.bulldoze.active:hover { background: #904731; }
 @media (pointer: coarse) {
   .cancel-edit { padding: 12px 10px; margin: -12px 0; }
 }
-@media (max-width: 420px) {
-  .tool { flex-direction: column; gap: 2px; padding: 3px 8px; font-size: 11px; }
-}
 
 .town-demand { display: grid; gap: 4px; border-top: 1px solid var(--line); padding: 7px 0 9px; }
 
@@ -174,34 +151,10 @@ button.bulldoze.active, button.bulldoze.active:hover { background: #904731; }
   .tool kbd { display: none; }
   .tool { padding: 0 8px; }
 }
-@media (max-width: 640px) {
-  .tool-bar { width: min(560px, calc(100vw - 24px)); display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 1px; }
-  .tool-divider { display: none; }
-  .tool { flex-direction: column; gap: 2px; padding: 3px 1px; font-size: 10px; }
-}
 
 @media (min-width: 641px) {
   .inspecting .hud-column { width: min(300px, 28vw); }
   .inspecting .budget { max-height: 45%; overflow: auto; }
-}
-
-@media (max-width: 640px) {
-  .inspecting .hud-column.left { width: calc(48% - 18px); max-height: 28dvh; overflow: auto; }
-  .inspecting .hud-column.left > .panel { flex: none; }
-  .inspecting .map-info { padding: 8px 10px 0; }
-  .inspecting .map-info h1 { margin: 4px 0 6px; font-size: 18px; }
-  .inspecting .map-info .objective { margin-bottom: 6px; }
-  .inspecting .trip-summary { margin: 0 -10px; padding: 5px 10px; }
-  .inspecting .simulation { position: fixed; top: 12px; right: 12px; width: calc(52% - 18px); max-height: 28dvh; overflow: auto; }
-  .inspecting .hud-column.right { height: 34dvh; }
-  .inspecting .household { flex: 0 1 auto; }
-  .inspecting .budget { flex: none; max-height: 55%; overflow: auto; }
-}
-
-@media (max-width: 640px) {
-  .inspecting .map-info .traffic-status, .inspecting .town-demand { display: none; }
-  .inspecting .trip-summary strong { font-size: 15px; }
-  .inspecting .town { padding: 8px 10px; }
 }
 
 /* Let the toolbar reserve its actual height when tools and touch instructions wrap. */
@@ -229,4 +182,60 @@ button.bulldoze.active, button.bulldoze.active:hover { background: #904731; }
   .inspecting .trip-summary { margin: 0 -10px; padding: 4px 10px; }
   .inspecting .simulation { max-height: 35%; overflow: auto; padding: 6px 9px; }
   .inspecting .budget { max-height: 38%; }
+}
+
+.disclosure-heading { display: flex; align-items: flex-start; gap: 6px; }
+.disclosure-title { flex: 1; min-width: 0; }
+.phone-heading { display: none; }
+.tool-tray { display: flex; align-items: center; justify-content: center; gap: 4px; padding: 4px; }
+.tool-tray .toggle { padding: 8px; min-height: 36px; }
+.tool-bar > [aria-expanded="true"] { outline: 1px solid var(--accent); outline-offset: -2px; }
+.study-views { position: absolute; bottom: 12px; right: 12px; display: grid; justify-items: end; gap: 4px; }
+
+@media (max-width: 640px) {
+  .hud .hud-column.left, .hud .hud-column.right {
+    top: 8px; bottom: auto; width: calc(50% - 12px); gap: 5px;
+    max-height: none; overflow: visible; justify-content: flex-start;
+  }
+  .hud .hud-column.left { left: 8px; }
+  .hud .hud-column.right { right: 8px; height: auto; }
+  .hud .map-info { padding: 8px 10px; }
+  .hud .map-info h1 { font-size: 20px; margin: 2px 0 6px; }
+  .hud .map-info .objective { margin: 0; gap: 5px; }
+  .hud .objective h2 { font-size: 10px; }
+  .hud .trip-summary { margin: 7px 0 0; padding: 5px 0 0; }
+  .hud .trip-summary strong, .hud .trip-summary span { font-size: 10px; }
+  .hud .traffic-status { margin-top: 2px; }
+  .hud .budget table { font-size: 10px; }
+  .hud .budget td, .hud .budget th { padding: 3px 2px; }
+  .hud .simulation, .hud .town, .hud .budget {
+    position: static; width: 100%; margin: 0; padding: 4px 8px; max-height: 24dvh; overflow: auto; flex: none;
+  }
+  /* Leave a band of map between the upper panels and the inspector, even with every panel open. */
+  .hud.inspecting .hud-column.left { grid-area: 1 / 1 / 2 / 2; max-height: 44%; overflow: auto; }
+  .hud.inspecting .map-info { min-height: 0; overflow: auto; flex: 0 1 auto; }
+  .hud.inspecting .town { max-height: min(24dvh, 60%); }
+  .hud.inspecting .simulation, .hud.inspecting .budget { max-height: 21%; }
+  .hud .simulation-heading { display: grid; gap: 1px; margin: 0; }
+  .disclosure-title { position: relative; padding: 4px 16px 4px 0; min-height: 32px; align-content: center; }
+  .phone-heading { display: flex; position: absolute; inset: 0; width: 100%; justify-content: flex-end; align-items: center; padding: 0; }
+  .phone-heading:hover:not(:disabled) { background: transparent; }
+  .disclosure-content[data-open="false"] { display: none; }
+  .hud .budget summary { padding: 8px 0; font-size: 11px; }
+  .hud .town-stats div:nth-child(n + 4) { display: flex; }
+  .hud .town-demand, .hud .town-feed { display: grid; }
+  .hud .household {
+    position: absolute; bottom: 0; right: 0; width: calc(100vw - 16px);
+    max-height: min(28dvh, 38%); padding: 5px 12px; border-radius: 14px 14px 8px 8px;
+  }
+  .hud .household-name { font-size: 18px; margin: 2px 0; }
+  .hud .household .close { height: 36px; width: 36px; margin: 0; }
+  .editor { max-width: calc(100% - 16px); gap: 5px; }
+  .placement-info { padding: 6px 10px; }
+  .placement-info p { font-size: 11px; }
+  .tool { flex-direction: column; gap: 2px; padding: 3px 1px; font-size: 10px; }
+  .tool kbd, .tool-divider { display: none; }
+  .hud .tool-bar { width: min(560px, calc(100vw - 16px)); display: grid; gap: 1px; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .tool-tray .tool { min-width: 58px; }
+  .hud .placement-info .mouse-help { display: none; }
 }

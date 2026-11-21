@@ -19,6 +19,7 @@ test('build a street, see a completed trip, and undo the connection', async ({ p
 
   await page.getByRole('button', { name: 'Pan', exact: true }).click();
   await expect.poll(editor).toMatchObject({ tool: 'pan' });
+  await page.getByRole('button', { name: 'Roads', exact: true }).click();
   await page.getByRole('button', { name: 'Build road', exact: true }).click();
   await page.mouse.move(west.x, west.y);
   await page.mouse.down();

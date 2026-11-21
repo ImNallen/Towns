@@ -1,3 +1,4 @@
+import { Disclosure } from './Disclosure';
 import { BUDGET } from '../sim/town/economy';
 import { ROAD_ORDER, ROAD_TYPES, type RoadType } from '../sim/network/roadTypes';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -7,6 +8,38 @@ import { BudgetPanel, money, dayClock, HouseholdCard, TownPanel } from './town';
 
 const SPEEDS = [1, 2, 4, 8] as const;
 type Editor = ReturnType<Game['editor']>;
+
+type Tool = NonNullable<Editor>['tool'];
+interface TrayTool {
+  tool: Tool;
+  label: string;
+  action: string;
+  path: string;
+  shortcut?: string;
+}
+interface ToolGroup {
+  name: string;
+  icon: string;
+  tools: TrayTool[];
+}
+const ROAD_ICON = 'M5 3 3 17m12-14 2 14M10 3v3m0 3v3m0 3v2';
+const ZONE_ICON = 'M3 3h6v6H3zm9 0h5v6h-5zM3 12h6v5H3zm9 0h5v5h-5z';
+const GROUPS: ToolGroup[] = [
+  { name: 'Roads', icon: ROAD_ICON, tools: [
+    { tool: 'road', label: 'Road', action: 'Build road', shortcut: 'R', path: ROAD_ICON },
+    { tool: 'curve', label: 'Curve', action: 'Build curved road', shortcut: 'C', path: 'M2 16C13 16 5 4 18 4M2 12c7 0 1-12 16-12' },
+    { tool: 'upgrade', label: 'Upgrade', action: 'Upgrade road', shortcut: 'U', path: 'M5 16V5m-3 3 3-3 3 3m7-4v11m-3-3 3 3 3-3' },
+  ] },
+  { name: 'People', icon: 'M11 5a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM5 12l3-4 3-1 2 4 4 1M10 8l-1 6-4 4m4-5 4 2 1 4', tools: [
+    { tool: 'footpath', label: 'Path', action: 'Build footpath', path: 'M2 16c4 0 8-2 7-6S10 4 17 3M4 18c6 0 11-5 9-9s1-3 5-4' },
+    { tool: 'zebra', label: 'Crossing', action: 'Build zebra crossing', path: 'M2 4h16M2 16h16M4 7v6m4-6v6m4-6v6m4-6v6' },
+    { tool: 'parking', label: 'Parking', action: 'Build parking lot', path: 'M6 17V3h5a4 4 0 0 1 0 8H6' },
+  ] },
+  { name: 'Land use', icon: ZONE_ICON, tools: [
+    { tool: 'zone', label: 'Zone', action: 'Zone', shortcut: 'Z', path: ZONE_ICON },
+    { tool: 'park', label: 'Park', action: 'Build park', path: 'm10 2-6 7h3l-4 5h14l-4-5h3zM10 14v4' },
+  ] },
+];
 
 function clock(seconds: number): string {
   const s = Math.floor(seconds);
@@ -18,6 +51,7 @@ function clock(seconds: number): string {
 
 export function App({ game }: { game: Game }) {
   const hud = useRef<HTMLElement>(null);
+  const [tray, setTray] = useState<string | null>(null);
   const [stats, setStats] = useState(game.stats());
   const [town, setTown] = useState(game.town());
   const [selected, setSelected] = useState(game.selectedHouse());
@@ -49,6 +83,7 @@ export function App({ game }: { game: Game }) {
     game.setShowLanes(!lanes);
   };
   const changeTool = (tool: NonNullable<Editor>['tool']): void => {
+    setTray(null);
     game.setTool(tool);
     setEditor(game.editor());
   };
@@ -73,6 +108,13 @@ export function App({ game }: { game: Game }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      if (tray && e.key === 'Escape') {
+        // Dismiss the tray before the map editor receives Escape and cancels the road draft.
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        setTray(null);
+        return;
+      }
       if (e.target instanceof HTMLElement && (e.target.isContentEditable || e.target.closest('input, textarea, select'))) return;
       if (e.metaKey || e.ctrlKey) {
         if (editor && e.key.toLowerCase() === 'z' && !e.shiftKey) {
@@ -112,8 +154,8 @@ export function App({ game }: { game: Game }) {
         toggleLanes();
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   });
 
   const instruction = editor?.hint || (editor?.pending
@@ -140,7 +182,7 @@ export function App({ game }: { game: Game }) {
     const panels = Array.from(root.querySelectorAll<HTMLElement>('.panel'));
     const left = root.querySelector<HTMLElement>('.hud-column.left')!;
     const right = root.querySelector<HTMLElement>('.hud-column.right')!;
-    const controls = right.querySelector<HTMLElement>('.simulation')!;
+    const budget = right.querySelector<HTMLElement>('.budget')!;
     const card = right.querySelector<HTMLElement>('.household')!;
     const toolbar = root.querySelector<HTMLElement>('.editor')!;
     const reveal = () => {
@@ -156,7 +198,7 @@ export function App({ game }: { game: Game }) {
       })) return;
       const narrow = window.matchMedia('(max-width: 640px)').matches;
       const x = narrow ? margin : left.getBoundingClientRect().right + margin;
-      const y = narrow ? Math.max(left.getBoundingClientRect().bottom, controls.getBoundingClientRect().bottom) + margin : margin;
+      const y = narrow ? Math.max(left.getBoundingClientRect().bottom, budget.getBoundingClientRect().bottom) + margin : margin;
       const endX = narrow ? root.clientWidth - margin : right.getBoundingClientRect().left - margin;
       const endY = (narrow ? card : toolbar).getBoundingClientRect().top - margin;
       game.revealSelectedParcel(new DOMRect(x, y, endX - x, endY - y));
@@ -165,9 +207,21 @@ export function App({ game }: { game: Game }) {
     for (const el of [root, ...panels]) observer.observe(el);
     reveal();
     return () => observer.disconnect();
-  }, [game, selected, inspecting]);
+  }, [game, selected, inspecting, tray]);
   const tripStatus = editor?.pending ? 'Updating roads' : speed === 0 ? 'Paused' : editor && !editor.connected ? 'Waiting for a connection' : 'Traffic running';
 
+  const openGroup = GROUPS.find(group => group.name === tray);
+  const viewsButton = <button className="tool" aria-label="Views" aria-expanded={tray === 'Views'}
+    onClick={() => setTray(tray === 'Views' ? null : 'Views')}>
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m2 7 8-4 8 4-8 4zM2 10l8 4 8-4M2 13l8 4 8-4" /></svg><span>Views</span>
+  </button>;
+  const viewsTray = tray === 'Views' && <div className="tool-tray panel" role="group" aria-label="Map overlays">
+    {town && <label className="toggle"><input type="checkbox" checked={occupancy} onChange={e => {
+      setOccupancy(e.target.checked);
+      game.setParkingView(e.target.checked);
+    }} />Parking occupancy</label>}
+    <label className="toggle"><input type="checkbox" checked={lanes} onChange={toggleLanes} />Lane graph <kbd>L</kbd></label>
+  </div>;
   return (
     <aside ref={hud} className={inspecting ? 'hud inspecting' : 'hud'} aria-label="Map controls">
       <div className="hud-column left">
@@ -190,42 +244,40 @@ export function App({ game }: { game: Game }) {
 
       <div className="hud-column right">
         <section className="simulation panel" aria-label="Simulation">
-          <div className="simulation-heading"><span>Simulation</span><time className="clock">{town ? dayClock(town) : stats ? clock(stats.time) : '00:00:00'}</time></div>
-          <div className="controls" role="group" aria-label="Simulation speed">
-            <button className={speed === 0 ? 'active pause' : 'pause'} onClick={() => changeSpeed(speed === 0 ? lastSpeed : 0)} aria-label={speed === 0 ? 'Resume simulation' : 'Pause simulation'} title="Pause / resume (Space)" aria-pressed={speed === 0}>
-              <span aria-hidden="true">{speed === 0 ? '▶' : 'Ⅱ'}</span>
-            </button>
-            {SPEEDS.map((s, i) => (
-              <button key={s} className={speed === s ? 'active' : ''} onClick={() => changeSpeed(s)} aria-label={`${s}× speed`} aria-pressed={speed === s} title={`${s}× speed (${i + 1})`}>{s}×</button>
-            ))}
-          </div>
-          {town && <label className="toggle"><input type="checkbox" checked={occupancy} onChange={e => { setOccupancy(e.target.checked); game.setParkingView(e.target.checked); }} />Parking occupancy</label>}
-          <details className="traffic-details">
-            <summary>Traffic details</summary>
-            <dl>
-              <dt>Vehicles</dt><dd>{stats?.active ?? 0}</dd>
-              <dt>Trips / min</dt><dd>{stats?.completedLastMinute ?? 0}</dd>
-              <dt>Avg speed</dt><dd>{stats ? `${(stats.meanSpeed * 3.6).toFixed(0)} km/h` : '–'}</dd>
-              <dt>Stopped</dt><dd>{stats ? `${(stats.stoppedShare * 100).toFixed(0)}%` : '–'}</dd>
-              <dt>Avg trip</dt><dd>{stats ? `${stats.meanTripTime.toFixed(0)} s` : '–'}</dd>
-            </dl>
-            <label className="toggle"><input type="checkbox" checked={lanes} onChange={toggleLanes} />Lane graph <kbd>L</kbd></label>
-            <div className="performance">{fps.toFixed(0)} fps</div>
-          </details>
+          <Disclosure heading={<div className="simulation-heading"><span>Simulation</span><time className="clock">{town ? dayClock(town) : stats ? clock(stats.time) : '00:00:00'}</time></div>}>
+            <div className="controls" role="group" aria-label="Simulation speed">
+              <button className={speed === 0 ? 'active pause' : 'pause'} onClick={() => changeSpeed(speed === 0 ? lastSpeed : 0)} aria-label={speed === 0 ? 'Resume simulation' : 'Pause simulation'} title="Pause / resume (Space)" aria-pressed={speed === 0}>
+                <span aria-hidden="true">{speed === 0 ? '▶' : 'Ⅱ'}</span>
+              </button>
+              {SPEEDS.map((s, i) => (
+                <button key={s} className={speed === s ? 'active' : ''} onClick={() => changeSpeed(s)} aria-label={`${s}× speed`} aria-pressed={speed === s} title={`${s}× speed (${i + 1})`}>{s}×</button>
+              ))}
+            </div>
+            <details className="traffic-details">
+              <summary>Traffic details</summary>
+              <dl>
+                <dt>Vehicles</dt><dd>{stats?.active ?? 0}</dd>
+                <dt>Trips / min</dt><dd>{stats?.completedLastMinute ?? 0}</dd>
+                <dt>Avg speed</dt><dd>{stats ? `${(stats.meanSpeed * 3.6).toFixed(0)} km/h` : '–'}</dd>
+                <dt>Stopped</dt><dd>{stats ? `${(stats.stoppedShare * 100).toFixed(0)}%` : '–'}</dd>
+                <dt>Avg trip</dt><dd>{stats ? `${stats.meanTripTime.toFixed(0)} s` : '–'}</dd>
+              </dl>
+              <div className="performance">{fps.toFixed(0)} fps</div>
+            </details>
+          </Disclosure>
         </section>
-        {business && <section className="household panel" aria-label="Business">
-          <div className="panel-heading">{business.zone === 'shops' ? 'Shop' : 'Workplace'}
-            <button className="close" onClick={() => selectHouse(null)} aria-label="Close business card">×</button>
-          </div>
-          <h2 className="household-name">{business.name}</h2>
+        {business && <section key={business.home} className="household panel" aria-label="Business">
+          <Disclosure heading={<><span className="panel-heading">{business.zone === 'shops' ? 'Shop' : 'Workplace'}</span>
+            <h2 className="household-name">{business.name}</h2></>}
+            action={<button className="close" onClick={() => selectHouse(null)} aria-label="Close business card">×</button>}>
           <dl><dt>Jobs filled</dt><dd>{business.filled} / {business.jobs}</dd>
             <dt>Yesterday’s wages and taxes</dt><dd>{money(business.lastDailyCost)}</dd>
             <dt>Taxes paid to date</dt><dd>{money(business.taxesPaid)}</dd>
             <dt>Deliveries today</dt><dd>{business.deliveries}</dd>
             <dt>Parking</dt><dd>{business.occupied}/{business.capacity} · {business.turnedAway} turned away today</dd>
-            <dt>Customers today</dt><dd>{business.customers}</dd></dl>
+            <dt>Customers today</dt><dd>{business.customers}</dd></dl></Disclosure>
         </section>}
-        {household && <HouseholdCard household={household} onClose={() => selectHouse(null)} />}
+        {household && <HouseholdCard key={household.home} household={household} onClose={() => selectHouse(null)} />}
         {town && <BudgetPanel town={town} />}
       </div>
 
@@ -264,25 +316,26 @@ export function App({ game }: { game: Game }) {
           </span>}
           <span className="mouse-help">{editor.tool === 'pan' ? '' : editor.chaining ? 'Esc finishes · ' : 'Esc cancels · '}Scroll to zoom · Right-drag to pan</span>
         </div>
+        {viewsTray}
+        {openGroup && <div className="tool-tray panel" role="group" aria-label={openGroup.name + ' tools'}>
+          {openGroup.tools.map(({ tool, label, action, path, shortcut }) => <button key={tool}
+            aria-label={action} aria-pressed={editor.tool === tool} aria-keyshortcuts={shortcut}
+            title={shortcut ? `${action} (${shortcut})` : action}
+            className={editor.tool === tool ? 'active tool' : 'tool'} onClick={() => changeTool(tool)}>
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d={path} /></svg>
+            <span>{label}</span>{shortcut && <kbd>{shortcut}</kbd>}
+          </button>)}
+        </div>}
         <div className="tool-bar panel" role="group" aria-label="Map tools">
-          <button aria-label="Build road" aria-pressed={editor.tool === 'road'} aria-keyshortcuts="R" className={editor.tool === 'road' ? 'active tool' : 'tool'} onClick={() => changeTool('road')} title="Build road (R)">
-            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 3-2 14m12-14 2 14M10 3v3m0 3v3m0 3v2" /></svg><span>Road</span><kbd>R</kbd>
-          </button>
-          <button aria-label="Build curved road" aria-pressed={editor.tool === 'curve'} aria-keyshortcuts="C" className={editor.tool === 'curve' ? 'active tool' : 'tool'} onClick={() => changeTool('curve')} title="Build curved road (C)">
-            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2 16C13 16 5 4 18 4M2 12c7 0 1-12 16-12" /></svg><span>Curve</span><kbd>C</kbd>
-          </button>
-          <button aria-label="Upgrade road" aria-pressed={editor.tool === 'upgrade'} aria-keyshortcuts="U" className={editor.tool === 'upgrade' ? 'active tool' : 'tool'} onClick={() => changeTool('upgrade')} title="Upgrade road (U)">
-            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 16V5m-3 3 3-3 3 3m7-4v11m-3-3 3 3 3-3" /></svg><span>Upgrade</span><kbd>U</kbd>
-          </button>
+          {GROUPS.map(group => <button key={group.name} aria-expanded={tray === group.name}
+            className={'tool' + (group.tools.some(entry => entry.tool === editor.tool) ? ' active' : '')}
+            onClick={() => setTray(tray === group.name ? null : group.name)}>
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d={group.icon} /></svg>
+            <span>{group.name}</span>
+          </button>)}
+          {viewsButton}
           <button aria-label="Bulldoze road" aria-pressed={editor.tool === 'bulldoze'} aria-keyshortcuts="B" className={editor.tool === 'bulldoze' ? 'active tool bulldoze' : 'tool bulldoze'} onClick={() => changeTool('bulldoze')} title="Bulldoze road (B)">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 12V8h6l2 4M5 8V5h4l1 3m2 5 3 1m1-6v6l2 2h-3l-1-3"/><rect x="2" y="12" width="10" height="4" rx="2"/></svg><span>Bulldoze</span><kbd>B</kbd>
-          </button>
-          <button aria-label="Build park" aria-pressed={editor.tool === 'park'} className={'tool' + (editor.tool === 'park' ? ' active' : '')} onClick={() => changeTool('park')}><b>♧</b><span>Park</span></button>
-          <button aria-label="Build footpath" aria-pressed={editor.tool === 'footpath'} onClick={() => changeTool('footpath')} className={'tool' + (editor.tool === 'footpath' ? ' active' : '')}><b>⌁</b><span>Path</span></button>
-          <button aria-label="Build zebra crossing" aria-pressed={editor.tool === 'zebra'} onClick={() => changeTool('zebra')} className={'tool' + (editor.tool === 'zebra' ? ' active' : '')}><b>▥</b><span>Crossing</span></button>
-          <button aria-label="Build parking lot" aria-pressed={editor.tool === 'parking'} className={editor.tool === 'parking' ? 'active tool' : 'tool'} onClick={() => changeTool('parking')} title="Build parking lot"><b>P</b><span>Parking</span></button>
-          <button aria-label="Zone" aria-pressed={editor.tool === 'zone'} aria-keyshortcuts="Z" className={editor.tool === 'zone' ? 'active tool' : 'tool'} onClick={() => changeTool('zone')} title="Zone (Z)">
-            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 3h6v6H3zm8 0h6v6h-6zM3 11h6v6H3zm8 0h6v6h-6z" /></svg><span>Zone</span><kbd>Z</kbd>
           </button>
           <button aria-label="Pan" aria-pressed={editor.tool === 'pan'} aria-keyshortcuts="V" className={editor.tool === 'pan' ? 'active tool' : 'tool'} onClick={() => changeTool('pan')} title="Pan (V)">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v16M2 10h16M7 5l3-3 3 3M7 15l3 3 3-3M5 7l-3 3 3 3m10-6 3 3-3 3" /></svg><span>Pan</span><kbd>V</kbd>
@@ -293,6 +346,7 @@ export function App({ game }: { game: Game }) {
           </button>
         </div>
       </section>}
+      {!editor && <div className="study-views">{viewsTray}<div className="panel">{viewsButton}</div></div>}
     </aside>
   );
 }

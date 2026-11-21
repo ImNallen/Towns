@@ -58,12 +58,14 @@ test('paint plots beside a street and undo the stroke', async ({ page }) => {
 
 test('a side street covers painted plots, bulldozing it uncovers them, the eraser clears them', async ({ page }) => {
   const { editor, move, drag, settled, undo, errors } = await open(page, VIEW);
+  await page.getByRole('button', { name: 'Land use', exact: true }).click();
   await page.getByRole('button', { name: 'Zone' }).click();
   await drag(-150, BACK_ROW, -50, BACK_ROW);
   await settled();
   const painted = (await editor()).zoned;
   expect(painted).toBeGreaterThan(40);
 
+  await page.getByRole('button', { name: 'Roads', exact: true }).click();
   await page.getByRole('button', { name: 'Build road', exact: true }).click();
   await drag(-65, 62, -65, -8);
   await expect.poll(editor).toMatchObject({ roadCount: 1, pending: false });

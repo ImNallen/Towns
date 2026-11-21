@@ -1,3 +1,4 @@
+import { meadowScenario } from '../../src/sim/scenarios/meadow';
 import { expect, test, type Page } from '@playwright/test';
 
 /**
@@ -344,6 +345,7 @@ test('parking occupancy and a new lot serving the shops', async ({ page }) => {
   }, null, { timeout: 90_000 });
   const shop = await page.evaluate(() => window.__towns!.town()!.businesses.find(b => b.zone === 'shops' && b.capacity && b.occupied === b.capacity)!);
   await page.mouse.click(...at(shop.lot.x, shop.lot.y));
+  await page.getByRole('button', { name: 'Views' }).click();
   await page.getByLabel('Parking occupancy').check();
   await expect(page.getByRole('region', { name: 'Business' })).toContainText('Parking');
   const card = (await page.getByRole('region', { name: 'Business' }).boundingBox())!;
@@ -351,6 +353,7 @@ test('parking occupancy and a new lot serving the shops', async ({ page }) => {
   expect(card.y + card.height).toBeLessThan(tools.y);
   await page.screenshot({ path: 'artifacts/screens/parking-full-yard.png' });
   await page.getByRole('button', { name: 'Close business card' }).click();
+  await page.getByRole('button', { name: 'People', exact: true }).click();
   await page.getByRole('button', { name: 'Build parking lot' }).click();
   await page.getByLabel('Lot size').selectOption('2');
   await page.mouse.move(...at(6, -1));
@@ -426,12 +429,14 @@ test('a footpath joins the frontage and a zebra carries residents across the str
     await page.mouse.up();
   };
   await expect.poll(editor).toMatchObject({connected:true,pending:false});
+  await page.getByRole('button', { name: 'People', exact: true }).click();
   await page.getByRole('button',{name:'Build footpath'}).click();
   const balance=()=>page.evaluate(()=>window.__towns!.town()!.budget.balance);
   const before=await balance();
   await stroke(50,3.75,30,-19);
   await expect.poll(balance).toBeLessThan(before);
   await page.screenshot({path:'artifacts/screens/footpath.png'});
+  await page.getByRole('button', { name: 'People', exact: true }).click();
   await page.getByRole('button',{name:'Build zebra crossing'}).click();
   const beforeZebra=await balance();
   await page.mouse.click(...at(65,8));
@@ -481,6 +486,7 @@ test('pedestrians use the side-street crossing at a junction', async ({page})=>{
 
 test('a neighbourhood park welcomes visitors after work',async({page})=>{
   const {at}=await connectedStreet(page);
+  await page.getByRole('button', { name: 'Land use', exact: true }).click();
   await page.getByRole('button',{name:'Build park',exact:true}).click();
   await page.getByLabel('Park size').selectOption('3');
   await page.mouse.move(...at(8,17));
@@ -506,3 +512,32 @@ test('a neighbourhood park welcomes visitors after work',async({page})=>{
   await expect(page.getByRole('region',{name:'Household'})).toContainText(/Parks add [1-9][0-9]* happiness points/);
   await page.screenshot({path:'artifacts/screens/park-happiness.png'});
 });
+
+for (const [device, width, height] of [
+  ['desktop', 1440, 900], ['tablet', 768, 1024], ['phone', 390, 844],
+] as const) {
+  test(`household and roads tray on ${device}`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    const house = meadowScenario().decor.houses[4]!;
+    await page.goto(`/?speed=0&x=${house.x}&y=${house.y}&mpp=0.24`);
+    await expect(page.locator('.town')).toBeVisible();
+    await page.evaluate(() => window.__towns!.selectHouse(4));
+    const card = page.getByRole('region', { name: 'Household' });
+    await expect(card).toBeVisible();
+    if (device === 'phone') {
+      await expect(card.getByRole('meter').first()).toBeHidden();
+      await card.getByRole('button', { expanded: false }).click();
+      await expect(card.getByRole('meter').first()).toBeVisible();
+    }
+    await page.getByRole('button', { name: 'Roads', exact: true }).click();
+    await expect(page.getByRole('group', { name: 'Roads tools' })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => {
+      const parcel = window.__towns!.selectedParcelOnScreen()!;
+      return [...document.querySelectorAll('.panel')].every(panel => {
+        const r = panel.getBoundingClientRect();
+        return parcel.right <= r.left || parcel.left >= r.right || parcel.bottom <= r.top || parcel.top >= r.bottom;
+      });
+    })).toBe(true);
+    await page.screenshot({ path: `artifacts/screens/toolbar-card-${device}.png` });
+  });
+}

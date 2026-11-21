@@ -1,3 +1,4 @@
+import { Disclosure } from './Disclosure';
 import { vehicleType } from '../vehicles/catalogue';
 import { dollars as money } from '../sim/town/budget';
 import { ZONE_KINDS } from '../sim/zoning/paint';
@@ -55,7 +56,7 @@ export function TownPanel({ town }: { town: TownView }) {
   const recent = town.events.slice(-(FEED_LENGTH - (town.day > 1 ? 1 : 0))).reverse();
   return (
     <section className="town panel" aria-label="Residents">
-      <div className="panel-heading"><span>Residents</span><span>{town.households.length} homes</span></div>
+      <Disclosure heading={<div className="panel-heading"><span>Residents</span><span>{town.households.length} homes</span></div>}>
       <dl className="town-stats">
         <div><dt>people</dt><dd>{totals.population}</dd></div>
         <div><dt>adults employed</dt><dd>{totals.employed}/{totals.adults}</dd></div>
@@ -84,6 +85,7 @@ export function TownPanel({ town }: { town: TownView }) {
           </li>
         ))}
       </ol>}
+      </Disclosure>
     </section>
   );
 }
@@ -118,11 +120,9 @@ export function HouseholdCard({ household, onClose }: { household: HouseholdView
   const model = vehicleType(household.carModel).name;
   return (
     <section className="household panel" aria-label="Household">
-      <div className="panel-heading">
-        <span>{household.region} · {HOMES[household.level - 1]}</span>
-        <button className="close" onClick={onClose} aria-label="Close household" title="Close (Esc)">×</button>
-      </div>
-      <h2 className="household-name">{family(household)}</h2>
+      <Disclosure heading={<><span className="panel-heading">{household.region} · {HOMES[household.level - 1]}</span>
+        <h2 className="household-name">{family(household)}</h2></>}
+        action={<button className="close" onClick={onClose} aria-label="Close household" title="Close (Esc)">×</button>}>
       <p className="household-meta">
         <span><i className="car-swatch" style={{ background: PALETTE.vehicles[vehicleType(household.carModel).colours[0]] }} aria-hidden="true" />{household.cars} {model}{household.cars === 1 ? '' : 's'} · {household.parked.join(', ')}</span>
         <span>{money(household.funds)}</span>
@@ -147,6 +147,7 @@ export function HouseholdCard({ household, onClose }: { household: HouseholdView
           </li>
         ))}
       </ul>
+      </Disclosure>
     </section>
   );
 }

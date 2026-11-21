@@ -45,6 +45,7 @@ test('residents commute, a household card opens on click, and a new road sends t
   await expect.poll(selected).toBeNull();
 
   const [westTip, eastTip] = await Promise.all(meadowTips([]).map(screen));
+  await page.getByRole('button', { name: 'Roads', exact: true }).click();
   await page.getByRole('button', { name: 'Build road', exact: true }).click();
   await page.mouse.move(eastTip!.x, eastTip!.y);
   await page.mouse.down();

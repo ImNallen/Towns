@@ -3,6 +3,7 @@ import { meadowScenario } from '../../src/sim/scenarios/meadow';
 
 for (const [device, viewport] of [
   ['desktop', { width: 1440, height: 900 }],
+  ['small phone', { width: 320, height: 568 }],
   ['phone', { width: 390, height: 844 }],
   ['landscape', { width: 844, height: 390 }],
   ['tablet', { width: 768, height: 1024 }],
@@ -48,6 +49,12 @@ for (const [device, viewport] of [
         return collisions;
       });
       await expect.poll(obstructions).toEqual([]);
+      if (device === 'small phone') {
+        await page.locator('.household .phone-heading').click();
+        await page.locator('.town .phone-heading').click();
+        await page.locator('.simulation .phone-heading').click();
+        await page.getByRole('button', { name: 'Roads', exact: true }).click();
+      }
       await budget.locator('summary').click();
       await expect(budget).toHaveAttribute('open', '');
       await expect.poll(obstructions).toEqual([]);
