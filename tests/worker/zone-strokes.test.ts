@@ -21,7 +21,7 @@ afterAll(() => {
 });
 
 describe('the simulation worker', () => {
-  it('applies a stroke and its undo without touching the roads or the World', () => {
+  it('applies a stroke and its undo without rebuilding roads or interrupting moving cars', () => {
     send({ type: 'init', scenario: 'meadow', seed: 1, speed: 4 });
     let frame = lastFrame(drain());
     for (let t = 0; t < 120 && frame.stats.active === 0; t++) {
@@ -31,8 +31,9 @@ describe('the simulation worker', () => {
     expect(frame.stats.active).toBeGreaterThan(0);
 
     send({ type: 'paintZone', zone: 'residential', cells: backRow });
-    const [painted, ...rest] = drain();
-    expect(rest).toEqual([]);
+    const messages = drain();
+    expect(messages.map(m => m.type)).toEqual(['town', 'frame', 'zoningChanged']);
+    const painted = messages.at(-1);
     expect(painted).toMatchObject({ type: 'zoningChanged', edits: [{ zone: 'residential' }] });
     if (painted?.type !== 'zoningChanged') throw new Error('expected zoningChanged');
     expect(painted.edits[0]).toMatchObject({ cells: expect.arrayContaining(backRow) });
@@ -41,7 +42,7 @@ describe('the simulation worker', () => {
     expect(drain()).toEqual([{ type: 'editRejected', reason: 'Already zoned residential.' }]);
 
     send({ type: 'undo' });
-    expect(drain()).toEqual([{ type: 'zoningChanged', edits: [] }]);
+    expect(drain().at(-1)).toEqual({ type: 'zoningChanged', edits: [] });
     run(0.1);
     const next = lastFrame(drain());
     expect(next.tick).toBeGreaterThan(frame.tick);

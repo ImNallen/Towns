@@ -47,6 +47,8 @@ export interface Bounds {
 
 /** A house residents live in. `homes[i]` is `decor.houses[i]`. */
 export interface HomeSpec {
+  /** A painted parcel awaiting or housing a family. */
+  lot?: import('../zoning/lots').Lot;
   /** Where the driveway meets its street, one per direction. Empty when the street is gone. */
   access: AccessPoint[];
   /** The off-map town this neighbourhood grew up around. */
@@ -80,6 +82,6 @@ export interface Scenario {
   bounds: Bounds;
   /** Residents and the places they travel to. Absent for traffic-only maps. */
   town?: TownSpec;
-  /** Zone cells beside the streets. Absent on maps without zoning; the World never reads them. */
+  /** Zone cells beside the streets. Absent on maps without zoning. */
   zones?: ZoneCells;
 }

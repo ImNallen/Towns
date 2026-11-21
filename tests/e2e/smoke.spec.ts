@@ -70,3 +70,40 @@ test('residential catalogue and sample street render', async ({ page }) => {
   await page.screenshot({ fullPage: true, path: 'artifacts/screens/building-catalogue.png' });
   expect(errors).toEqual([]);
 });
+
+test('painted residential frontage grows into a lived-in street', async ({ page }) => {
+  test.setTimeout(150_000);
+  const errors: string[] = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.goto('/?scenario=meadow&seed=1&speed=0&x=70&y=8&mpp=0.1');
+  const editor = () => page.evaluate(() => window.__towns?.editor());
+  await expect.poll(editor).toMatchObject({ pending: false });
+  const box = (await page.locator('#map').boundingBox())!;
+  const at = (x: number, y: number) => [box.x + box.width / 2 + (x - 70) / 0.1, box.y + box.height / 2 - (y - 8) / 0.1] as const;
+  await page.keyboard.press('z');
+  for (const y of [-24, 40]) {
+    await page.mouse.move(...at(46, y));
+    await page.mouse.down();
+    await page.mouse.move(...at(80, y), { steps: 12 });
+    await page.mouse.up();
+    await expect.poll(editor).toMatchObject({ pending: false });
+  }
+  await page.getByRole('button', {name: 'Pan'}).click();
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => window.__towns!.setSpeed(120));
+  const town = () => page.evaluate(() => window.__towns!.town()!);
+  await expect.poll(async () => (await town()).households.length, {timeout: 60_000}).toBeGreaterThan(12);
+  await page.evaluate(() => window.__towns!.setSpeed(0));
+  const first = (await town()).households.find(h => h.lot)!.lot!;
+  await page.mouse.click(...at(first.x, first.y));
+  await expect(page.getByRole('region', {name: 'Household'})).toBeVisible();
+  await page.screenshot({path: 'artifacts/screens/growth-first-home.png'});
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => window.__towns!.setSpeed(120));
+  await expect.poll(async () => (await town()).day, {timeout: 100_000}).toBeGreaterThanOrEqual(4);
+  await page.evaluate(() => window.__towns!.setSpeed(0));
+  expect((await town()).households.filter(h => h.lot).length).toBeGreaterThan(1);
+  expect((await town()).households.some(h => h.lot && h.wages > 0)).toBe(true);
+  await page.screenshot({path: 'artifacts/screens/growth-day-four.png'});
+  expect(errors).toEqual([]);
+});

@@ -364,7 +364,7 @@ function meadowWithoutZones(replay: Replay): Scenario {
 }
 
 /** Where a driveway at `p` meets each directional road lane passing it. */
-function accessPoints(network: Network, p: Vec2): AccessPoint[] {
+export function accessPoints(network: Network, p: Vec2): AccessPoint[] {
   const access: AccessPoint[] = [];
   for (const lane of network.lanes) {
     if (lane.kind !== 'road') continue;

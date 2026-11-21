@@ -3,7 +3,11 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { polyline } from '../sim/math/polyline';
 import type { Vec2 } from '../sim/math/vec';
 import type { House } from '../sim/scenarios/types';
-import { FlatMesh } from './flat';
+import { BLUEPRINTS } from '../buildings/catalogue';
+import type { HouseholdView } from '../sim/town/town';
+import { buildBuildingLayer, type BuildingInstance } from './buildings/mesh';
+import { disposeLayer } from './dispose';
+import { FlatMesh, flatMaterial } from './flat';
 import { PALETTE } from './palette';
 
 /** A walled block with a gable roof, in the house's frame: ridge along local x or z, centred on z = 0. */
@@ -78,6 +82,8 @@ export class HouseLayer {
   readonly group = new THREE.Group();
   private readonly meshes: THREE.InstancedMesh[];
   private readonly levels: Uint8Array;
+  private grown = new Map<number, NonNullable<HouseholdView['lot']>>();
+  private grownLayer = new THREE.Group();
   private selection: THREE.Mesh | null = null;
 
   constructor(private readonly houses: readonly House[]) {
@@ -118,6 +124,36 @@ export class HouseLayer {
     });
   }
 
+  update(households: HouseholdView[]): void {
+    const grown = new Map<number, NonNullable<HouseholdView['lot']>>();
+    for (const h of households) {
+      if (h.lot) grown.set(h.home, h.lot);
+      else this.setLevel(h.home, h.level);
+    }
+    if (grown.size === this.grown.size && [...grown].every(([id, lot]) => {
+      const old = this.grown.get(id);
+      return old?.key === lot.key && old.design === lot.design && old.columns === lot.columns && old.rows === lot.rows;
+    })) return;
+    this.grown = grown;
+    disposeLayer(this.grownLayer);
+    const instances: BuildingInstance[] = [];
+    const gardens = new FlatMesh(0.042);
+    const driveways = new FlatMesh(0.048);
+    for (const lot of grown.values()) {
+      instances.push({ ...lot, blueprint: BLUEPRINTS.find(b => b.id === lot.design)! });
+      gardens.polygon(lot.corners);
+      driveways.ribbon(polyline([{ x: lot.streetX, y: lot.streetY }, lot]), 2.4);
+    }
+    this.grownLayer = buildBuildingLayer(instances);
+    for (const [mesh, colour] of [[gardens, PALETTE.gardens[0]], [driveways, PALETTE.roadSurface]] as const) {
+      if (mesh.empty) continue;
+      const ground = new THREE.Mesh(mesh.build(), flatMaterial(colour));
+      ground.receiveShadow = true;
+      this.grownLayer.add(ground);
+    }
+    this.group.add(this.grownLayer);
+  }
+
   /** The house whose parcel (its garden, or the house itself) contains `p`. */
   houseAt(p: Vec2): number | null {
     for (const [i, house] of this.houses.entries()) {
@@ -129,6 +165,16 @@ export class HouseLayer {
       const q = local(house, p);
       if (LEVELS[this.levels[i]! - 1]!.some((b) => q.x >= b.minX && q.x <= b.maxX && Math.abs(q.y) <= b.depth / 2)) return i;
     }
+    for (const [id, lot] of this.grown) {
+      let inside = false;
+      let prev = lot.corners.at(-1)!;
+      for (const next of lot.corners) {
+        if ((prev.y > p.y) !== (next.y > p.y)
+          && p.x < prev.x + (next.x - prev.x) * (p.y - prev.y) / (next.y - prev.y)) inside = !inside;
+        prev = next;
+      }
+      if (inside) return id;
+    }
     return null;
   }
 
@@ -139,14 +185,16 @@ export class HouseLayer {
       this.selection = null;
     }
     if (index === null) return;
-    const house = this.houses[index]!;
-    const g = house.garden;
-    const corners = g
+    const house = this.houses[index];
+    const lot = this.grown.get(index);
+    if (!house && !lot) return;
+    const g = house?.garden;
+    const corners = lot ? lot.corners : g
       ? [{ x: g.minX, y: g.minY }, { x: g.maxX, y: g.minY }, { x: g.maxX, y: g.maxY }, { x: g.minX, y: g.maxY }]
       : [{ x: -8, y: -6 }, { x: 6, y: -6 }, { x: 6, y: 6 }, { x: -8, y: 6 }].map((c) => {
-        const cos = Math.cos(house.angle);
-        const sin = Math.sin(house.angle);
-        return { x: house.x + c.x * cos - c.y * sin, y: house.y + c.x * sin + c.y * cos };
+        const cos = Math.cos(house!.angle);
+        const sin = Math.sin(house!.angle);
+        return { x: house!.x + c.x * cos - c.y * sin, y: house!.y + c.x * sin + c.y * cos };
       });
     const outline = new FlatMesh(0.3);
     outline.ribbon(polyline(corners, true), 0.35);

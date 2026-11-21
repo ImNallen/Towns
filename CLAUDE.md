@@ -12,6 +12,7 @@ pnpm check          # typecheck + unit tests. Run before saying anything is done
 pnpm test           # vitest: sim tests + architecture guard (fast, headless)
 pnpm sim            # headless sim run, prints stats + state hash
 pnpm sim --scenario straight --ticks 2400 --seed 7 --every 600
+pnpm sim --scenario meadow --paint --ticks 288000 --every 28800  # paint all live cells, report daily
 pnpm e2e            # Playwright: boots the app, saves screenshots to artifacts/screens/
 ```
 
@@ -26,9 +27,9 @@ src/sim/        Pure, deterministic simulation. No DOM, no Three.js, no React, n
   network/      Lane graph (lanes, next/prev, give-way) + drawable surfaces; NetworkBuilder validates it
   traffic/      IDM car-following, SoA vehicle storage, next-hop routing tables
   scenarios/    Map definitions (network + demand + scenery)
-  zoning/       Zone cells beside every built road, and zone strokes painted onto them (Meadow Vale only;
-                the World does not read them yet)
+  zoning/       Zone cells beside every built road, paint strokes, and residential lots beside the street (Meadow Vale only)
   world.ts      World: fixed 20 Hz tick (DT = 1/20), stats, snapshot, hash
+src/buildings/  Shared residential blueprint catalogue and deterministic design/finish picker
 src/worker/     Runs World in a Web Worker; protocol.ts defines every message
 src/render/     Three.js: camera, road meshes, scenery, instanced vehicles, debug overlay, game loop
 src/ui/         React HUD over the canvas
@@ -40,7 +41,7 @@ Data flow: `main.tsx` → `createGame` starts the worker → worker builds the s
 (the scenario, for drawing) and then a `frame` (positions, ids, stats) after each batch of ticks → the renderer
 interpolates between the last two frames. On Meadow Vale the worker also owns the ordered list of edits: roads,
 removals and zone strokes. The editor previews a placement with the same planner the worker uses to accept it.
-A zone stroke never changes the network, so the worker applies it and its undo without rebuilding the World, and both
+A zone stroke never changes the network, so the worker applies it and its undo without moving existing traffic. The World groups live painted cells into parcels and reserves driveway targets. Both
 threads derive the painted cells with `meadowZoning(edits, cells)`. Each road edit rebuilds the local lane network and maps active vehicles to their positions and destinations. If a trip cannot continue safely, the worker pauses new arrivals and retries as traffic clears.
 
 ## Rules (enforced by tests/architecture.test.ts where possible)

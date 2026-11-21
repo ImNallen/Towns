@@ -4,8 +4,6 @@ import {
   isZoneStroke, meadowLayout, meadowScenario, meadowSegments, meadowZoning, planMeadowRoad, snapToMeadowStreet,
   type MeadowEdit,
 } from '../../src/sim/scenarios/meadow';
-import type { Scenario } from '../../src/sim/scenarios/types';
-import { DT, World } from '../../src/sim/world';
 import { cellKey, decodeCellKey, findCell, type CellKey, type RoadIndex } from '../../src/sim/zoning/cells';
 import { planZoneStroke, type ZoneKind, type ZoneStroke, type Zoning } from '../../src/sim/zoning/paint';
 
@@ -167,7 +165,7 @@ describe('strokes in the edit list', () => {
     expect(keys).toEqual([...keys].sort((a, b) => a - b));
   });
 
-  it('never reach the simulation: the hash is the same with or without strokes', () => {
+  it('leave the road network unchanged', () => {
     const roadsOnly = draw([[p(-65, 62), p(-65, -44)]], draw([[p(-45, -8), p(45, 8)]]));
     let withStrokes = paint([], backRow(0, 15));
     withStrokes = draw([[p(-45, -8), p(45, 8)]], withStrokes);
@@ -175,12 +173,6 @@ describe('strokes in the edit list', () => {
     withStrokes = draw([[p(-65, 62), p(-65, -44)]], withStrokes);
     withStrokes = paint(withStrokes, [keysOn(withStrokes, 7, 3)[0]!]);
     expect(withStrokes.filter(isZoneStroke)).toHaveLength(3);
-    const run = (scenario: Scenario) => {
-      const world = new World(scenario, 3);
-      for (let t = 0; t < 120 / DT; t++) world.step();
-      return world.hash();
-    };
     expect(meadowScenario(withStrokes).network).toEqual(meadowScenario(roadsOnly).network);
-    expect(run(meadowScenario(withStrokes))).toBe(run(meadowScenario(roadsOnly)));
   });
 });

@@ -22,14 +22,15 @@ export function family(household: HouseholdView): string {
 }
 
 function memberName(town: TownView, household: number, person: number): string {
-  const h = town.households[household]!;
+  const h = town.households.find(h => h.id === household)!;
   const first = h.members.find((m) => m.id === person)?.firstName;
   return first ? `${first} ${h.surname}` : family(h);
 }
 
 function describe(event: TownEventView, town: TownView): string {
-  const household = town.households[event.household]!;
+  const household = town.households.find(h => h.id === event.household)!;
   switch (event.kind) {
+    case 'movedIn': return `${family(household)} moved into a new home`;
     case 'boughtCar': return `${family(household)} bought a ${ORDINALS[event.cars - 1] ?? 'new'} car`;
     case 'newerCar': return `${family(household)} traded up to the ${CAR_MODELS[event.model - 1]}`;
     case 'upgradedHouse': return event.level >= 3
