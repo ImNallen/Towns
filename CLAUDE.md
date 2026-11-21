@@ -29,6 +29,7 @@ Run studies with `pnpm exec tsx scripts/<name>.ts`.
 | `avenue-comparison` | Lane use on an Avenue approach and traffic in mixed-zone Meadow |
 | `grow` | Builds a North Valley town and reports simulation costs, memory, frame bytes and hashes near 150, 500 and 1,000 homes. |
 | `valley-browser` | Measures live FPS and worker ticks/s at the same milestones. Start `pnpm dev --port 5198` first. At 1,000 homes the script measures 1×, 4× and 8×. Set `VALLEY_THROTTLE=1` to repeat with 4× Chromium main-thread slowdown. |
+| `save-benchmark` | Compares replay and checkpoint load times, file sizes, and hashes for ten-day Meadow and mature 500/1,000-home Valley towns. |
 | `walker-benchmark` | Time per update for 300 moving walkers |
 
 For a retained heap snapshot at 1,000 homes, run `VALLEY_HEAP_SNAPSHOT=/tmp/valley.heapsnapshot node --expose-gc --import tsx scripts/grow.ts`.
@@ -52,6 +53,8 @@ Browser options live in `src/main.tsx`. Use `?scenario=meadow` (also `valley`, `
 `main.tsx` calls `createGame`. The worker builds the scenario and World, sends `ready` for the initial map, then publishes frames after batches of fixed ticks. The renderer interpolates positions. Town messages supply household, business, demand, and budget data for the HUD.
 
 The editor and worker share placement planners. The worker checks funds and owns each town’s ordered edit history. A road edit builds a candidate network and projects vehicles onto reachable lanes. If a vehicle loses its route or safe spacing, the worker holds new arrivals and retries. Walkers transfer to reachable pavements or return home and increment `walkersCleared`. Both threads derive paint from live cell keys and the edit history. Painting or undoing a stroke updates zoning in place.
+
+The worker captures compressed checkpoints outside the tick loop every 6,000 ticks. The save retains the tick and edit-history position of its latest complete checkpoint. The binary field order in the sim's `snapshotState` methods belongs to the save format. Update the format and its reader when changing that layout.
 
 ## Rules (enforced by tests/architecture.test.ts where possible)
 

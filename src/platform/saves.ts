@@ -35,20 +35,21 @@ async function slotTransaction(slot: Slot, json?: string): Promise<string | unde
 export const browserSaves: SaveStorage = {
   async read(slot) {
     let json;
+    let unavailable = false;
     try { json = await slotTransaction(slot); }
-    catch {
-      // Private browsing can deny IndexedDB and still permit older local slots.
-    }
+    catch { unavailable = true; }
     if (json === undefined) {
       try { json = localStorage.getItem('towns.save.' + slot); }
       catch { throw new Error('Browser storage is unavailable.'); }
     }
-    if (!json) throw new Error(slot + ' is empty.');
+    if (!json) throw new Error(unavailable ? 'Browser storage is unavailable.' : slot + ' is empty.');
     return json;
   },
   async write(slot, json) {
     try { await slotTransaction(slot, json); }
     catch { throw new Error('Could not save to browser storage. Export a file to keep your town.'); }
+    // Retire the legacy copy only after the IndexedDB transaction commits.
+    try { localStorage.removeItem('towns.save.' + slot); } catch { /* IndexedDB already holds the save. */ }
   },
   exportFile(json) {
     const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
