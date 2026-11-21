@@ -686,7 +686,7 @@ test('saves a paused town across a page reload and a file round trip', async ({ 
   expect(await page.evaluate(() => window.__towns!.save())).toBe(saved);
   await page.screenshot({ path: 'artifacts/screens/save-menu-phone.png' });
   await menu.getByLabel('Import town file').setInputFiles({
-    name: 'newer.json', mimeType: 'application/json', buffer: Buffer.from('{"version":2}'),
+    name: 'old-town.json', mimeType: 'application/json', buffer: Buffer.from('{"version":1}'),
   });
   await expect(menu.getByRole('status')).toContainText('Unsupported town save version');
   expect(await page.evaluate(() => window.__towns!.save())).toBe(saved);

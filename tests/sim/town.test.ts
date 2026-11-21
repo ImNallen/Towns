@@ -171,14 +171,17 @@ describe('Meadow Vale residents', () => {
     const restored = world.editNetwork(meadowScenario([]));
     if (!restored.ok) throw new Error(restored.reason);
     world = restored.world;
-    let refused = false;
+    let interrupted = false;
     live(world, 60, (town) => {
-      if (!refused && westWorkers(town).some((m) => m.activity === 'homebound')) {
-        expect(world.editNetwork(meadowScenario(bulldozed)).ok).toBe(false);
-        refused = true;
+      if (!interrupted && westWorkers(town).some((m) => m.activity === 'homebound')) {
+        const edit = world.editNetwork(meadowScenario(bulldozed));
+        if (!edit.ok) throw new Error(edit.reason);
+        expect(edit.world.stats().cleared).toBeGreaterThan(0);
+        expect(westWorkers(view(edit.world)).some(m => m.activity === 'homebound')).toBe(false);
+        interrupted = true;
       }
     });
-    expect(refused).toBe(true);
+    expect(interrupted).toBe(true);
     expect(westWorkers(view(world)).every((m) => m.activity === 'home')).toBe(true);
     expect(side(view(world), 'Westbrook').every((h, i) => h.wages >= wages[i]!)).toBe(true);
     expect(world.stats().lost).toBe(0);

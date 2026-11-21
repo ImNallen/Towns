@@ -595,7 +595,7 @@ export class Town {
   }
 
   /** Advance one game minute. `minute` counts from midnight before day 1. */
-  update(minute: number, roads: TownRoads, allowDepartures: boolean): void {
+  update(minute: number, roads: TownRoads): void {
     for (let h = 0; h < this.spec.homes.length; h++) {
       let density = 0;
       for (const a of this.spec.homes[h]!.access) density += roads.traffic.noiseDensity[a.lane]!;
@@ -628,7 +628,7 @@ export class Town {
         continue;
       }
       const park=this.nearestPark[this.household[p]!]!;
-      if (allowDepartures && park>=0 && this.activity[p]===HOME && this.leisureDay[p]!==day) {
+      if (park>=0 && this.activity[p]===HOME && this.leisureDay[p]!==day) {
         const opening=day%7===6 || day%7===0 ? 11*60 : 18*60;
         const departure=opening + (p*19)%100;
         if (clock>=departure && clock < departure+60 && this.pantry[this.household[p]!]!>=PANTRY_LOW) {
@@ -647,7 +647,7 @@ export class Town {
       if (phase === WALK_TO_CAR || phase === SEARCH) this.startDrive(p, roads, minute);
       else if (phase === WALK_TO_DOOR || phase === WALK_HOME) this.enterDoor(p, minute);
       else if (phase === RETURN_FAILED || phase === WALK_BACK || phase === SEEK_HOME) this.leaveRegion(p, roads, minute);
-      else if (allowDepartures && this.activity[p] === HOME) this.leaveHome(p, day, clock, roads);
+      else if (this.activity[p] === HOME) this.leaveHome(p, day, clock, roads);
       else if (this.activity[p] === AWAY && minute >= this.until[p]!) {
         if (this.at[p]! < this.spec.regions.length) { this.leaveRegion(p, roads, minute); continue; }
         if (this.driverCar[p]! < 0) {
@@ -703,10 +703,14 @@ export class Town {
       this.freightDue[h] = waiting ? minute : minute + 15;
       return true;
     }
+    this.finishFreight(h, minute);
+    return false;
+  }
+
+  private finishFreight(h: number, minute: number): void {
     this.freightState[h] = IDLE;
     const jobs = lotJobs(this.spec.homes[h]!.lot!);
     this.freightDue[h] = minute + Math.ceil(MINUTES_PER_DAY / (1 + jobs / (lotZone(this.spec.homes[h]!.lot!) === 'workplaces' ? QUALITY.freightJobsPerLoad : 2)));
-    return false;
   }
 
   private demandFor(zone: ZoneKind): number {
@@ -925,6 +929,15 @@ export class Town {
   driverDestination(p: number): number {
     if (this.target[p]! >= 0) return this.parking.firstDest + this.target[p]!;
     return this.activity[p] === HOMEBOUND ? this.homeDest + this.household[p]! : this.destination(this.at[p]!);
+  }
+
+  abandonDrive(owner: number, minute: number): void {
+    if (owner >= 0) this.abandonTrip(owner);
+    if (owner < -1) {
+      const home = -2 - owner;
+      if (this.freightState[home] === RETURNING) this.finishFreight(home, minute);
+      else this.freightState[home] = IDLE;
+    }
   }
 
   /** Return the resident and any car committed to the abandoned trip to their home. */

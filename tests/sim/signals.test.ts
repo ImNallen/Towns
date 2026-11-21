@@ -70,8 +70,8 @@ it('rests on the main green until a waiting pedestrian calls the side phase with
   const side = planMeadowRoad([],point,{x:-65,y:62});
   if(!side.ok) throw new Error(side.reason);
   const scenario = meadowScenario([side.road,{lights:point,actuated:true}]);
-  const w = new World(scenario, 1);
-  w.setAdmissions(false);
+  // Run after midnight, before residents depart for work.
+  const w = new World({ ...scenario, demand: [] }, 1, 4096, (1440 - 390 + 60) * 20);
   for(let i=0;i<1500;i++) {
     w.step();
     expect(signalAspect(0,w.signalClocks[0]!)).toBe('green');

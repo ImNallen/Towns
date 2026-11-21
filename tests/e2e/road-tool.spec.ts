@@ -85,7 +85,7 @@ test.describe('touch controls', () => {
   });
 });
 
-test('cancel a deferred undo without removing the road or its traffic', async ({ page }) => {
+test('undo a busy road while paused', async ({ page }) => {
   await page.goto('/?speed=0&x=0&y=0&mpp=0.5');
   const editor = () => page.evaluate(() => window.__towns?.editor());
   await expect.poll(editor).toMatchObject({ pending: false });
@@ -103,14 +103,16 @@ test('cancel a deferred undo without removing the road or its traffic', async ({
   await page.getByRole('button', { name: 'Pause simulation' }).click();
   const active = await stat('active');
   await page.getByRole('button', { name: 'Undo' }).click();
-  await expect(page.getByRole('button', { name: 'Resume traffic' })).toBeVisible();
-  await page.getByRole('button', { name: 'Cancel edit' }).click();
-  await expect.poll(editor).toMatchObject({ pending: false, connected: true, roadCount: 1 });
-  expect(await stat('active')).toBe(active);
-  await page.keyboard.press('4');
-  await expect.poll(() => stat('completed'), { timeout: 20_000 }).toBeGreaterThan(0);
+  await expect.poll(editor).toMatchObject({ pending: false, connected: false, roadCount: 0 });
+  expect(await stat('cleared')).toBeGreaterThan(0);
+  expect(await stat('active') + await stat('cleared')).toBe(active);
+  expect(await stat('lost')).toBe(0);
+  await page.getByText('Traffic details', { exact: true }).click();
+  const row = page.getByText('Cleared by edits', { exact: true });
+  await expect(row.locator('+ dd')).toHaveText(String(await stat('cleared')));
+  await page.screenshot({ path: 'artifacts/screens/instant-road-undo.png' });
 
-  function stat(key: 'active' | 'completed') {
+  function stat(key: 'active' | 'cleared' | 'lost') {
     return page.evaluate((name) => window.__towns?.stats()?.[name] ?? 0, key);
   }
 });

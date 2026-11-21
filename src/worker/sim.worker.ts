@@ -34,7 +34,6 @@ function ready(): void {
   accumulator = 0;
   last = performance.now();
   post({ type: 'ready', scenario: session.world.scenario, capacity: CAPACITY, edits: session.edits });
-  if (session.pending) post({ type: 'editWaiting' });
   postFrame(session.world);
   postTown(session.world);
 }
@@ -110,10 +109,6 @@ setInterval(() => {
   }
   if (steps === MAX_STEPS_PER_PUMP) accumulator = 0; // falling behind: drop time rather than spiral
   if (steps > 0) {
-    if (session.pending && (world.vehicles.count === 0 || Math.floor(world.tick / 20) !== Math.floor((world.tick - steps) / 20))) {
-      session.command({ type: 'retry' });
-      if (!session.pending) return;
-    }
     postFrame(world);
     if (now - lastTown >= TOWN_INTERVAL) postTown(world);
   }

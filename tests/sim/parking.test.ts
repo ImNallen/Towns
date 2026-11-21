@@ -102,11 +102,15 @@ describe('parking', () => {
   });
 
   it('waits at the kerb while another delivery unloads, then takes the shared bay', () => {
-    const world = new World(scenario, 1, 4096, 0, 0);
-    world.setZoning(new Map(Array.from(cells.keys, key => [key as CellKey, 'shops'])));
-    world.setAdmissions(false);
-    for (let tick = 0; tick < 6 * 28800; tick++) world.step();
-    world.setAdmissions(true);
+    // Grow neighbouring shops with their depots on the disconnected side of Meadow.
+    const town = scenario.town!;
+    const regions = town.regions.map((r, i) => ({ ...r, source: town.regions[1 - i]!.source }));
+    const isolated = new World({ ...scenario, town: { ...town, regions } }, 1, 4096, 0, 0);
+    isolated.setZoning(new Map(Array.from(cells.keys, key => [key as CellKey, 'shops'])));
+    for (let tick = 0; tick < 6 * 28800; tick++) isolated.step();
+    const connected = isolated.editNetwork(scenario);
+    if (!connected.ok) throw new Error(connected.reason);
+    const world = connected.world;
     let waiting = -1;
     for (let tick = 0; tick < 28800; tick++) {
       world.step();

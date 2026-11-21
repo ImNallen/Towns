@@ -2,10 +2,11 @@ import { ROAD_TYPES } from '../sim/network/roadTypes';
 import { isScenarioName, type ScenarioName } from '../sim/scenarios';
 import type { ToWorker } from './protocol';
 
-export type EditCommand = Exclude<ToWorker, { type: 'init' | 'save' | 'load' | 'cancelLoad' | 'setSpeed' }> | { type: 'retry' };
+export const SAVE_VERSION = 2;
+export type EditCommand = Exclude<ToWorker, { type: 'init' | 'save' | 'load' | 'cancelLoad' | 'setSpeed' }>;
 export interface InitialTown { scenario: ScenarioName; seed: number; walkLimit?: number }
 export interface ReplayEvent { tick: number; command: EditCommand }
-export interface TownSave extends InitialTown { version: 1; tick: number; events: ReplayEvent[] }
+export interface TownSave extends InitialTown { version: typeof SAVE_VERSION; tick: number; events: ReplayEvent[] }
 
 const record = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -23,7 +24,7 @@ function command(v: unknown): v is EditCommand {
     case 'bulldozeRoad': return integer(v.segment) && integer(v.editCount);
     case 'paintZone': return (v.zone === null || ['residential','shops','workplaces','parking','park'].some(use => use === v.zone))
       && Array.isArray(v.cells) && v.cells.every(integer);
-    case 'undo': case 'cancelRoadEdit': case 'retry': return true;
+    case 'undo': return true;
     default: return false;
   }
 }
@@ -32,7 +33,7 @@ export function parseSave(json: string): TownSave {
   let data: unknown;
   try { data = JSON.parse(json); } catch { throw new Error('This file is not valid JSON.'); }
   if (!record(data)) throw new Error('Invalid town save.');
-  if (data.version !== 1) throw new Error('Unsupported town save version. This game reads version 1.');
+  if (data.version !== SAVE_VERSION) throw new Error(`Unsupported town save version. This game reads version ${SAVE_VERSION}.`);
   if (typeof data.scenario !== 'string' || !isScenarioName(data.scenario) || !finite(data.seed)
     || !(data.walkLimit === undefined || (finite(data.walkLimit) && data.walkLimit >= 0))
     || !integer(data.tick) || !Array.isArray(data.events)) throw new Error('Invalid town save settings.');
@@ -44,5 +45,5 @@ export function parseSave(json: string): TownSave {
     previous = event.tick;
     return { tick: event.tick, command: event.command };
   });
-  return { version: 1, scenario: data.scenario, seed: data.seed, walkLimit: data.walkLimit, tick: data.tick, events };
+  return { version: SAVE_VERSION, scenario: data.scenario, seed: data.seed, walkLimit: data.walkLimit, tick: data.tick, events };
 }

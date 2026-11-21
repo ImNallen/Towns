@@ -52,7 +52,7 @@ it('restores a junction, actuated lights, and an avenue at distinct edit ticks',
 
 it('rejects incompatible versions and invalid edit histories', () => {
   const save = town().save();
-  expect(() => parseSave(JSON.stringify({ ...save, version: 2 }))).toThrow(/version/);
+  expect(() => parseSave(JSON.stringify({ ...save, version: 1 }))).toThrow(/version/);
   expect(() => parseSave(JSON.stringify({ ...save, events: [{ tick: 5, command: { type: 'undo' } }] }))).toThrow(/history/);
   expect(() => parseSave(JSON.stringify({ ...save, events: [{ tick: 0, command: { type: 'load' } }] }))).toThrow(/history/);
 });
@@ -68,16 +68,14 @@ it('restores parking bays, a crossing, a footpath and a park', async () => {
   await roundTrip(session);
 });
 
-it('restores a deferred bulldoze with admissions closed and then cancelled', async () => {
-  const session = createSession({ scenario: 'meadow', seed: 3 }, () => {});
+it('undoes the connecting road on tick 45 and replays the clearance at the same tick', async () => {
+  const session = town();
   session.command({ type: 'buildRoad', start: { x: -45, y: -8 }, end: { x: 45, y: 8 } });
-  while (session.world.tick < 1200) session.world.step();
-  session.command({ type: 'bulldozeRoad', editCount: 1, segment: 0 });
-  expect(session.pending).toBe(true);
-  session.command({ type: 'retry' });
-  await roundTrip(session);
-  session.command({ type: 'cancelRoadEdit' });
-  expect(session.pending).toBe(false);
+  while (session.world.tick < 45) session.world.step();
+  expect(session.world.stats().active).toBe(1);
+  session.command({ type: 'undo' });
+  expect(session.edits).toHaveLength(0);
+  expect(session.world.stats()).toMatchObject({ tick: 45, active: 0, cleared: 1, lost: 0 });
   await roundTrip(session);
 });
 
