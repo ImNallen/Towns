@@ -347,27 +347,36 @@ export class World {
     // A split can put two cars on opposite sides of a lane boundary. Check spacing
     // along each driver's new route, rather than only inside individual lanes.
     edited.buildBuckets();
-    if (allowLaneShift && this.avenueLanes) {
+    const adjusted = allowLaneShift && this.avenueLanes ? new Uint8Array(V.highWater) : undefined;
+    // Allow one tick to react, then brake comfortably to the leader's speed.
+    const brakingRoom = (slot: number, leaderSpeed: number) => {
+      const speed = edited.vehicles.v[slot]!;
+      return IDM.minGap + DT * speed + Math.max(0, speed * speed - leaderSpeed * leaderSpeed) / (2 * V.brake[slot]!);
+    };
+    if (adjusted) {
       // Narrowing can project two parallel queues onto the same carriageway.
       // Preserve their front-to-back order and leave each follower braking room.
       const next = edited.vehicles;
       for (const road of edited.lanes) {
         if (road.kind !== 'road') continue;
         const first = edited.bucketStart[road.id]!, end = first + edited.bucketCount[road.id]!;
-        let shifted = false;
         for (let k = first + 1; k < end; k++) {
           const lead = edited.order[k-1]!, car = edited.order[k]!;
+          if (V.lane[lead] === V.lane[car] && !adjusted[lead]) continue;
           const rear = next.s[lead]! - next.length[lead]!;
           const gap = rear - next.s[car]!;
-          const overlapsAfterMerge = V.lane[lead] !== V.lane[car] && gap < -1e-4;
-          shifted = overlapsAfterMerge || (shifted && gap < IDM.minGap);
-          if (!shifted) continue;
-          const front = rear - IDM.minGap;
-          if (front < 0 || edited.walkers?.graph.stops[road.id]?.some(stop =>
-            front - next.length[car]! <= stop.to && next.s[car]! >= stop.from)) return fail(car);
-          next.s[car] = front;
-          next.v[car] = Math.min(next.v[car]!, next.v[lead]!);
-          edited.laneMinRear[road.id] = Math.min(edited.laneMinRear[road.id]!, front - next.length[car]!);
+          if (gap < IDM.minGap) {
+            const front = rear - IDM.minGap;
+            if (front < 0 || edited.walkers?.graph.stops[road.id]?.some(stop =>
+              front - next.length[car]! <= stop.to && next.s[car]! >= stop.from)) return fail(car);
+            next.s[car] = front;
+            edited.laneMinRear[road.id] = Math.min(edited.laneMinRear[road.id]!, front - next.length[car]!);
+            adjusted[car] = 1;
+          }
+          if (next.v[car]! > next.v[lead]! && gap < brakingRoom(car, next.v[lead]!)) {
+            next.v[car] = next.v[lead]!;
+            adjusted[car] = 1;
+          }
         }
       }
     }
@@ -382,9 +391,15 @@ export class World {
       }
       let distance = edited.laneLen[lane]! - s;
       let next = edited.routing.nextHop(edited.vehicles.dest[slot]!, lane);
-      while (next >= 0 && distance < MAX_LENGTH) {
-        if (edited.bucketCount[next]! > 0
-          && distance + edited.vehicles.s[edited.tail(next)]! < V.length[edited.tail(next)]! - 1e-4) return fail(slot);
+      const scan = MAX_LENGTH + (adjusted ? brakingRoom(slot, 0) : 0);
+      while (next >= 0 && distance < scan) {
+        if (edited.bucketCount[next]! > 0) {
+          const leader = edited.tail(next);
+          const gap = distance + edited.vehicles.s[leader]! - V.length[leader]!;
+          if (gap < -1e-4) return fail(slot);
+          if (adjusted?.[leader] && edited.vehicles.v[slot]! > edited.vehicles.v[leader]!
+            && gap < brakingRoom(slot, edited.vehicles.v[leader]!)) return fail(slot);
+        }
         distance += edited.laneLen[next]!;
         next = edited.routing.nextHop(edited.vehicles.dest[slot]!, next);
       }

@@ -69,6 +69,11 @@ it('balances through traffic at a fork, with clear merges and repeatable choices
     w.congestionAware = false;
     const v = w.vehicles;
     const previous = new Int32Array(v.capacity);
+    const forkEntries = network.lanes[inner]!.prev.flatMap(a =>
+      network.lanes[outer]!.prev.filter(b => network.lanes[a]!.prev[0] === network.lanes[b]!.prev[0]).map(b => [a, b]));
+    expect(forkEntries.length).toBeGreaterThan(0);
+    const lastMovement = new Int32Array(v.capacity).fill(-1);
+    const lastDriver = new Int32Array(v.capacity);
     const passed = [0,0];
     let bothQueued = false;
     const occupied = new Set<number>();
@@ -81,6 +86,14 @@ it('balances through traffic at a fork, with clear merges and repeatable choices
         if (!v.alive[i]) continue;
         const lane=v.lane[i]!;
         occupied.add(lane);
+        if (network.lanes[lane]!.kind === 'connector') {
+          lastMovement[i] = lane;
+          lastDriver[i] = v.id[i]!;
+        } else if (lastDriver[i] === v.id[i] && lastMovement[i]! >= 0 && v.s[i]! < v.length[i]!
+          && network.lanes[lane]!.prev.includes(lastMovement[i]!)) {
+          // The rear still occupies the connector after the front enters the receiving lane.
+          occupied.add(lastMovement[i]!);
+        }
         if (lane===inner && v.v[i]!<1) innerQueue++;
         if (lane===outer && v.v[i]!<1) outerQueue++;
         if (previous[i]===inner && network.lanes[inner]!.next.includes(lane)) passed[0]++;
@@ -91,6 +104,9 @@ it('balances through traffic at a fork, with clear merges and repeatable choices
         }
       }
       bothQueued ||= innerQueue>=2 && outerQueue>=2;
+      for (const [a,b] of forkEntries) {
+        if (occupied.has(a!) && occupied.has(b!)) throw new Error('Overlapping fork entries at tick ' + t);
+      }
       for (const lane of occupied) for (const other of network.lanes[lane]!.crossingYieldTo) {
         if (occupied.has(other)) throw new Error('Conflicting movements at tick '+t);
       }
@@ -126,4 +142,32 @@ it('keeps drivers in the required turn lane even when the empty lane has a longe
   expect(usedInner).toBe(true);
   expect(w.stats().completed).toBe(2);
   expect(w.stats().lost).toBe(0);
+});
+
+it('leaves moving followers room to brake when two Avenue queues narrow into one', () => {
+  const ends = [{x:0, y:0}, {x:250, y:0}];
+  function street(type: 'avenue' | 'town') {
+    const {network} = buildStreetNetwork(new NetworkBuilder(), [ends], ends, [], [type]);
+    return {...meadowScenario(), town:undefined, network, demand:[]};
+  }
+  const avenue = street('avenue');
+  const world = new World(avenue, 1);
+  const [inner, outer] = avenue.network.avenuePairs![0]!;
+  world.vehicles.spawn(inner, 100, 0, 1, 0);
+  world.vehicles.spawn(outer, 100, 0, 1, 0);
+  world.vehicles.spawn(inner, 83, 12, 1, 0);
+  world.vehicles.spawn(inner, 61, 12, 1, 0);
+  const edit = world.editNetwork(street('town'), undefined, true);
+  if (!edit.ok) throw new Error(edit.reason);
+  const v = edit.world.vehicles;
+  for (let tick = 0; tick < 1600; tick++) {
+    edit.world.step();
+    for (let i = 0; i < v.highWater; i++) for (let j = 0; j < i; j++) {
+      if (!v.alive[i] || !v.alive[j] || v.lane[i] !== v.lane[j]) continue;
+      const leader = v.s[i]! > v.s[j]! ? i : j;
+      if (Math.abs(v.s[i]! - v.s[j]!) < v.length[leader]! - 1e-4) throw new Error('Overlap after narrowing at tick ' + tick);
+    }
+  }
+  expect(edit.world.stats().completed).toBe(4);
+  expect(edit.world.stats().lost).toBe(0);
 });
