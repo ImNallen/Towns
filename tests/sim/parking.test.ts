@@ -116,6 +116,31 @@ describe('parking', () => {
     throw new Error('Expected the queued delivery to acquire its loading bay');
   });
 
+  it('turns shoppers away from a shop without bays, then serves them with two public spaces', () => {
+    const paint = new Map<CellKey, LandUse>([[524392 as CellKey, 'shops']]);
+    const run = () => {
+      const world = new World(scenario, 1);
+      world.setZoning(paint);
+      let visits = 0, refusedShopper = false;
+      for (let tick = 0; tick < 5 * 28800; tick++) {
+        world.step();
+        if (tick % 100) continue;
+        const view = world.townView()!;
+        refusedShopper ||= view.events.some(e => e.kind === 'parkingFailed' && e.shopper);
+        visits = Math.max(visits, view.businesses[0]?.customers ?? 0);
+      }
+      expect(world.stats().lost).toBe(0);
+      return { visits, refusedShopper, refusals: world.townView()!.parking.turnedAway };
+    };
+    const before = run();
+    expect(before.visits).toBe(0);
+    expect(before.refusedShopper).toBe(true);
+    paint.set(524400 as CellKey, 'parking');
+    const after = run();
+    expect(after.visits).toBeGreaterThan(0);
+    expect(after.refusals).toBeLessThan(before.refusals);
+  });
+
   it('circles full destinations, reports failures, and serves more drivers with a lot', () => {
     const mixed = new Map<CellKey, LandUse>();
     for (const raw of cells.keys) {
