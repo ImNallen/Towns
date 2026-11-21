@@ -1,8 +1,9 @@
 import { walkChance } from '../../src/sim/town/mode';
 import { expect, it } from 'vitest';
+import { polyline } from '../../src/sim/math/polyline';
 import { NetworkBuilder } from '../../src/sim/network/builder';
 import { buildStreetNetwork } from '../../src/sim/network/streets';
-import { WalkingNetwork, Walkers } from '../../src/sim/network/walking';
+import { WalkingNetwork, Walkers, WALK_EDIT_SNAP_METRES } from '../../src/sim/network/walking';
 import { meadowScenario } from '../../src/sim/scenarios/meadow';
 import { World } from '../../src/sim/world';
 import { decodeCellKey, type CellKey } from '../../src/sim/zoning/cells';
@@ -78,34 +79,90 @@ it('weighs route length, grocery loads, children, accessible cars and car owners
   }
 });
 
-it('defers a moved pavement until walkers clear the edited road', () => {
-  const scenario=meadowScenario();
-  const world=new World(scenario,1);
-  const zoning=new Map(Array.from(scenario.zones!.keys,raw=>{
-    const key=raw as CellKey,{column,side}=decodeCellKey(key);
-    const band=(column+2*side)%6;
-    return [key,band<3?'residential':band===3?'shops':'workplaces'] as const;
+it('resumes a mid-pavement trip at the nearest reachable point within the edit radius', () => {
+  const graphAt = (y: number) => {
+    const alignment = street.map(line => line.map(p => ({ x: p.x, y: p.y + y })));
+    return new WalkingNetwork(buildStreetNetwork(new NetworkBuilder(), alignment, []).network, doors, []);
+  };
+  const old = new Walkers(graphAt(0), 1);
+  old.start(0, 0, 1, 30);
+  for (let t = 0; t < 500; t++) old.step(0.05);
+  const [x, y] = old.positions();
+  const shifted = new Walkers(graphAt(WALK_EDIT_SNAP_METRES), 1);
+  expect(shifted.restore(0, old, 1)).toBe(true);
+  expect(shifted.positions()[0]).toBeCloseTo(x!);
+  expect(shifted.positions()[1]).toBeCloseTo(y! + WALK_EDIT_SNAP_METRES);
+  for (let t = 0; t < 2000 && shifted.count; t++) shifted.step(0.05);
+  expect(shifted.count).toBe(0);
+  expect(shifted.node[0]).toBe(shifted.graph.places[1]);
+  expect(new Walkers(graphAt(WALK_EDIT_SNAP_METRES + 0.1), 1).restore(0, old, 1)).toBe(false);
+});
+
+it('stays on its segment when a new shortcut changes both endpoint routes', () => {
+  const a = { x: 0, y: 0 }, b = { x: 20, y: 0 }, door = { x: 10, y: 10 };
+  const graph = (lines: typeof a[][]) => new WalkingNetwork({
+    lanes: [], sinks: [], sources: [],
+    surfaces: lines.map((points, id) => ({ id, style: 'footpath', width: 2, centerline: polyline(points) })),
+  }, [a, door], []);
+  const before = new Walkers(graph([[a, b], [b, door]]), 1);
+  before.start(0, 0, 1, 30);
+  before.step(12);
+  const changed = graph([[a, b], [b, door], [a, door]]);
+  const snapped = new Walkers(changed, 1);
+  expect(snapped.restore(0, before, 1)).toBe(true);
+  expect(snapped.positions()).toEqual(before.positions());
+  snapped.step(1);
+  const again = new Walkers(changed, 1);
+  expect(again.restore(0, snapped, 1)).toBe(true);
+  expect(again.positions()).toEqual(snapped.positions());
+  expect(again.positions()[0]).toBeGreaterThan(before.positions()[0]!);
+  for (let t = 0; t < 1000 && again.count; t++) again.step(0.05);
+  expect(again.node[0]).toBe(changed.places[1]);
+  expect(again.count).toBe(0);
+});
+
+it('applies a road upgrade during a walk and counts trips cleared by pavement removal', () => {
+  const scenario = meadowScenario();
+  const world = new World(scenario, 1);
+  const zoning = new Map(Array.from(scenario.zones!.keys, raw => {
+    const key = raw as CellKey, { column, side } = decodeCellKey(key);
+    const band = (column + 2 * side) % 6;
+    return [key, band < 3 ? 'residential' : band === 3 ? 'shops' : 'workplaces'] as const;
   }));
   world.setZoning(zoning);
-  const upgraded=meadowScenario([{upgrade:1,roadType:'parking'}]);
-  for (let t=0;t<100000;t++) {
-    world.step();
-    if(t%100 || !world.walkers!.count) continue;
-    const result=world.editNetwork(upgraded);
-    if(result.ok || !result.reason.includes('walking')) continue;
-    const before=world.walkers!.count;
-    expect(before).toBeGreaterThan(0);
-    world.setAdmissions(false);
-    for(let wait=0;wait<28800;wait++) {
-      world.step();
-      if(wait%20 || world.walkers!.count || world.vehicles.count) continue;
-      expect(world.editNetwork(upgraded).ok).toBe(true);
-      expect(world.stats().lost).toBe(0);
-      return;
-    }
-    throw new Error('Active trips failed to drain');
+  const upgrade = meadowScenario([{ upgrade: 1, roadType: 'parking' }]);
+  const removal = meadowScenario([{ upgrade: 1, roadType: 'country' }]);
+  for (let t = 0; t < 30501; t++) world.step();
+  const before = world.walkers!.positions();
+  const upgraded = world.editNetwork(upgrade);
+  if (!upgraded.ok) throw new Error(upgraded.reason);
+  const after = upgraded.world.walkers!.positions();
+  expect(upgraded.world.tick).toBe(world.tick);
+  expect(upgraded.world.stats()).toMatchObject({ walkersCleared: 0, lost: 0 });
+  expect(after.length).toBe(before.length);
+  const distances = [];
+  for (let i = 0; i < after.length; i += 3) {
+    expect(after[i + 2]).toBe(before[i + 2]);
+    distances.push(Math.hypot(after[i]! - before[i]!, after[i + 1]! - before[i + 1]!));
   }
-  throw new Error('Expected an active pavement to defer the edit');
+  expect(Math.max(...distances)).toBeGreaterThan(1);
+  expect(Math.max(...distances)).toBeLessThanOrEqual(WALK_EDIT_SNAP_METRES);
+  const removed = world.editNetwork(removal);
+  if (!removed.ok) throw new Error(removed.reason);
+  const stats = removed.world.stats();
+  expect(stats.walkersCleared).toBeGreaterThan(0);
+  expect(stats.walkers + stats.walkersCleared).toBe(world.walkers!.count);
+  for (const [scenario, edited] of [[upgrade, upgraded.world], [removal, removed.world]] as const) {
+    const replay = world.editNetwork(scenario);
+    if (!replay.ok) throw new Error(replay.reason);
+    for (let i = 0; i < 2400; i++) {
+      edited.step();
+      replay.world.step();
+    }
+    expect(replay.world.hash()).toBe(edited.hash());
+    expect(edited.stats().lost).toBe(0);
+  }
+  expect(removed.world.stats().walkersCleared).toBe(stats.walkersCleared);
 });
 
 it('repairs routes around changed pavement and preserves cold-build routing ties', () => {

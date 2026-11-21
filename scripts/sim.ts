@@ -55,6 +55,7 @@ const fmt = (st: SimStats): string =>
     `stopped=${(st.stoppedShare * 100).toFixed(0).padStart(3)}%`,
     `trip=${st.meanTripTime.toFixed(1)}s`,
     `deliveries=${st.deliveries}`,
+    `walkers-cleared=${st.walkersCleared}`,
     `lost=${st.lost}`,
   ].join('  ');
 

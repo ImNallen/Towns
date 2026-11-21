@@ -38,6 +38,7 @@ const SPAWN_SPACING = IDM.minGap + 3;
 
 export interface SimStats {
   walkers: number;
+  walkersCleared: number;
   activeZebras: number;
   zebraWaits: number;
   tick: number;
@@ -190,7 +191,7 @@ export class World {
     }
   }
 
-  private installLots(zoning: Zoning, previous: Town): boolean {
+  private installLots(zoning: Zoning, previous: Town): void {
     const base = this.scenario.town!;
     this.zoning = zoning;
     const occupied = previous.occupiedLots();
@@ -214,7 +215,7 @@ export class World {
     const bays = parkingBays(this.scenario, homes, zoning);
     this.routing = new Routing(this.network, [...homes.map(home => home.access), ...bays.map(b => b.access)]);
     this.town = new Town({ ...base, homes }, this.routing.sinks.length, 0, this.routing, new Parking(bays, this.routing.sinks.length + homes.length), this.scenario.decor.houses, this.network, this.walkLimit, base.homes.length, previous.walkers.graph.routing, parksOn(this.scenario.zones,zoning));
-    return this.town.copyFrom(previous, this.routing, this.minute());
+    this.town.copyFrom(previous, this.routing, this.minute());
   }
 
   /**
@@ -228,10 +229,8 @@ export class World {
       return { ok: false, reason: 'The edited map must keep every home.' };
     }
     if (this.town) {
-      const preserveWalks = zoning.size || this.town.spec.homes.length > scenario.town!.homes.length
-        ? edited.installLots(zoning, this.town)
-        : edited.town!.copyFrom(this.town, edited.routing, this.minute());
-      if (!preserveWalks) return { ok: false, reason: 'A resident is still walking on the affected pavement.' };
+      if (zoning.size || this.town.spec.homes.length > scenario.town!.homes.length) edited.installLots(zoning, this.town);
+      else edited.town!.copyFrom(this.town, edited.routing, this.minute());
     }
     const V = this.vehicles;
     const sinkCount = this.routing.sinks.length;
@@ -586,7 +585,7 @@ export class World {
         const nh = this.routing.nextHop(d, L);
         if (nh < 0) {
           this.lost++;
-          if (owner[i]! >= 0) this.town?.lost(owner[i]!);
+          if (owner[i]! >= 0) this.town?.abandonTrip(owner[i]!);
           V.despawn(i);
           break;
         }
@@ -718,6 +717,7 @@ export class World {
       zebraWaits: this.zebraWaits(),
       activeZebras: this.walkers?.graph.crossings.filter(c => c.zebra && c.occupied).length ?? 0,
       walkers: this.walkers?.count ?? 0,
+      walkersCleared: this.walkers?.cleared ?? 0,
       active: V.count,
       spawned: this.spawned,
       completed: this.completed,
