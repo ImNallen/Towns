@@ -1,3 +1,6 @@
+import { NetworkBuilder } from '../../src/sim/network/builder';
+import { polyline } from '../../src/sim/math/polyline';
+import { TrafficConditions } from '../../src/sim/traffic/conditions';
 import { expect, it } from 'vitest';
 import { studyTown, type TownLayout } from '../../scripts/town-layout';
 
@@ -55,3 +58,37 @@ it('meters workplace lorries using the same service entrance', () => {
   expect(deliveries).toBeGreaterThan(0);
   expect(deliveries).toBeLessThanOrEqual(3);
 }, 30000);
+
+it('preserves roadside noise and household happiness across a live network rebuild', () => {
+  const w = studyTown('Jammed');
+  for (let i = 0; i < 28800; i++) w.step();
+  const edit = w.editNetwork(w.scenario);
+  if (!edit.ok) throw new Error(edit.reason);
+  const edited = edit.world;
+  expect(Math.max(...w.traffic.noiseDensity)).toBeGreaterThan(0.04);
+  for (let i = 0; i < w.traffic.noiseDensity.length; i++) {
+    expect(edited.traffic.noiseDensity[i]).toBeCloseTo(w.traffic.noiseDensity[i]!, 5);
+  }
+  w.step(); edited.step();
+  expect(edited.townView()!.households.map(h => h.happiness)).toEqual(w.townView()!.households.map(h => h.happiness));
+});
+
+it('remaps a noisy road onto split lanes without giving a new branch its traffic history', () => {
+  function network(split: boolean) {
+    const b = new NetworkBuilder();
+    const street = (x: number, to: number, y = 0) => b.addLane('road', polyline([{x, y: 0}, {x: to, y}]), 12);
+    if (split) {
+      const left = street(0, 20);
+      b.connect(left, street(20, 80));
+      b.connect(left, street(20, 20, 40));
+    } else street(0, 80);
+    return new TrafficConditions(b.build());
+  }
+  const before = network(false), split = network(true);
+  before.noiseDensity[0] = 0.125;
+  split.copyNoiseFrom(before);
+  expect([...split.noiseDensity]).toEqual([0.125, 0.125, 0]);
+  split.noiseDensity[1] = 0.25;
+  before.copyNoiseFrom(split);
+  expect(before.noiseDensity[0]).toBe(0.21875);
+});

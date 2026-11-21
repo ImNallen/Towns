@@ -328,6 +328,7 @@ export class World {
         next = edited.routing.nextHop(edited.vehicles.dest[slot]!, next);
       }
     }
+    edited.traffic.copyNoiseFrom(this.traffic);
     edited.rng.copyFrom(this.rng);
     if (!this.town) edited.town = null;
     edited.admissionsOpen = this.admissionsOpen;
