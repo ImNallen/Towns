@@ -1,3 +1,4 @@
+import { ROAD_ORDER, ROAD_TYPES, type RoadType } from '../sim/network/roadTypes';
 import { useEffect, useState } from 'react';
 import type { Game } from '../render/game';
 import { ZONE_KINDS, type ZoneKind } from '../sim/zoning/paint';
@@ -48,6 +49,11 @@ export function App({ game }: { game: Game }) {
     game.setTool(tool);
     setEditor(game.editor());
   };
+  const pickType = (type: RoadType) => {
+    game.setRoadType(type);
+    setEditor(game.editor());
+  };
+  const roadPicker = editor && ['road', 'curve', 'upgrade'].includes(editor.tool);
   const changeBrush = (brush: ZoneKind | null): void => {
     game.setBrush(brush);
     setEditor(game.editor());
@@ -78,6 +84,10 @@ export function App({ game }: { game: Game }) {
         if (selected !== null && !editor?.chaining && !editor?.canCancel) selectHouse(null);
       } else if (editor?.tool === 'zone' && ['h', 's', 'w', 'e'].includes(e.key.toLowerCase())) {
         changeBrush(ZONE_KINDS['hswe'.indexOf(e.key.toLowerCase())] ?? null);
+      } else if (roadPicker && ['5', '6', '7'].includes(e.key)) {
+        pickType(ROAD_ORDER[Number(e.key) - 5]!);
+      } else if (editor && e.key.toLowerCase() === 'u') {
+        changeTool('upgrade');
       } else if (editor && e.key.toLowerCase() === 'r') {
         changeTool('road');
       } else if (editor && e.key.toLowerCase() === 'c') {
@@ -107,6 +117,7 @@ export function App({ game }: { game: Game }) {
     ? 'Updating roads…'
     : editor?.tool === 'pan' ? 'Drag the map to pan.'
     : editor?.tool === 'bulldoze' ? 'Select a street segment to remove.'
+    : editor?.tool === 'upgrade' ? 'Choose a road type, then click a segment.'
     : editor?.tool === 'curve' ? 'Drag between two points, then place the bend.'
     : editor?.tool === 'zone' ? (editor.brush
       ? 'Drag along the plots beside a street to zone them. Plots fill in toward the street.'
@@ -177,7 +188,11 @@ export function App({ game }: { game: Game }) {
 
       {editor && <section className="editor" aria-label="Road editor">
         <div className="placement-info panel">
-          {editor.cost !== null && <strong className="preview-cost">Costs {money(editor.cost)}</strong>}
+          {roadPicker && <label className="road-picker">Road type <select value={editor.roadType}
+            onChange={event => { const type = ROAD_ORDER[event.target.selectedIndex]; if (type) pickType(type); }}>
+            {ROAD_ORDER.map((type, i) => <option key={type} value={type}>{ROAD_TYPES[type].name} · {i + 5}</option>)}
+          </select></label>}
+          {editor.cost !== null && <strong className="preview-cost">{editor.cost < 0 ? 'Refund' : 'Costs'} {money(Math.abs(editor.cost))}</strong>}
           <p role="status" aria-live="polite">{instruction}</p>
           {editor.canCancel && editor.pending && speed === 0 && <button className="cancel-edit" onClick={() => changeSpeed(lastSpeed)}>Resume traffic</button>}
           {editor.canCancel && <button className="cancel-edit" onClick={() => game.cancelRoadEdit()}>Cancel edit</button>}
@@ -206,6 +221,9 @@ export function App({ game }: { game: Game }) {
           </button>
           <button aria-label="Build curved road" aria-pressed={editor.tool === 'curve'} aria-keyshortcuts="C" className={editor.tool === 'curve' ? 'active tool' : 'tool'} onClick={() => changeTool('curve')} title="Build curved road (C)">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2 16C13 16 5 4 18 4M2 12c7 0 1-12 16-12" /></svg><span>Curve</span><kbd>C</kbd>
+          </button>
+          <button aria-label="Upgrade road" aria-pressed={editor.tool === 'upgrade'} aria-keyshortcuts="U" className={editor.tool === 'upgrade' ? 'active tool' : 'tool'} onClick={() => changeTool('upgrade')} title="Upgrade road (U)">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 16V5m-3 3 3-3 3 3m7-4v11m-3-3 3 3 3-3" /></svg><span>Upgrade</span><kbd>U</kbd>
           </button>
           <button aria-label="Bulldoze road" aria-pressed={editor.tool === 'bulldoze'} aria-keyshortcuts="B" className={editor.tool === 'bulldoze' ? 'active tool bulldoze' : 'tool bulldoze'} onClick={() => changeTool('bulldoze')} title="Bulldoze road (B)">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 12V8h6l2 4M5 8V5h4l1 3m2 5 3 1m1-6v6l2 2h-3l-1-3"/><rect x="2" y="12" width="10" height="4" rx="2"/></svg><span>Bulldoze</span><kbd>B</kbd>

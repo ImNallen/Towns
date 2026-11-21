@@ -1,7 +1,7 @@
 import { endOf, sampleAt, startOf, type PathSample } from './math/polyline';
 import type { Lane, Network } from './network/types';
 import { Rng } from './rng';
-import { zonedLots } from './zoning/lots';
+import { sameParcel, zonedLots } from './zoning/lots';
 import type { Zoning } from './zoning/paint';
 import { accessPoints } from './scenarios/meadow';
 import type { Scenario } from './scenarios/types';
@@ -174,19 +174,19 @@ export class World {
     this.zoning = zoning;
     const occupied = previous.occupiedLots();
     const lots = zonedLots(this.scenario, zoning, occupied);
-    const surviving = new Set(lots);
+    const surviving = new Map(lots.map(lot => [lot.key, lot]));
     const homes = [...base.homes];
     const free: number[] = [];
-    const occupiedSlots = new Map<(typeof lots)[number], number>();
+    const occupiedSlots = new Map<(typeof lots)[number]['key'], number>();
     for (let h = homes.length; h < previous.spec.homes.length; h++) {
       const lot = previous.spec.homes[h]!.lot;
-      if (lot && surviving.has(lot)) occupiedSlots.set(lot, h);
+      if (lot && sameParcel(lot, surviving.get(lot.key))) occupiedSlots.set(lot.key, h);
       else free.push(h);
       homes.push({ access: [], region: 0 });
     }
     let used = 0;
     for (const lot of lots) {
-      const h = occupiedSlots.get(lot) ?? free[used++] ?? homes.length;
+      const h = occupiedSlots.get(lot.key) ?? free[used++] ?? homes.length;
       const access = accessPoints(this.network, { x: lot.streetX, y: lot.streetY });
       homes[h] = { lot, access, region: lot.streetX < 0 ? 0 : 1 };
     }

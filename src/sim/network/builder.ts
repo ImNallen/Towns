@@ -7,6 +7,7 @@ import type { Lane, LaneKind, Network, Surface, SurfaceStyle } from './types';
 const CONNECTION_TOLERANCE = 0.25;
 
 export interface RoadOptions {
+  roadType?: Surface['roadType'];
   width: number;
   laneWidth: number;
   speedLimit: number;
@@ -42,9 +43,9 @@ export class NetworkBuilder {
     this.lane(lane).crossingYieldTo.push(...priority);
   }
 
-  addSurface(style: SurfaceStyle, centerline: Polyline, width: number): number {
+  addSurface(style: SurfaceStyle, centerline: Polyline, width: number, roadType?: Surface['roadType']): number {
     const id = this.surfaces.length;
-    this.surfaces.push({ id, style, centerline, width });
+    this.surfaces.push({ id, style, centerline, width, roadType });
     return id;
   }
 
@@ -56,7 +57,7 @@ export class NetworkBuilder {
     const half = opts.laneWidth / 2;
     const forward = this.addLane('road', offsetPolyline(centerline, -half), opts.speedLimit);
     const backward = this.addLane('road', offsetPolyline(reversePolyline(centerline), -half), opts.speedLimit);
-    this.addSurface('twoWay', centerline, opts.width);
+    this.addSurface('twoWay', centerline, opts.width, opts.roadType);
     return { forward, backward };
   }
 

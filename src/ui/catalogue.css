@@ -13,3 +13,5 @@ html:has(.catalogue), body:has(.catalogue) { height: auto; overflow: visible; }
 .catalogue figcaption { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 7px; }
 .catalogue figcaption span { color: var(--muted); }
 .catalogue canvas { width: 100%; height: auto; display: block; }
+.road-section { display: flex; justify-content: center; align-items: stretch; margin: 16px 0; }
+.road-section span { text-align: center; padding: 12px 0; font-size: 11px; border: 1px solid var(--line); }

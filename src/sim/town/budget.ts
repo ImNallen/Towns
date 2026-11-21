@@ -1,16 +1,20 @@
+import { ROAD_TYPES } from '../network/roadTypes';
 import { polyline } from '../math/polyline';
-import { isZoneStroke, meadowSegments, type MeadowEdit } from '../scenarios/meadow';
+import { isZoneStroke, meadowSegmentInfo, type MeadowEdit } from '../scenarios/meadow';
 
 import { BUDGET } from './economy';
 
 /** Signed cost in whole dollars, based on the geometry before the edit. */
 export function editCost(previous: readonly MeadowEdit[], edit: MeadowEdit): number {
   if (isZoneStroke(edit)) return edit.zone ? edit.cells.length * BUDGET.zonePerCell : 0;
-  if ('remove' in edit) {
-    const length = polyline(meadowSegments(previous)[edit.remove]!).length;
-    return -Math.round(length * BUDGET.roadPerMetre * BUDGET.salvageShare);
+  if ('remove' in edit || 'upgrade' in edit) {
+    const segment = meadowSegmentInfo(previous)['remove' in edit ? edit.remove : edit.upgrade]!;
+    const before = ROAD_TYPES[segment.roadType].cost;
+    const after = 'remove' in edit ? 0 : ROAD_TYPES[edit.roadType].cost;
+    const delta = (segment.to - segment.from) * (after - before);
+    return delta < 0 ? -Math.round(-delta * BUDGET.salvageShare) : Math.round(delta);
   }
-  return Math.round(polyline(edit.points).length * BUDGET.roadPerMetre);
+  return Math.round(polyline(edit.points).length * ROAD_TYPES[edit.roadType ?? 'town'].cost);
 }
 
 /** Undo uses the same pre-edit geometry that determined the original invoice. */
@@ -44,9 +48,9 @@ export class Treasury {
     return undefined;
   }
 
-  close(roadMetres: number): void {
+  close(upkeep: number): void {
     const day = this.today;
-    day.upkeep = Math.round(roadMetres * BUDGET.upkeepPerMetre);
+    day.upkeep = upkeep;
     this.balance += day.homes + day.shops + day.workplaces - day.upkeep;
     Object.assign(this.yesterday, day);
     day.building = day.homes = day.shops = day.workplaces = day.upkeep = 0;

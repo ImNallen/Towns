@@ -1,3 +1,4 @@
+import type { RoadType } from './roadTypes';
 import type { Polyline } from '../math/polyline';
 
 export type LaneKind = 'road' | 'connector' | 'ring';
@@ -25,9 +26,10 @@ export interface Lane {
 }
 
 /** Drawable road surface. Purely visual; traffic only uses lanes. */
-export type SurfaceStyle = 'twoWay' | 'oneWay' | 'junction' | 'driveway';
+export type SurfaceStyle = 'twoWay' | 'oneWay' | 'junction' | 'driveway' | 'parking' | 'pavement';
 
 export interface Surface {
+  readonly roadType?: RoadType;
   readonly id: number;
   readonly style: SurfaceStyle;
   readonly centerline: Polyline;

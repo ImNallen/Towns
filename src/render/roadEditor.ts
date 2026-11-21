@@ -1,3 +1,4 @@
+import { edgeOffset, ROAD_TYPES, type RoadType } from '../sim/network/roadTypes';
 import { BUDGET } from '../sim/town/economy';
 import { editCost, shortage } from '../sim/town/budget';
 import * as THREE from 'three';
@@ -16,9 +17,10 @@ import { PALETTE } from './palette';
 import { buildRoads } from './roads';
 import { buildStrokePreview } from './zones';
 
-export type MapTool = 'road' | 'curve' | 'bulldoze' | 'zone' | 'pan';
+export type MapTool = 'road' | 'curve' | 'upgrade' | 'bulldoze' | 'zone' | 'pan';
 export interface EditorState {
   tool: MapTool;
+  roadType: RoadType;
   roadCount: number;
   connected: boolean;
   hint: string;
@@ -53,7 +55,7 @@ export interface HousePicker {
 type EditPhase =
   | { kind: 'idle' }
   | { kind: 'drawing'; id: number; host: StreetPoint | undefined; start: Vec2; press: Vec2; pointer: PointerEvent }
-  | { kind: 'removing'; id: number; segment: number; press: Vec2 }
+  | { kind: 'editingSegment'; id: number; segment: number; press: Vec2 }
   /** A press on a house (or, with the pan tool, on open ground) that selects it if released in place. */
   | { kind: 'selecting'; id: number; house: number | null; press: Vec2 }
   | { kind: 'bending'; start: Vec2; end: Vec2; id: number | null }
@@ -94,6 +96,7 @@ function buildBoundary(): THREE.Mesh {
 }
 
 export class RoadEditor {
+  private roadType: RoadType = 'town';
   private balance: number = BUDGET.startingBalance;
 
   setBalance(balance: number): void {
@@ -106,6 +109,7 @@ export class RoadEditor {
   private cells: ZoneCells = { count: 0, keys: new Float64Array(), corners: new Float64Array() };
   private zoning: Zoning = new Map();
   private brush: ZoneKind | null = 'residential';
+  private segmentTypes: readonly RoadType[] = [];
   private segments: readonly (readonly Vec2[])[] = [];
   private highlightedSegment: number | null = null;
   private roadCount = 0;
@@ -145,7 +149,7 @@ export class RoadEditor {
     canvas.addEventListener('pointerleave', () => {
       this.hover.visible = false;
       this.move = null;
-      if (this.tool === 'bulldoze' && this.phase.kind === 'idle') this.highlight(null);
+      if ((this.tool === 'bulldoze' || this.tool === 'upgrade') && this.phase.kind === 'idle') this.highlight(null);
       if (this.tool === 'zone' && this.phase.kind === 'idle') this.previewStroke([], this.brush, '');
     }, { signal });
     canvas.addEventListener('pointerup', (e) => this.point(e, true), { signal });
@@ -160,7 +164,7 @@ export class RoadEditor {
   state(): EditorState {
     const kind = this.phase.kind;
     return {
-      tool: this.tool, cost: this.cost, hint: this.hint, roadCount: this.roadCount, connected: this.connected,
+      tool: this.tool, roadType: this.roadType, cost: this.cost, hint: this.hint, roadCount: this.roadCount, connected: this.connected,
       angleSnapping: this.angleSnapping, chaining: kind === 'chaining',
       pending: kind === 'pending' || kind === 'waiting',
       canCancel: kind === 'bending' || kind === 'waiting',
@@ -170,7 +174,7 @@ export class RoadEditor {
   }
 
   canPan(e: PointerEvent): boolean {
-    return this.phase.kind !== 'drawing' && this.phase.kind !== 'removing' && this.phase.kind !== 'painting' && (this.tool === 'pan' || e.button !== 0);
+    return this.phase.kind !== 'drawing' && this.phase.kind !== 'editingSegment' && this.phase.kind !== 'painting' && (this.tool === 'pan' || e.button !== 0);
   }
 
   setAngleSnapping(enabled: boolean): void {
@@ -185,6 +189,12 @@ export class RoadEditor {
     this.canvas.dataset.tool = tool;
     this.handles.visible = tool === 'road' || tool === 'curve';
     this.boundary.visible = tool !== 'pan';
+  }
+
+  setRoadType(type: RoadType): void {
+    this.roadType = type;
+    this.highlightedSegment = null;
+    this.move = this.pointer;
   }
 
   setBrush(brush: ZoneKind | null): void {
@@ -203,9 +213,11 @@ export class RoadEditor {
     const layout = meadowLayout(edits);
     this.streets = layout.streets;
     this.segments = layout.segments;
+    this.segmentTypes = layout.segmentTypes;
     this.connected = layout.connected;
     this.finish();
-    if (latest && 'remove' in latest) this.hint = 'Segment removed. Undo to restore it.';
+    if (latest && 'upgrade' in latest) this.hint = 'Changed segment to ' + ROAD_TYPES[latest.roadType].name + '.';
+    else if (latest && 'remove' in latest) this.hint = 'Segment removed. Undo to restore it.';
     else if (latest && isZoneStroke(latest)) {
       this.hint = latest.zone ? `Zoned ${plots(latest.cells.length)} ${latest.zone}. Undo to remove them.` : `Cleared ${plots(latest.cells.length)}.`;
     }
@@ -280,12 +292,12 @@ export class RoadEditor {
   }
 
   private segmentAt(cursor: Vec2): number | null {
-    let reach = MEADOW_ROAD_WIDTH / 2 + Math.min(2, 4 * this.camera.mpp);
+    let reach = Infinity;
     let nearest: number | null = null;
     for (const [index, points] of this.segments.entries()) {
       for (let i = 1; i < points.length; i++) {
         const gap = distance(cursor, projectOntoSegment(cursor, points[i - 1]!, points[i]!));
-        if (gap >= reach) continue;
+        if (gap >= reach || gap > edgeOffset(this.segmentTypes[index]!, 'left') + Math.min(2, 4 * this.camera.mpp)) continue;
         nearest = index;
         reach = gap;
       }
@@ -298,7 +310,14 @@ export class RoadEditor {
     this.clearPreview();
     this.highlightedSegment = segment;
     this.hint = segment === null ? '' : 'Click to remove this segment.';
-    if (segment !== null) this.guide(polyline(this.segments[segment]!), PALETTE.editorInvalid, MEADOW_ROAD_WIDTH);
+    if (segment !== null && this.tool === 'upgrade') {
+      const edit = { upgrade: segment, roadType: this.roadType };
+      this.preview = buildRoads(meadowNetwork([...this.edits, edit]), 'dashed');
+      this.scene.add(this.preview);
+      this.setRoadVisibility(false);
+      this.cost = editCost(this.edits, edit);
+      this.hint = 'Click to change this segment to ' + ROAD_TYPES[this.roadType].name + '.';
+    } else if (segment !== null) this.guide(polyline(this.segments[segment]!), PALETTE.editorInvalid, MEADOW_ROAD_WIDTH);
   }
 
   private roadGuide(host: StreetPoint | undefined, start: Vec2, cursor: Vec2, snap: StreetPoint | undefined): AngleGuide | undefined {
@@ -365,11 +384,11 @@ export class RoadEditor {
       this.previewStroke(touched, this.brush, 'Release');
       return;
     }
-    if (this.tool === 'bulldoze') {
+    if (this.tool === 'bulldoze' || this.tool === 'upgrade') {
       const segment = this.segmentAt(cursor);
       this.highlight(segment);
       if (segment !== null) {
-        this.phase = { kind: 'removing', id: e.pointerId, segment, press: { x: e.clientX, y: e.clientY } };
+        this.phase = { kind: 'editingSegment', id: e.pointerId, segment, press: { x: e.clientX, y: e.clientY } };
         this.canvas.setPointerCapture(e.pointerId);
       }
       return;
@@ -388,7 +407,7 @@ export class RoadEditor {
 
   /** A house under the cursor that a click selects rather than starting a road from a nearby street. */
   private clickableHouse(cursor: Vec2): number | null {
-    if (this.tool === 'bulldoze' || this.tool === 'zone') return null;
+    if ((this.tool === 'bulldoze' || this.tool === 'upgrade') || this.tool === 'zone') return null;
     const house = this.houses.houseAt(cursor);
     return house !== null && (this.tool === 'pan' || !this.snap(cursor)) ? house : null;
   }
@@ -413,14 +432,15 @@ export class RoadEditor {
       else if (this.hint === HOUSE_HINT) this.hint = '';
     }
     if (this.tool === 'pan') return;
-    if (phase.kind === 'removing') {
+    if (phase.kind === 'editingSegment') {
       if (phase.id !== e.pointerId) return;
       if (Math.hypot(e.clientX - phase.press.x, e.clientY - phase.press.y) > CLICK_SLOP || this.segmentAt(cursor) !== phase.segment) {
         this.finish();
       } else if (release) {
         this.phase = { kind: 'pending' };
-        this.hint = 'Removing segment…';
-        this.send({ type: 'bulldozeRoad', segment: phase.segment, editCount: this.edits.length });
+        this.hint = this.tool === 'upgrade' ? 'Changing road type…' : 'Removing segment…';
+        const target = { segment: phase.segment, editCount: this.edits.length };
+        this.send(this.tool === 'upgrade' ? { type: 'upgradeRoad', roadType: this.roadType, ...target } : { type: 'bulldozeRoad', ...target });
       }
       return;
     }
@@ -449,7 +469,7 @@ export class RoadEditor {
       return;
     }
     if (phase.kind === 'idle') {
-      if (this.tool === 'bulldoze') this.highlight(this.segmentAt(cursor));
+      if (this.tool === 'bulldoze' || this.tool === 'upgrade') this.highlight(this.segmentAt(cursor));
       else if (this.tool === 'zone') this.previewStroke(cellsAlong(this.cells, cursor, cursor), this.brush, 'Click or drag');
       else this.mark(this.snap(cursor)?.point);
       return;
@@ -499,7 +519,7 @@ export class RoadEditor {
   }
 
   private place(start: Vec2, end: Vec2, bend: Vec2 | undefined, release: boolean, hint: string, alignment?: AngleGuide): void {
-    let plan = planMeadowRoad(this.edits, start, end, bend);
+    let plan = planMeadowRoad(this.edits, start, end, bend, this.roadType);
     const cost = plan.ok ? editCost(this.edits, plan.road) : 0;
     const reason = shortage(this.balance, cost);
     if (reason && plan.ok) plan = { ok: false, reason, points: plan.road.points };
@@ -534,7 +554,7 @@ export class RoadEditor {
       const to = path.length - (atJunction(points[points.length - 1]!) ? JUNCTION_MOUTH : 0);
       if (to <= from) continue;
       const visible = from > 0 || to < path.length ? slicePolyline(path, from, to) : path;
-      for (const side of [-1, 1]) edges.ribbon(offsetPolyline(visible, side * (MEADOW_ROAD_WIDTH / 2 - 0.35)), 0.35);
+      for (const side of [-1, 1]) edges.ribbon(offsetPolyline(visible, side * (edgeOffset(this.roadType, side > 0 ? 'left' : 'right') - 0.35)), 0.35);
     }
     preview.add(new THREE.Mesh(edges.build(), new THREE.MeshBasicMaterial({ color: PALETTE.editorHandle })));
     if (alignment) this.drawAngle(preview, start, alignment);
@@ -548,7 +568,7 @@ export class RoadEditor {
     if (plan.ok) {
       this.finish();
       this.phase = phase.kind === 'chaining' ? { kind: 'pending', chain: { from: start, to: end } } : { kind: 'pending' };
-      this.send({ type: 'buildRoad', start, end, bend });
+      this.send({ type: 'buildRoad', roadType: this.roadType, start, end, bend });
     } else if (phase.kind === 'bending' || phase.kind === 'chaining') {
       phase.id = null;
     } else {

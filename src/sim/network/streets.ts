@@ -1,5 +1,5 @@
 import { cubicPoints } from '../math/curves';
-import { endOf, polyline, slicePolyline, startOf, type Polyline } from '../math/polyline';
+import { offsetPolyline, endOf, polyline, slicePolyline, startOf, type Polyline } from '../math/polyline';
 import { add, cross, distance, dot, normalize, scale, sub, type Vec2 } from '../math/vec';
 import type { Demand } from '../scenarios/types';
 import { Routing } from '../traffic/routing';
@@ -7,8 +7,9 @@ import { NetworkBuilder } from './builder';
 import { throughArms, type StreetCrossing } from './junctions';
 import type { Network } from './types';
 
+import { ROAD_TYPES, type RoadType } from './roadTypes';
+
 export const JUNCTION_MOUTH = 10;
-const SPEED = 11.1;
 const key = (p: Vec2): string => `${p.x},${p.y}`;
 
 interface Arm {
@@ -30,7 +31,7 @@ function turn(builder: NetworkBuilder, from: number, to: number): number {
     sub(b, scale(bh, handle)), sub(b, scale(bh, 0.1)), 0.4,
   ), b]);
   const straight = dot(ah, bh) > 0.95;
-  const id = builder.addLane('connector', path, straight ? SPEED : 6);
+  const id = builder.addLane('connector', path, Math.min(builder.lane(from).speedLimit, builder.lane(to).speedLimit, straight ? Infinity : 6));
   builder.connect(from, id);
   builder.connect(id, to);
   builder.addSurface('junction', path, 4.5);
@@ -50,7 +51,7 @@ function conflicts(a: Polyline, b: Polyline): boolean {
 /** Build streets whose shared endpoints are nodes. Smooth degree-two nodes should be coalesced. */
 export function buildStreetNetwork(
   builder: NetworkBuilder, streets: readonly (readonly Vec2[])[], portals: readonly Vec2[],
-  crossings: readonly StreetCrossing[] = [],
+  crossings: readonly StreetCrossing[] = [], types: readonly RoadType[] = [],
 ): { network: Network; demand: Demand[]; entries: number[] } {
   const headings = new Map<string, Vec2[]>();
   for (const points of streets) {
@@ -65,10 +66,10 @@ export function buildStreetNetwork(
   }
   const mouthNodes = new Set<string>();
   for (const [node, arms] of headings) {
-    if (arms.length >= 3 || (arms.length === 2 && dot(arms[0]!, arms[1]!) > -0.95)) mouthNodes.add(node);
+    if (arms.length >= 3 || (arms.length === 2 && dot(arms[0]!, arms[1]!) > -0.999999)) mouthNodes.add(node);
   }
   const nodes = new Map<string, Arm[]>();
-  for (const points of streets) {
+  for (const [index, points] of streets.entries()) {
     const path = polyline(points);
     if (!(path.length > 0)) throw new Error('A street needs positive length');
     const first = points[0]!;
@@ -82,7 +83,19 @@ export function buildStreetNetwork(
     const from = startMouth * mouthScale;
     const to = path.length - endMouth * mouthScale;
     const center = slicePolyline(path, from, to);
-    const lanes = builder.addTwoWayRoad(center, { width: 8, laneWidth: 3.5, speedLimit: SPEED });
+    const type = types[index] ?? 'town';
+    const spec = ROAD_TYPES[type];
+    const half = spec.laneWidth * spec.lanesPerDirection;
+    const lanes = builder.addTwoWayRoad(center, { width: half * 2, laneWidth: spec.laneWidth, speedLimit: spec.speedLimit, roadType: type });
+    for (const side of ['left', 'right'] as const) {
+      let edge = half;
+      for (const strip of spec.strips) {
+        if (strip.side !== 'both' && strip.side !== side) continue;
+        const offset = (edge + strip.width / 2) * (side === 'left' ? 1 : -1);
+        builder.addSurface(strip.kind, offsetPolyline(center, offset), strip.width);
+        edge += strip.width;
+      }
+    }
     const arms: [Vec2, Arm][] = [
       [first, { incoming: lanes.backward, outgoing: lanes.forward, tangent: normalize(sub(points[1]!, first)) }],
       [last, { incoming: lanes.forward, outgoing: lanes.backward, tangent: normalize(sub(points[points.length - 2]!, last)) }],

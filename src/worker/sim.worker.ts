@@ -3,7 +3,7 @@
  * Posts a compact snapshot whenever the simulation has advanced.
  */
 import { buildScenario, type Scenario } from '../sim/scenarios';
-import { isZoneStroke, meadowScenario, meadowSegments, meadowZoning, planMeadowRoad, type MeadowEdit } from '../sim/scenarios/meadow';
+import { isZoneStroke, meadowScenario, meadowSegmentInfo, meadowZoning, planMeadowRoad, type MeadowEdit } from '../sim/scenarios/meadow';
 import { planZoneStroke } from '../sim/zoning/paint';
 import { editCost, shortage, undoCost } from '../sim/town/budget';
 import { DT, World } from '../sim/world';
@@ -42,6 +42,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       postTown(world);
       break;
     }
+    case 'upgradeRoad':
     case 'bulldozeRoad':
     case 'buildRoad':
     case 'undo': {
@@ -52,18 +53,23 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       if (waiting) break;
       let proposed: MeadowEdit[];
       if (msg.type === 'buildRoad') {
-        const plan = planMeadowRoad(edits, msg.start, msg.end, msg.bend);
+        const plan = planMeadowRoad(edits, msg.start, msg.end, msg.bend, msg.roadType);
         if (!plan.ok) {
           post({ type: 'editRejected', reason: plan.reason });
           break;
         }
         proposed = [...edits, plan.road];
-      } else if (msg.type === 'bulldozeRoad') {
-        if (msg.editCount !== edits.length || !Number.isInteger(msg.segment) || !meadowSegments(edits)[msg.segment]) {
-          post({ type: 'editRejected', reason: 'Select a street segment to remove.' });
+      } else if (msg.type === 'bulldozeRoad' || msg.type === 'upgradeRoad') {
+        const segment = meadowSegmentInfo(edits)[msg.segment];
+        if (msg.editCount !== edits.length || !Number.isInteger(msg.segment) || !segment) {
+          post({ type: 'editRejected', reason: 'Select a street segment.' });
           break;
         }
-        proposed = [...edits, { remove: msg.segment }];
+        if (msg.type === 'upgradeRoad' && segment.roadType === msg.roadType) {
+          post({ type: 'editRejected', reason: 'This segment already has that road type.' });
+          break;
+        }
+        proposed = [...edits, msg.type === 'upgradeRoad' ? { upgrade: msg.segment, roadType: msg.roadType } : { remove: msg.segment }];
       } else if (edits.length && isZoneStroke(edits.at(-1)!)) {
         const next = edits.slice(0, -1);
         commitZoning(next, undoCost(edits));

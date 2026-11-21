@@ -63,6 +63,7 @@ test('building catalogue and sample street render', async ({ page }) => {
   await page.goto('/?catalogue=1');
   await expect(page.locator('.catalogue')).toHaveAttribute('data-ready', 'true', { timeout: 30_000 });
   await expect(page.locator('figure canvas')).toHaveCount(36);
+  await page.locator('#roads').screenshot({ path: 'artifacts/screens/road-catalogue.png' });
   await page.locator('#shops').screenshot({ path: 'artifacts/screens/shop-catalogue.png' });
   await page.locator('#workplaces').screenshot({ path: 'artifacts/screens/workplace-catalogue.png' });
   await page.getByRole('link', { name: 'Sample street' }).click();
@@ -255,4 +256,36 @@ test('erasing a rear row updates the occupied garden while paused', async ({ pag
   await page.getByRole('button', { name: 'Pan' }).click();
   await page.mouse.click(...rear);
   expect(await page.evaluate(() => window.__towns!.selectedHouse())).toBeNull();
+});
+
+test('road type preview, upgrades and residential growth', async ({ page }) => {
+  test.setTimeout(120_000);
+  const { at, drag, editor } = await connectedStreet(page);
+  await page.keyboard.press('r');
+  await page.keyboard.press('7');
+  await page.mouse.move(...at(0, 8));
+  await page.mouse.down();
+  await page.mouse.move(...at(0, 49), { steps: 10 });
+  await expect(page.locator('.preview-cost')).toContainText('Costs');
+  await page.screenshot({ path: 'artifacts/screens/road-type-preview.png' });
+  await page.keyboard.press('5');
+  await expect.poll(editor).toMatchObject({ roadType: 'country' });
+  await page.mouse.up();
+  await expect.poll(editor).toMatchObject({ roadCount: 2, pending: false });
+  await page.keyboard.press('u');
+  await page.keyboard.press('7');
+  const balance = () => page.evaluate(() => window.__towns!.town()!.budget.balance);
+  const before = await balance();
+  await page.mouse.click(...at(13, 8));
+  await expect.poll(balance).toBeLessThan(before);
+  await page.keyboard.press('z');
+  await drag(12, -8, 42);
+  await expect.poll(async () => (await editor())!.zoned).toBeGreaterThan(5);
+  await page.keyboard.press('v');
+  await page.mouse.move(0, 0);
+  await page.screenshot({ path: 'artifacts/screens/road-types-map.png' });
+  await page.evaluate(() => window.__towns!.setSpeed(240));
+  await expect.poll(() => page.evaluate(() => window.__towns!.town()!.households.filter(h => h.lot).length), { timeout: 90_000 }).toBeGreaterThanOrEqual(3);
+  await page.evaluate(() => window.__towns!.setSpeed(0));
+  await page.screenshot({ path: 'artifacts/screens/road-upgrade-growth.png' });
 });
