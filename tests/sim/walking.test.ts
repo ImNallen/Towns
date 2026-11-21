@@ -176,3 +176,18 @@ it('repairs routes around changed pavement and preserves cold-build routing ties
   const removed = buildStreetNetwork(new NetworkBuilder(),street,[],[],['country']).network;
   expect(new WalkingNetwork(removed,doors,[],edited.routing).distance(0,1)).toBe(Infinity);
 });
+
+it('retains the cold walking routes when an edit cuts, replaces and adds frontage', () => {
+  const original = buildStreetNetwork(new NetworkBuilder(), street, []).network;
+  const graph = new WalkingNetwork(original, doors, []);
+  const extended = buildStreetNetwork(new NetworkBuilder(), [
+    [{ x:0,y:0 },{ x:60,y:0 }],
+    [{ x:60,y:0 },{ x:110,y:0 }],
+    [{ x:60,y:0 },{ x:60,y:40 }],
+  ], []).network;
+  const places = [doors[1]!,{x:63,y:30},doors[0]!];
+  const cold = new WalkingNetwork(extended,places,[]);
+  const edited = new WalkingNetwork(extended,places,[],graph.routing);
+  expect(edited.costs).toEqual(cold.costs);
+  expect(edited.next).toEqual(cold.next);
+});

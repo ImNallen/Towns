@@ -77,3 +77,17 @@ it('preserves the pedestrian right of way when a new street would cross a footpa
     reason: 'Leave the footpath clear of the new street.',
   });
 });
+
+it('observes a vehicle only at crossing intervals on its own lane and clears them after it leaves', () => {
+  const w = new World(meadowScenario(), 1);
+  const graph = w.walkers!.graph;
+  const c = graph.crossings[0]!;
+  const zone = c.lanes[0]!;
+  const v = w.vehicles;
+  const slot = v.spawn(zone.lane,zone.from+1,0,0,0);
+  w.walkers!.step(0.05,v);
+  expect(c.blocked).toBe(true);
+  v.s[slot] = zone.to+v.length[slot]!+1;
+  w.walkers!.step(0.05,v);
+  expect(c.blocked).toBe(false);
+});

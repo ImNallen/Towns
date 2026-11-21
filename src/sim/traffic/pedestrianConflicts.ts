@@ -42,20 +42,28 @@ export function crossingAt(network: Network, a: Vec2, b: Vec2, zebra: boolean): 
   return { zebra, lanes, occupied: false, requested: false, blocked: false, served: 0, yieldingTicks: 0 };
 }
 
-export function observeCrossings(crossings: Crossing[], vehicles: Vehicles): void {
+export interface CrossingStop {
+  crossing: Crossing;
+  from: number;
+  to: number;
+}
+
+export function observeCrossings(crossings: Crossing[], stops: CrossingStop[][], vehicles: Vehicles): void {
   for (const c of crossings) {
     c.waiting = false;
     c.requested = c.occupied = c.blocked = false;
-    for (const zone of c.lanes) {
-      for (let p = 0; p < vehicles.highWater; p++) {
-        if (!vehicles.alive[p] || vehicles.lane[p] !== zone.lane) continue;
-        const front = vehicles.s[p]!,
-          speed = vehicles.v[p]!;
-        if (front - vehicles.length[p]! > zone.to) continue;
-        // Before entering a zebra, allow a driver within braking distance to clear.
-        const gap = c.zebra || c.walkGroup !== undefined ? (speed * speed) / (2 * vehicles.brake[p]!) + speed * 0.1 : Math.max(1, speed) * 7;
-        if (front + gap > zone.from + 0.00001) c.blocked = true;
-      }
+  }
+  for (let p = 0; p < vehicles.highWater; p++) {
+    if (!vehicles.alive[p]) continue;
+    for (const zone of stops[vehicles.lane[p]!]!) {
+      const c = zone.crossing;
+      if (c.blocked) continue;
+      const front = vehicles.s[p]!;
+      if (front - vehicles.length[p]! > zone.to) continue;
+      const speed = vehicles.v[p]!;
+      const gap = c.zebra || c.walkGroup !== undefined
+        ? (speed * speed) / (2 * vehicles.brake[p]!) + speed * 0.1 : Math.max(1, speed) * 7;
+      if (front + gap > zone.from + 0.00001) c.blocked = true;
     }
   }
 }

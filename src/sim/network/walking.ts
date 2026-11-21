@@ -1,5 +1,5 @@
 import { signalAspect } from './signals';
-import { crossingAt, observeCrossings, type Crossing } from '../traffic/pedestrianConflicts';
+import { crossingAt, observeCrossings, type Crossing, type CrossingStop } from '../traffic/pedestrianConflicts';
 import type { Vehicles } from '../traffic/vehicles';
 import { WalkRouting } from './walkRouting';
 import type { Vec2 } from '../math/vec';
@@ -26,7 +26,7 @@ export class WalkingNetwork {
   get next() { return this.routing.next; }
   get costs() { return this.routing.costs; }
   readonly crossings: Crossing[] = [];
-  readonly stops: { crossing: Crossing; from: number; to: number }[][];
+  readonly stops: CrossingStop[][];
   edgeCount = 0;
 
   constructor(network: Network, doors: readonly Vec2[], bays: readonly Bay[], previous?: WalkRouting, parks: readonly Vec2[] = []) {
@@ -216,7 +216,7 @@ export class Walkers {
     return true;
   }
   step(dt: number, vehicles?: Vehicles, tick = 0): void {
-    if (vehicles) observeCrossings(this.graph.crossings,vehicles);
+    if (vehicles) observeCrossings(this.graph.crossings, this.graph.stops, vehicles);
     if (!this.count) return;
     this.crowd.fill(0);
     for (let i = 0; i < this.goal.length; i++) {

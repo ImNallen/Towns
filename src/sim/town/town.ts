@@ -256,6 +256,8 @@ export class Town {
   private readonly early: Uint8Array;
 
   private readonly filled: Int32Array;
+  private readonly employers: Int32Array;
+  private readonly jobSlots: Int32Array;
   private readonly open: Uint8Array;
   private readonly deliveries: Uint16Array;
   private readonly freightState: Uint8Array;
@@ -384,6 +386,8 @@ export class Town {
     this.workedDay = new Int32Array(P);
     this.early = new Uint8Array(P);
     this.filled = new Int32Array(spec.regions.length + H);
+    this.employers = new Int32Array(this.filled.length);
+    this.jobSlots = new Int32Array(this.filled.length);
     this.open = new Uint8Array(H);
     this.deliveries = new Uint16Array(H);
     // Two adjacent frontages on the same side can share a service entrance.
@@ -1262,6 +1266,16 @@ export class Town {
       this.job[p] = -1;
       this.record(minute, this.household[p]!, LOST_JOB, job, p);
     }
+    // Open employers stay fixed during this market pass, even as vacancies change.
+    let employerCount = 0;
+    for (let r = 0; r < this.filled.length; r++) {
+      const slot = r - regions.length;
+      const jobs = regions[r]?.jobs ?? (this.open[slot] ? lotJobs(this.spec.homes[slot]!.lot!) : 0);
+      if (jobs > 0) {
+        this.employers[employerCount++] = r;
+        this.jobSlots[r] = jobs;
+      }
+    }
     // Make the single most valuable hire or switch until none is left, so a job goes to
     // whoever gains most from it (locals before long-distance commuters). Every move raises
     // that person's job value, so this ends.
@@ -1275,10 +1289,9 @@ export class Town {
         const current = this.job[p]!;
         if (current < 0 && this.employed(h) >= this.cars[h]!) continue;
         const base = current >= 0 ? this.jobValue(h, current, routing) + ECONOMY.switchMargin : 0;
-        for (let r = 0; r < this.filled.length; r++) {
-          const slot = r - regions.length;
-          const jobs = regions[r]?.jobs ?? (this.open[slot] ? lotJobs(this.spec.homes[slot]!.lot!) : 0);
-          if (r === current || this.filled[r]! >= jobs) continue;
+        for (let e = 0; e < employerCount; e++) {
+          const r = this.employers[e]!;
+          if (r === current || this.filled[r]! >= this.jobSlots[r]!) continue;
           const gain = this.jobValue(h, r, routing) - base;
           if (gain > bestGain) {
             person = p;

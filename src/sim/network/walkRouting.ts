@@ -19,11 +19,10 @@ export class WalkRouting {
     places: readonly number[],
     previous?: WalkRouting,
   ) {
-    const oldToNew = new Int32Array(previous?.nodes.size ?? 0).fill(-1);
+    const surviving = new Int32Array(points.length);
     const newToOld = points.map(({ x, y }, n) => {
       const key = x + '/' + y;
       const old = previous?.nodes.get(key) ?? -1;
-      if (old >= 0) oldToNew[old] = n;
       this.nodes.set(key, n);
       return old;
     });
@@ -39,15 +38,20 @@ export class WalkRouting {
       if (previous && oldPlace !== undefined) {
         const oldCost = previous.costs[oldPlace]!;
         const oldNext = previous.next[oldPlace]!;
-        const order = points.map((_, i) => i).filter((i) => Number.isFinite(oldCost[newToOld[i]!]));
-        order.sort((a, b) => oldCost[newToOld[a]!]! - oldCost[newToOld[b]!]! || a - b);
-        for (const n of order) {
-          const old = newToOld[n]!;
-          const hop = oldToNew[oldNext[old]!] ?? -1;
-          if (hop < 0 || !Number.isFinite(cost[hop])) continue;
-          const edge = edges[n]!.find((e) => e.to === hop);
-          if (edge && cost[hop]! + edge.length === oldCost[old]) {
-            cost[n] = oldCost[old]!;
+        // Follow the old tree outward from its root. A child is reusable only
+        // after its parent survived and their edge still gives the old cost.
+        surviving[0] = target;
+        let count = 1;
+        for (let i = 0; i < count; i++) {
+          const parent = surviving[i]!;
+          for (const edge of edges[parent]!) {
+            const child = edge.to;
+            const oldChild = newToOld[child]!;
+            if (cost[child] !== Infinity || oldChild < 0 || oldNext[oldChild] !== newToOld[parent]) continue;
+            const candidate = cost[parent]! + edge.length;
+            if (candidate !== oldCost[oldChild]) continue;
+            cost[child] = candidate;
+            surviving[count++] = child;
           }
         }
       }
