@@ -40,6 +40,29 @@ function turn(builder: NetworkBuilder, from: number, to: number): number {
   return id;
 }
 
+/** Portals have one regional source and sink. Fork each incoming trip onto its
+ * routed lane and merge departing lanes before the regional boundary. */
+function avenueDirection(builder: NetworkBuilder, center: Polyline, speed: number,
+  width: number, startsAtPortal: boolean, endsAtPortal: boolean, reservations: number[]) {
+  const lead = Math.min(6, center.length / 8);
+  const start = startsAtPortal ? lead * 3 : 0;
+  const end = center.length - (endsAtPortal ? lead * 3 : 0);
+  const lane = (from: number, to: number, offset: number) =>
+    builder.addLane('road', offsetPolyline(slicePolyline(center, from, to), offset), speed);
+  const entry = startsAtPortal ? lane(0, lead, -width / 2) : undefined;
+  const inner = lane(start, end, -width / 2);
+  const outer = lane(start, end, -1.5 * width);
+  const exit = endsAtPortal ? lane(center.length - lead, center.length, -width / 2) : undefined;
+  if (entry !== undefined) reservations.push(turn(builder, entry, inner), turn(builder, entry, outer));
+  if (exit !== undefined) {
+    const through = turn(builder, inner, exit), merge = turn(builder, outer, exit);
+    builder.giveWayAtEntry(merge, [through]);
+    reservations.push(through, merge);
+  }
+  return { entry: entry ?? inner, exit: exit ?? inner,
+    outerEntry: startsAtPortal ? undefined : outer, outerExit: endsAtPortal ? undefined : outer };
+}
+
 /** True for crossing paths and merges (nearby sampled centre lines within a vehicle width). */
 function conflicts(a: Polyline, b: Polyline): boolean {
   for (let i = 0; i < a.pts.length; i += 2) {
@@ -74,6 +97,8 @@ export function buildStreetNetwork(
   for (const [node, arms] of headings) {
     if (widths.get(node)!.size > 1 || arms.length >= 3 || (arms.length === 2 && dot(arms[0]!, arms[1]!) > -0.999999)) mouthNodes.add(node);
   }
+  const reservedMovements: number[] = [];
+  const portalKeys = new Set(portals.map(key));
   const corners = new Map<string, { heading: number; left?: Vec2; right?: Vec2 }[]>();
   const pedestrianLinks: NonNullable<Network['pedestrianLinks']> = [];
   const nodes = new Map<string, Arm[]>();
@@ -94,11 +119,17 @@ export function buildStreetNetwork(
     const type = types[index] ?? 'town';
     const spec = ROAD_TYPES[type];
     const half = spec.laneWidth * spec.lanesPerDirection;
-    const lanes = builder.addTwoWayRoad(center, { width: half * 2, laneWidth: spec.laneWidth, speedLimit: spec.speedLimit, roadType: type });
-    const outer = spec.lanesPerDirection === 2 ? {
-      forward: builder.addLane('road', offsetPolyline(center, -1.5 * spec.laneWidth), spec.speedLimit),
-      backward: builder.addLane('road', offsetPolyline(reversePolyline(center), -1.5 * spec.laneWidth), spec.speedLimit),
-    } : undefined;
+    let forward, backward;
+    if (spec.lanesPerDirection === 2) {
+      const firstPortal = portalKeys.has(key(first)), lastPortal = portalKeys.has(key(last));
+      forward = avenueDirection(builder, center, spec.speedLimit, spec.laneWidth, firstPortal, lastPortal, reservedMovements);
+      backward = avenueDirection(builder, reversePolyline(center), spec.speedLimit, spec.laneWidth, lastPortal, firstPortal, reservedMovements);
+      builder.addSurface('twoWay', center, half * 2, type);
+    } else {
+      const lanes = builder.addTwoWayRoad(center, {width: half * 2, laneWidth: spec.laneWidth, speedLimit: spec.speedLimit, roadType: type});
+      forward = {entry: lanes.forward, exit: lanes.forward, outerEntry: undefined, outerExit: undefined};
+      backward = {entry: lanes.backward, exit: lanes.backward, outerEntry: undefined, outerExit: undefined};
+    }
     const ends = [first, last].map((point, i) => {
       const inward = i ? points[points.length - 2]! : points[1]!;
       const arm: { heading: number; left?: Vec2; right?: Vec2 } = { heading: Math.atan2(inward.y - point.y, inward.x - point.x) };
@@ -122,8 +153,8 @@ export function buildStreetNetwork(
       }
     }
     const arms: [Vec2, Arm][] = [
-      [first, { outerIn: outer?.backward, outerOut: outer?.forward, incoming: lanes.backward, outgoing: lanes.forward, tangent: normalize(sub(points[1]!, first)) }],
-      [last, { outerIn: outer?.forward, outerOut: outer?.backward, incoming: lanes.forward, outgoing: lanes.backward, tangent: normalize(sub(points[points.length - 2]!, last)) }],
+      [first, { outerIn: backward.outerExit, outerOut: forward.outerEntry, incoming: backward.exit, outgoing: forward.entry, tangent: normalize(sub(points[1]!, first)) }],
+      [last, { outerIn: forward.outerExit, outerOut: backward.outerEntry, incoming: forward.exit, outgoing: backward.entry, tangent: normalize(sub(points[points.length - 2]!, last)) }],
     ];
     for (const [point, arm] of arms) {
       const list = nodes.get(key(point)) ?? [];
@@ -131,7 +162,7 @@ export function buildStreetNetwork(
       nodes.set(key(point), list);
     }
   }
-  const reservedMovements: number[] = [];
+
   const junctions: NonNullable<Network['junctions']> = [];
   const priorityAxes = new Map(crossings.map((c) => [key(c.point), c.priorityAxis]));
   for (const [node, arms] of nodes) {

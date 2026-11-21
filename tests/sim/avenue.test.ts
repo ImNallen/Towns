@@ -42,3 +42,16 @@ it.each([false,true])('separates avenue turn lanes and clears merges with lights
   expect(world.stats().completed).toBeGreaterThan(50);
   expect(world.stats().lost).toBe(0);
 });
+
+it('routes from one regional source to both branches of an avenue T and back to one sink', () => {
+  const west={x:-120,y:0}, centre={x:0,y:0}, north={x:0,y:100}, south={x:0,y:-100};
+  const {network,entries}=buildStreetNetwork(new NetworkBuilder(),
+    [[west,centre],[centre,north],[centre,south]], [west,north,south], [], ['avenue','town','town']);
+  const world=new World({...meadowScenario(),network,town:undefined,demand:[]},7);
+  for(const dest of [1,2]) {
+    expect(world.routing.canReach(dest,entries[0]!)).toBe(true);
+    expect(world.routing.canReach(0,entries[dest]!)).toBe(true);
+  }
+  expect(world.routing.nextHop(1,entries[0]!)).not.toBe(world.routing.nextHop(2,entries[0]!));
+  expect(network.sinks).toHaveLength(3);
+});
