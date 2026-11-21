@@ -5,10 +5,16 @@ export const PALETTE = {
   building: {
     walls: {
       chalk: '#ece9de', cream: '#e5d9be', stone: '#cec8b6', mist: '#c1ced1',
+      precast: '#b8bfc0', blueConcrete: '#9caaae', aluminium: '#d0d5d4',
       brick: '#c48e7c', ochre: '#ddc395', celadon: '#becdb8', rose: '#ddbfb6',
     },
     roofs: {
+      zinc: '#87969a', gunmetal: '#66777e', galvalume: '#a1acac',
       slate: '#82949e', terracotta: '#b9816c', charcoal: '#969591', moss: '#919b7d', tan: '#bdab8e',
+    },
+    industrial: {
+      apron: '#c4c4ba', glass: '#c3dfe0', flashing: '#dce1db', grille: '#56656a',
+      timber: '#b89676', strap: '#677473', marking: '#ede9d9',
     },
     awning: '#568c81', chimney: '#c79f86',
     trim: '#f5f0df', hedge: '#819774', trunk: '#9b8467', pool: '#94becb',

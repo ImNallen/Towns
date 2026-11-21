@@ -91,3 +91,13 @@ test('both neighbouring finishes are excluded even when their designs and orient
   expect(third.variant.wall).toBe(first.variant.wall);
   expect(new Set([...neighbours.map(n => n.variant.roof), third.variant.roof]).size).toBe(3);
 });
+
+test('workplace finishes stay distinct from residential walls and roofs', () => {
+  const homes = BLUEPRINTS.filter(b => b.zone === 'residential');
+  const houseWalls = new Set(homes.flatMap(b => b.walls));
+  const houseRoofs = new Set(homes.flatMap(b => b.roofs));
+  for (const design of BLUEPRINTS.filter(b => b.zone === 'workplaces')) {
+    expect(design.walls.filter(w => houseWalls.has(w)), design.name).toEqual([]);
+    expect(design.roofs.filter(r => houseRoofs.has(r)), design.name).toEqual([]);
+  }
+});
