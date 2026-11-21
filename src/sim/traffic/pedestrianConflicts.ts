@@ -4,6 +4,7 @@ import type { Network } from '../network/types';
 import type { Vehicles } from './vehicles';
 
 export interface Crossing {
+  walkGroup?: number;
   zebra: boolean;
   /** Interval of vehicle-front positions where the nose intersects the crossing.
    * Include the vehicle length when checking whether its tail has left. */
@@ -48,7 +49,7 @@ export function observeCrossings(crossings: Crossing[], vehicles: Vehicles): voi
           speed = vehicles.v[p]!;
         if (front - vehicles.length[p]! > zone.to) continue;
         // Before entering a zebra, allow a driver within braking distance to clear.
-        const gap = c.zebra ? (speed * speed) / (2 * vehicles.brake[p]!) + speed * 0.1 : Math.max(1, speed) * 7;
+        const gap = c.zebra || c.walkGroup !== undefined ? (speed * speed) / (2 * vehicles.brake[p]!) + speed * 0.1 : Math.max(1, speed) * 7;
         if (front + gap > zone.from + 0.00001) c.blocked = true;
       }
     }

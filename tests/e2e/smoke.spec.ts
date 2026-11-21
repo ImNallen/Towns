@@ -541,3 +541,26 @@ for (const [device, width, height] of [
     await page.screenshot({ path: `artifacts/screens/toolbar-card-${device}.png` });
   });
 }
+test('lights control a live junction', async ({page}) => {
+  const {at,editor} = await connectedStreet(page,'',true);
+  await page.keyboard.press('r');
+  await page.mouse.move(...at(0,0));
+  await page.mouse.down();
+  await page.mouse.move(...at(0,45), {steps:12});
+  await page.mouse.up();
+  await expect.poll(editor).toMatchObject({roadCount:2,pending:false});
+  await page.getByRole('button',{name:'Roads',exact:true}).click();
+  await page.getByRole('button',{name:'Build traffic lights'}).click();
+  await page.mouse.click(...at(0,0));
+  await page.keyboard.press('v');
+  await page.evaluate(()=>window.__towns!.setSpeed(60));
+  await page.waitForFunction(()=>{
+    const game=window.__towns!, stats=game.stats();
+    if (stats && stats.tick>3000 && stats.stoppedShare>0.12) {
+      game.setSpeed(0);
+      return true;
+    }
+    return false;
+  });
+  await page.screenshot({path:'artifacts/screens/junction-lights.png'});
+});
