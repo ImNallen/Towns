@@ -51,7 +51,7 @@ function conflicts(a: Polyline, b: Polyline): boolean {
 /** Build streets whose shared endpoints are nodes. Smooth degree-two nodes should be coalesced. */
 export function buildStreetNetwork(
   builder: NetworkBuilder, streets: readonly (readonly Vec2[])[], portals: readonly Vec2[],
-  crossings: readonly StreetCrossing[] = [], types: readonly RoadType[] = [], lights: readonly Vec2[] = [],
+  crossings: readonly StreetCrossing[] = [], types: readonly RoadType[] = [], lights: readonly (Vec2 & { actuated?: boolean })[] = [],
 ): { network: Network; demand: Demand[]; entries: number[] } {
   const headings = new Map<string, Vec2[]>();
   for (const points of streets) {
@@ -138,7 +138,8 @@ export function buildStreetNetwork(
     const main = throughArms(arms, priorityAxes.get(node));
     const [x, y] = node.split(',').map(Number);
     const point = { x: x!, y: y! };
-    junctions.push({ point, lights: lights.some(p => key(p) === node),
+    const light = lights.find(p => key(p) === node);
+    junctions.push({ point, lights: !!light, actuated: !!light?.actuated,
       arms: arms.map(a => ({ incoming: a.incoming, group: main.includes(a) ? 0 : 1 })) });
     const movements = arms.flatMap((from) => arms.filter((to) => to !== from).map((to) => {
       const primary = main.includes(from);
@@ -164,7 +165,7 @@ export function buildStreetNetwork(
       const { left, right } = arms[i]!;
       const neighbour = arms[(i + 1) % arms.length]!.right;
       if (arms.length > 1 && left && neighbour) pedestrianLinks.push({ a: left, b: neighbour, crossing: false });
-      if (arms.length !== 2 && left && right) pedestrianLinks.push({ a: left, b: right, crossing: true, walkGroup: junction ? groups.get(arms[i]!) : undefined });
+      if (arms.length !== 2 && left && right) pedestrianLinks.push({ a: left, b: right, crossing: true, signal: junction?.actuated ? junctions.indexOf(junction) : undefined, walkGroup: junction ? groups.get(arms[i]!) : undefined });
     }
   }
   const built = builder.build();

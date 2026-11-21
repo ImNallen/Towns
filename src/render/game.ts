@@ -39,6 +39,7 @@ export interface Game {
   walkerPositions(): Float32Array;
   editor(): EditorState | null;
   setAngleSnapping(enabled: boolean): void;
+  setActuated(value: boolean): void;
   setRoadType(type: RoadType): void;
   setTool(tool: MapTool): void;
   setLotColumns(columns: number): void;
@@ -223,7 +224,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
       walkerPositions = msg.walkers;
       walkerLayer.update(walkerPositions);
       vehicles?.push(msg, performance.now());
-      roadLayer?.userData.updateSignals(msg.stats.tick);
+      roadLayer?.userData.updateSignals(msg.stats.tick, msg.signalClocks);
       latestStats = msg.stats;
       traffic = msg.traffic;
       if (trafficVisible) trafficLayer?.update(traffic);
@@ -264,6 +265,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   const game: Game = {
     editor: () => editor?.state() ?? null,
     setAngleSnapping: (enabled) => editor?.setAngleSnapping(enabled),
+    setActuated(value) { if (editor) editor.actuated = value; },
     setRoadType(type) { editor?.setRoadType(type); },
     setTool(tool) {
       editor?.setTool(tool);

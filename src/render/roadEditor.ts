@@ -22,6 +22,7 @@ export type MapTool = 'road' | 'curve' | 'upgrade' | 'bulldoze' | 'zone' | 'park
 export interface EditorState {
   tool: MapTool;
   roadType: RoadType;
+  actuated: boolean;
   roadCount: number;
   connected: boolean;
   hint: string;
@@ -99,6 +100,7 @@ function buildBoundary(): THREE.Mesh {
 }
 
 export class RoadEditor {
+  actuated = true;
   private roadType: RoadType = 'town';
   private balance: number = BUDGET.startingBalance;
 
@@ -168,7 +170,7 @@ export class RoadEditor {
   state(): EditorState {
     const kind = this.phase.kind;
     return {
-      tool: this.tool, roadType: this.roadType, cost: this.cost, hint: this.hint, roadCount: this.roadCount, connected: this.connected,
+      tool: this.tool, actuated: this.actuated, roadType: this.roadType, cost: this.cost, hint: this.hint, roadCount: this.roadCount, connected: this.connected,
       angleSnapping: this.angleSnapping, chaining: kind === 'chaining',
       pending: kind === 'pending' || kind === 'waiting',
       canCancel: kind === 'bending' || kind === 'waiting',
@@ -391,7 +393,7 @@ export class RoadEditor {
     if (this.phase.kind !== 'idle') return;
     const cursor = this.world(e);
     if (this.tool === 'lights') {
-      this.send({ type: 'buildLights', point: cursor });
+      this.send({ type: 'buildLights', point: cursor, actuated: this.actuated });
       return;
     }
     if (this.tool === 'footpath' || this.tool === 'zebra') {

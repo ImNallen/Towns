@@ -21,7 +21,7 @@ export interface MeadowRoad {
 }
 
 export interface WalkEdit { walk: "footpath" | "zebra"; a: Vec2; b: Vec2 }
-export type MeadowEdit = { lights: Vec2 } | WalkEdit | MeadowRoad | { readonly remove: number } | { readonly upgrade: number; readonly roadType: RoadType } | ZoneStroke;
+export type MeadowEdit = { lights: Vec2; actuated?: boolean } | WalkEdit | MeadowRoad | { readonly remove: number } | { readonly upgrade: number; readonly roadType: RoadType } | ZoneStroke;
 
 export const isZoneStroke = (edit: MeadowEdit): edit is ZoneStroke => 'zone' in edit;
 
@@ -462,7 +462,7 @@ function meadowWithoutZones(replay: Replay, edits: readonly MeadowEdit[]): Scena
   const types = replay.sections.map(s => s.roadType);
   const streets = coalesceStreets([...replay.chains], types);
   const crossings = replay.crossings.filter((crossing) => degree(streets, crossing.point) === 4);
-  const { network, demand, entries } = buildStreetNetwork(new NetworkBuilder(), streets, PORTALS, crossings, types, edits.flatMap(e => 'lights' in e ? [e.lights] : []));
+  const { network, demand, entries } = buildStreetNetwork(new NetworkBuilder(), streets, PORTALS, crossings, types, edits.flatMap(e => 'lights' in e ? [{ ...e.lights, actuated: e.actuated }] : []));
   const decor = scenery();
   const driveways = new NetworkBuilder();
   const homes = decor.houses.map((house) => ({ access: [] as AccessPoint[], region: house.x < 0 ? 0 : 1 }));

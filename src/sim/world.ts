@@ -1,5 +1,5 @@
-import { signalAspect } from './network/signals';
 import { TrafficConditions } from './traffic/conditions';
+import { nextActuatedClock, signalAspect } from './network/signals';
 import { parksOn } from './town/parks';
 import type { WalkRouting } from './network/walkRouting';
 import { endOf, sampleAt, startOf, type PathSample } from './math/polyline';
@@ -101,6 +101,14 @@ export class World {
   private readonly laneMinRear: Float64Array;
 
   private readonly signalGroups: Int8Array;
+  private readonly waitingTicks: Uint16Array;
+  readonly signalClocks: Int16Array;
+  private readonly actuatedJunctions: number[];
+  private readonly movementSignal: Int32Array;
+
+  /** Movement a vehicle just left, for rear-bumper clearance on the receiving lane. */
+  private readonly previousMovement: Int32Array;
+  private readonly previousVehicle: Int32Array;
   private readonly enteredAt: Int32Array;
 
   private readonly spawners: Spawner[];
@@ -132,10 +140,19 @@ export class World {
     this.town = scenario.town ? new Town(scenario.town, this.routing.sinks.length, seed, this.routing, new Parking(bays, this.routing.sinks.length + homes.length), scenario.decor.houses, this.network, this.walkLimit, homes.length, previousWalking) : null;
 
     const n = this.lanes.length;
+    this.previousMovement = new Int32Array(capacity).fill(-1);
+    this.previousVehicle = new Int32Array(capacity);
     this.signalGroups = new Int8Array(n).fill(-1);
     this.enteredAt = new Int32Array(n).fill(-1);
-    for (const j of this.network.junctions ?? []) if (j.lights) {
+    const junctions = this.network.junctions ?? [];
+    this.waitingTicks = new Uint16Array(junctions.length);
+    this.signalClocks = new Int16Array(junctions.length);
+    this.actuatedJunctions = [];
+    this.movementSignal = new Int32Array(n).fill(-1);
+    for (const [index,j] of junctions.entries()) if (j.lights) {
+      if (j.actuated) this.actuatedJunctions.push(index);
       for (const arm of j.arms) for (const movement of this.lanes[arm.incoming]!.next) {
+        if (j.actuated) this.movementSignal[movement] = index;
         this.signalGroups[movement] = arm.group;
       }
     }
@@ -177,11 +194,21 @@ export class World {
   step(): void {
     if (this._tick % TICKS_PER_MINUTE === 0) this.traffic.sample(this.vehicles);
     if (this.congestionAware) this.routing.refresh(this._tick, this.traffic.seconds);
+    if (this.actuatedJunctions.length && this.walkers) {
+      for (const c of this.walkers.graph.crossings) if (c.signal !== undefined) c.clock = this.signalClocks[c.signal]!;
+    }
     this.walkers?.step(DT,this.vehicles,this.tick);
     if (this.town && this._tick % TICKS_PER_MINUTE === 0) this.town.update(this.minute(), this, this.admissionsOpen);
     this.buildBuckets();
     this.computeAccelerations();
     this.integrate();
+    for (const index of this.actuatedJunctions) {
+      const clock = this.signalClocks[index]!;
+      const side = this.sideCall(index);
+      this.waitingTicks[index] = side && clock < 500 ? this.waitingTicks[index]! + 1 : 0;
+      const change = clock >= 500 || this.waitingTicks[index]! >= 480 || !this.approachCall(index, 0, 32);
+      this.signalClocks[index] = nextActuatedClock(clock, side && change);
+    }
     this.spawn();
     this._tick++;
   }
@@ -329,6 +356,17 @@ export class World {
       }
     }
     edited.traffic.copyNoiseFrom(this.traffic);
+    for (const index of edited.actuatedJunctions) {
+      const point = edited.network.junctions![index]!.point;
+      const old = this.actuatedJunctions.find(i => {
+        const p = this.network.junctions![i]!.point;
+        return p.x === point.x && p.y === point.y;
+      });
+      if (old !== undefined) {
+        edited.signalClocks[index] = this.signalClocks[old]!;
+        edited.waitingTicks[index] = this.waitingTicks[old]!;
+      }
+    }
     edited.rng.copyFrom(this.rng);
     if (!this.town) edited.town = null;
     edited.admissionsOpen = this.admissionsOpen;
@@ -492,16 +530,43 @@ export class World {
   }
 
   /** Reserve the conflict area before entry; vehicles already inside finish clearing it. */
+  private approachCall(index: number, group: number, distance: number): boolean {
+    const junction = this.network.junctions![index]!;
+    for (const arm of junction.arms) {
+      if (arm.group !== group || !this.bucketCount[arm.incoming]) continue;
+      const driver = this.order[this.bucketStart[arm.incoming]!]!;
+      const v = this.vehicles;
+      if (v.alive[driver] && v.lane[driver] === arm.incoming
+        && this.laneLen[arm.incoming]! - v.s[driver]! < distance
+        && this.routing.nextHop(v.dest[driver]!, arm.incoming) >= 0) return true;
+    }
+    return false;
+  }
+
+  private sideCall(index: number): boolean {
+    if (this.approachCall(index, 1, 18)) return true;
+    if (this.walkers) for (const c of this.walkers.graph.crossings) {
+      if (c.signal === index && c.walkGroup === 1 && c.waiting) return true;
+    }
+    return false;
+  }
+
   private signalBlocked(movement: number): boolean {
-    if (signalAspect(this.signalGroups[movement]!, this.tick) !== 'green') return true;
+    const signal = this.movementSignal[movement]!;
+    const clock = signal < 0 ? this.tick : this.signalClocks[signal]!;
+    if (signalAspect(this.signalGroups[movement]!, clock) !== 'green') return true;
     for (const other of this.lanes[movement]!.crossingYieldTo) if (this.movementOccupied(other)) return true;
     for (const other of this.yieldingMovements[movement]!) if (this.movementOccupied(other)) return true;
     return false;
   }
 
   private movementOccupied(other: number): boolean {
-    return this.bucketCount[other]! > 0 || this.enteredAt[other] === this.tick
-      || this.laneMinRear[this.lanes[other]!.next[0]!]! < 0;
+    if (this.bucketCount[other]! > 0 || this.enteredAt[other] === this.tick) return true;
+    const outgoing = this.lanes[other]!.next[0]!;
+    if (this.laneMinRear[outgoing]! >= 0) return false;
+    if (this.movementSignal[other]! < 0 || !this.bucketCount[outgoing]) return true;
+    const slot = this.tail(outgoing);
+    return this.previousVehicle[slot] !== this.vehicles.id[slot] || this.previousMovement[slot] === other;
   }
 
   private junctionBlocked(movement: number, distance: number, speed: number): boolean {
@@ -635,6 +700,10 @@ export class World {
         si -= this.laneLen[L]!;
         if (this.signalGroups[nh]! >= 0) this.enteredAt[nh] = this.tick;
         V.laneDelay[i] = 0;
+        if (this.movementSignal[L]! >= 0) {
+          this.previousVehicle[i] = V.id[i]!;
+          this.previousMovement[i] = L;
+        }
         L = nh;
       }
       s[i] = si;
@@ -815,10 +884,12 @@ export class World {
     };
     const V = this.vehicles;
     mix(this._tick);
+    for (const index of this.actuatedJunctions) { mix(this.signalClocks[index]!); mix(this.waitingTicks[index]!); }
     mix(this.spawned);
     mix(this.completed);
     for (let i = 0; i < V.highWater; i++) {
       if (!V.alive[i]) continue;
+      if (this.actuatedJunctions.length && this.previousVehicle[i] === V.id[i]) mix(this.previousMovement[i]!);
       mix(V.id[i]!);
       mix(V.lane[i]!);
       mix(Math.round(V.s[i]! * 1e4));

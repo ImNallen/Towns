@@ -98,7 +98,7 @@ export function buildRoads(network: Network, marking: 'dashed' | 'solid' = 'soli
   }
   const group = new THREE.Group();
   group.name = 'roads';
-  const lamps: { group: number; material: THREE.MeshLambertMaterial }[] = [];
+  const lamps: { signal: number; group: number; material: THREE.MeshLambertMaterial }[] = [];
   for (const junction of network.junctions ?? []) if (junction.lights) {
     for (const arm of junction.arms) {
       const lane = network.lanes[arm.incoming]!;
@@ -110,11 +110,11 @@ export function buildRoads(network: Network, marking: 'dashed' | 'solid' = 'soli
       const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.78, 0.1, 16), material);
       lamp.position.set(x, 1.02, z);
       group.add(housing, lamp);
-      lamps.push({ group: arm.group, material });
+      lamps.push({ signal: junction.actuated ? network.junctions!.indexOf(junction) : -1, group: arm.group, material });
     }
   }
-  group.userData.updateSignals = (tick: number) => {
-    for (const lamp of lamps) lamp.material.color.set(PALETTE.signal[signalAspect(lamp.group, tick)]);
+  group.userData.updateSignals = (tick: number, clocks?: Int16Array) => {
+    for (const lamp of lamps) lamp.material.color.set(PALETTE.signal[signalAspect(lamp.group, clocks?.[lamp.signal] ?? tick)]);
   };
   group.userData.updateSignals(0);
   const add = (mesh: FlatMesh, color: string): void => {

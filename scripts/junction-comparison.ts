@@ -4,7 +4,8 @@ import { decodeCellKey, type CellKey } from '../src/sim/zoning/cells';
 import type { LandUse } from '../src/sim/zoning/paint';
 import { DT, World } from '../src/sim/world';
 
-for (const lights of [false,true]) {
+const peak = process.argv.includes('--peak');
+for (const plan of ['give-way','fixed','actuated']) {
   const edits: MeadowEdit[] = [];
   const point = {x:-65,y:-8};
   for (const [a,b] of [[{x:-45,y:-8},{x:45,y:8}], [point,{x:-65,y:62}]] as const) {
@@ -12,9 +13,9 @@ for (const lights of [false,true]) {
     if (!plan.ok) throw new Error(plan.reason);
     edits.push(plan.road);
   }
-  if (lights) edits.push({lights:point});
+  if (plan !== 'give-way') edits.push({lights:point,actuated:plan === 'actuated'});
   const scenario = meadowScenario(edits);
-  const world = new World(scenario,1);
+  const world = new World(peak ? {...scenario,demand:scenario.demand.map(d => ({...d,rate:0.48}))} : scenario,1);
   const zoning = new Map<CellKey,LandUse>();
   for (const raw of scenario.zones!.keys) {
     const key = raw as CellKey, {column,side} = decodeCellKey(key);
@@ -47,6 +48,6 @@ for (const lights of [false,true]) {
       row.peak=Math.max(row.peak,queue);
     });
   }
-  console.log(lights?'Lights':'Give way', 'lost',world.stats().lost);
+  console.log(plan, 'lost',world.stats().lost);
   console.table(results.map((r,i)=>({lane:arms[i]!.incoming,meanQueue:r.queueTicks/288000,peak:r.peak,delay:r.delay/Math.max(1,r.passed),throughput:r.passed})));
 }

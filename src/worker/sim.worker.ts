@@ -60,7 +60,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
           post({ type: 'editRejected', reason: junction ? 'This junction already has lights.' : 'Select a T or four-way junction.' });
           break;
         }
-        proposed = [...edits, { lights: junction.point }];
+        proposed = [...edits, { lights: junction.point, actuated: msg.actuated }];
       } else if (msg.type === 'buildWalk') {
         const cells = world.scenario.zones!;
         const plan = planWalk(world.network, msg.walk, msg.start, msg.end, { cells, zoning: meadowZoning(edits,cells) });
@@ -168,7 +168,7 @@ function postFrame(w: World): void {
   const paint = new Uint8Array(w.vehicles.highWater);
   const slots = w.writeSnapshot(positions, ids, models, paint);
   const walkers = w.pedestrianPositions();
-  post({ type: 'frame', walkers, traffic: w.traffic.view(), tick: w.tick, slots, positions, ids, models, paint, stats: w.stats() }, [walkers.buffer, positions.buffer, ids.buffer, models.buffer, paint.buffer]);
+  post({ type: 'frame', signalClocks: w.signalClocks, walkers, traffic: w.traffic.view(), tick: w.tick, slots, positions, ids, models, paint, stats: w.stats() }, [walkers.buffer, positions.buffer, ids.buffer, models.buffer, paint.buffer]);
 }
 
 function postTown(w: World): void {
