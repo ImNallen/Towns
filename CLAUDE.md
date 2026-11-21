@@ -26,7 +26,8 @@ src/sim/        Pure, deterministic simulation. No DOM, no Three.js, no React, n
   network/      Lane graph (lanes, next/prev, give-way) + drawable surfaces; NetworkBuilder validates it
   traffic/      IDM car-following, SoA vehicle storage, next-hop routing tables
   scenarios/    Map definitions (network + demand + scenery)
-  zoning/       Zone cells beside every built road (Meadow Vale only; the World does not read them yet)
+  zoning/       Zone cells beside every built road, and zone strokes painted onto them (Meadow Vale only;
+                the World does not read them yet)
   world.ts      World: fixed 20 Hz tick (DT = 1/20), stats, snapshot, hash
 src/worker/     Runs World in a Web Worker; protocol.ts defines every message
 src/render/     Three.js: camera, road meshes, scenery, instanced vehicles, debug overlay, game loop
@@ -37,8 +38,10 @@ tests/          vitest (tests/**/*.test.ts) and Playwright (tests/e2e)
 
 Data flow: `main.tsx` → `createGame` starts the worker → worker builds the scenario and `World`, posts `ready`
 (the scenario, for drawing) and then a `frame` (positions, ids, stats) after each batch of ticks → the renderer
-interpolates between the last two frames. On Meadow Vale the worker also owns the ordered list of road edits.
-The editor previews a placement with the same planner the worker uses to accept it. Each edit rebuilds the local lane network and maps active vehicles to their positions and destinations. If a trip cannot continue safely, the worker pauses new arrivals and retries as traffic clears.
+interpolates between the last two frames. On Meadow Vale the worker also owns the ordered list of edits: roads,
+removals and zone strokes. The editor previews a placement with the same planner the worker uses to accept it.
+A zone stroke never changes the network, so the worker applies it and its undo without rebuilding the World, and both
+threads derive the painted cells with `meadowZoning(edits, cells)`. Each road edit rebuilds the local lane network and maps active vehicles to their positions and destinations. If a trip cannot continue safely, the worker pauses new arrivals and retries as traffic clears.
 
 ## Rules (enforced by tests/architecture.test.ts where possible)
 
