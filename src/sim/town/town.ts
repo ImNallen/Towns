@@ -1,3 +1,4 @@
+import { Model } from '../../vehicles/catalogue';
 import { BUDGET, ECONOMY } from './economy';
 import { Treasury, type BudgetView } from './budget';
 import { ZONE_KINDS, type ZoneKind } from '../zoning/paint';
@@ -14,7 +15,7 @@ export const CLOCK_START = 6 * 60 + 30;
 /** What the town needs from the world it lives in. */
 export interface TownRoads {
   readonly routing: Routing;
-  trySpawnAt(lane: number, s: number, dest: number, owner: number): boolean;
+  trySpawnAt(lane: number, s: number, dest: number, owner: number, model: Model): boolean;
 }
 
 // Person activity: Home -> Outbound(errand) -> Away(errand) -> Homebound -> Home.
@@ -42,7 +43,8 @@ const PANTRY_LOW = 1.5;
 
 const HOUSE_CAPACITY = [0, 3, 5, 7];
 const MAX_LEVEL = 3;
-const MAX_MODEL = 3;
+const MAX_MODEL = Model.SUV;
+const IDLE = 0, INBOUND = 1, UNLOADING = 2, RETURNING = 3;
 type Demand = Record<ZoneKind, number>;
 const GROWTH_THRESHOLD = 360;
 const lotZone = (lot: Lot) => lot.designs[0]!.blueprint.zone;
@@ -134,6 +136,8 @@ export interface BusinessView {
   lot: ReturnType<typeof visibleLot>;
   jobs: number;
   filled: number;
+  deliveries: number;
+  unloading: boolean;
   customers: number;
 }
 export interface TownView {
@@ -218,6 +222,9 @@ export class Town {
 
   private readonly filled: Int32Array;
   private readonly open: Uint8Array;
+  private readonly deliveries: Uint16Array;
+  private readonly freightState: Uint8Array;
+  private readonly freightDue: Int32Array;
   private readonly customers: Uint32Array;
   private readonly growth: Demand = { residential: 0, shops: 0, workplaces: 0 };
   private readonly eventPlace = new Array<string>(EVENT_CAPACITY);
@@ -268,6 +275,9 @@ export class Town {
     this.early = new Uint8Array(P);
     this.filled = new Int32Array(spec.regions.length + H);
     this.open = new Uint8Array(H);
+    this.deliveries = new Uint16Array(H);
+    this.freightState = new Uint8Array(H);
+    this.freightDue = new Int32Array(H);
     this.customers = new Uint32Array(H);
     this.eventDay = new Int32Array(EVENT_CAPACITY);
     this.eventMinute = new Int16Array(EVENT_CAPACITY);
@@ -304,7 +314,8 @@ export class Town {
     this.funds[h] = ECONOMY.initialFunds + rng.int(ECONOMY.initialFundsRange);
     this.level[h] = 1;
     this.cars[h] = 1;
-    this.carModel[h] = 1;
+    this.carModel[h] = this.funds[h]! >= ECONOMY.carPrice[Model.Estate] && this.memberCount[h]! > adults
+      ? Model.Estate : Model.Hatchback;
     this.pantry[h] = 2 + rng.next() * 2;
   }
 
@@ -337,7 +348,7 @@ export class Town {
     for (const key of [
       'taxable', 'taxesPaid', 'payroll', 'lastDailyCost', 'surname', 'funds', 'wages', 'level', 'cars', 'carModel', 'pantry', 'firstMember', 'memberCount', 'adults',
       'household', 'role', 'age', 'firstName', 'job', 'activity', 'errand', 'at', 'arrivedAt', 'until', 'workedDay',
-      'open', 'customers', 'early', 'eventDay', 'eventMinute', 'eventHousehold', 'eventKind', 'eventDetail', 'eventPerson',
+      'deliveries', 'freightState', 'freightDue', 'open', 'customers', 'early', 'eventDay', 'eventMinute', 'eventHousehold', 'eventKind', 'eventDetail', 'eventPerson',
     ] as const) this[key].set(source[key]);
     Object.assign(this.growth, source.growth);
     Object.assign(this.eventPlace, source.eventPlace);
@@ -358,6 +369,9 @@ export class Town {
       if (this.level[h]) this.moveOut(h);
       if (!this.open[h]) continue;
       closed = true;
+      this.deliveries[h] = 0;
+      this.freightState[h] = 0;
+      this.freightDue[h] = 0;
       this.open[h] = this.customers[h] = 0;
       const place = h + this.spec.regions.length;
       for (let p = 0; p < source.people; p++) {
@@ -387,12 +401,46 @@ export class Town {
     if (minute % 60 === 0) this.grow(minute, roads.routing);
     const clock = minute % MINUTES_PER_DAY;
     if (clock === 0) this.midnight(minute, roads.routing);
+    this.dispatchFreight(minute, roads);
     const day = dayOf(minute);
     for (let p = 0; p < this.people; p++) {
       if (this.role[p] !== ADULT) continue;
       if (this.activity[p] === HOME) this.leaveHome(p, day, clock, roads);
       else if (this.activity[p] === AWAY && minute >= this.until[p]!) this.leaveRegion(p, roads);
     }
+  }
+
+  /** Owner -1 is through traffic. Freight owners -2 and below identify their business slot. */
+  private dispatchFreight(minute: number, roads: TownRoads): void {
+    for (let h = 0; h < this.open.length; h++) {
+      if (!this.open[h] || minute < this.freightDue[h]!) continue;
+      const home = this.spec.homes[h]!;
+      const depot = this.spec.regions[home.region]!;
+      const model = lotZone(home.lot!) === 'shops' ? Model.DeliveryVan : Model.Lorry;
+      const owner = -2 - h;
+      const access = roads.routing.bestAccess(home.access, depot.sink);
+      if (access < 0) continue;
+      if (this.freightState[h] === UNLOADING) {
+        const start = home.access[access]!;
+        if (roads.trySpawnAt(start.lane, start.s, depot.sink, owner, model)) this.freightState[h] = RETURNING;
+      } else if (this.freightState[h] === IDLE && roads.trySpawnAt(depot.source, 0, this.homeDest + h, owner, model)) {
+        this.freightState[h] = INBOUND;
+      }
+    }
+  }
+
+  freightArrived(owner: number, minute: number): boolean {
+    const h = -2 - owner;
+    if (this.freightState[h] === INBOUND) {
+      this.deliveries[h]++;
+      this.freightState[h] = UNLOADING;
+      this.freightDue[h] = minute + 15;
+      return true;
+    }
+    this.freightState[h] = IDLE;
+    const jobs = lotJobs(this.spec.homes[h]!.lot!);
+    this.freightDue[h] = minute + Math.ceil(MINUTES_PER_DAY / (1 + jobs / 2));
+    return false;
   }
 
   private demandFor(zone: ZoneKind): number {
@@ -452,6 +500,7 @@ export class Town {
   }
 
   driving(p: number): boolean {
+    if (p < -1) return this.freightState[-2 - p] === INBOUND || this.freightState[-2 - p] === RETURNING;
     return p < 0 || (!this.departed(p) && (this.activity[p] === OUTBOUND || this.activity[p] === HOMEBOUND));
   }
 
@@ -510,7 +559,7 @@ export class Town {
     const access = this.spec.homes[this.household[p]!]!.access;
     const dest = this.destination(region);
     const k = roads.routing.bestAccess(access, dest);
-    if (k < 0 || !roads.trySpawnAt(access[k]!.lane, access[k]!.s, dest, p)) return false;
+    if (k < 0 || !roads.trySpawnAt(access[k]!.lane, access[k]!.s, dest, p, this.carModelOf(p))) return false;
     this.activity[p] = OUTBOUND;
     this.errand[p] = errand;
     this.at[p] = region;
@@ -530,7 +579,7 @@ export class Town {
       lane = access[k]!.lane;
       s = access[k]!.s;
     }
-    if (!roads.trySpawnAt(lane, s, dest, p)) return;
+    if (!roads.trySpawnAt(lane, s, dest, p, this.carModelOf(p))) return;
     this.activity[p] = HOMEBOUND;
     if (this.errand[p] !== WORK) return;
     const start = this.until[p]! - (SHIFT_END - SHIFT_START);
@@ -616,6 +665,7 @@ export class Town {
   }
 
   private midnight(minute: number, routing: Routing): void {
+    this.deliveries.fill(0);
     this.customers.fill(0);
     for (let h = 0; h < this.spec.homes.length; h++) {
       if (!this.open[h] && !this.level[h]) continue;
@@ -713,7 +763,7 @@ export class Town {
     const level = this.level[h]!;
     const model = this.carModel[h]!;
     if (mobility < 1 && mobility <= comfort) {
-      if (spare >= ECONOMY.carPrice[model]!) this.buyCar(h, minute);
+      if (spare >= ECONOMY.carPrice[model]!) this.buyCar(h, minute, spare);
       return;
     }
     if (comfort < 1) {
@@ -732,7 +782,18 @@ export class Town {
     }
   }
 
-  private buyCar(h: number, minute: number): void {
+  private buyCar(h: number, minute: number, spare: number): void {
+    const current = this.carModel[h]!;
+    const children = this.memberCount[h]! - this.adults[h]!;
+    const preferred = children ? Model.Estate : Model.SUV;
+    const price = ECONOMY.carPrice[preferred];
+    const trade = this.cars[h]! * (price - ECONOMY.carPrice[current]! * ECONOMY.tradeInShare);
+    if (current < preferred && spare >= price + trade + ECONOMY.wealthMargin) {
+      this.carModel[h] = preferred;
+      this.funds[h] -= trade;
+      this.carUpgrades++;
+      this.record(minute, h, NEWER_CAR, preferred);
+    }
     this.funds[h] -= ECONOMY.carPrice[this.carModel[h]!]!;
     this.cars[h]++;
     this.carsBought++;
@@ -811,6 +872,9 @@ export class Town {
       if (!lot || lotZone(lot) === 'residential') continue;
       mix(lotZone(lot) === 'shops' ? 1 : 2);
       mix(this.open[h]!);
+      mix(this.deliveries[h]!);
+      mix(this.freightState[h]!);
+      mix(this.freightDue[h]!);
       mix(this.customers[h]!);
     }
     mix(this.carsBought);
@@ -905,6 +969,7 @@ export class Town {
       if (zone === 'residential') throw new Error('A residence cannot be an open business');
       budget.today[zone] += this.dailyTax(h);
       businesses.push({ lastDailyCost: this.lastDailyCost[h]!, taxesPaid: this.taxesPaid[h]!, home: h, lot: visibleLot(lot), name: this.placeName(r), zone,
+        deliveries: this.deliveries[h]!, unloading: this.freightState[h] === UNLOADING,
         jobs: lotJobs(lot), filled: this.filled[r]!, customers: this.customers[h]! });
     }
     return {

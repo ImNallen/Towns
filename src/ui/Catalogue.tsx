@@ -3,6 +3,7 @@ import { PALETTE } from '../render/palette';
 import { useEffect, useRef } from 'react';
 import { BLUEPRINTS } from '../buildings/catalogue';
 import { PreviewRenderer } from '../render/buildings/preview';
+import { VEHICLES } from '../vehicles/catalogue';
 import './catalogue.css';
 
 export function Catalogue() {
@@ -12,7 +13,8 @@ export function Catalogue() {
     try {
       for (const canvas of root.current!.querySelectorAll('canvas')) {
         const design = BLUEPRINTS.find(b => b.id === canvas.dataset.design);
-        if (design) renderer.sheet(canvas, design);
+        if (canvas.dataset.vehicle) renderer.vehicle(canvas, Number(canvas.dataset.vehicle));
+        else if (design) renderer.sheet(canvas, design);
         else renderer.street(canvas);
       }
       root.current!.dataset.ready = 'true';
@@ -22,8 +24,8 @@ export function Catalogue() {
   }, []);
   return <main ref={root} className="catalogue">
     <header><span className="wordmark">Towns / Low density</span>
-      <h1>Building catalogue</h1>
-      <nav aria-label="Catalogue sections">{['cheap', 'mid', 'expensive', 'shops', 'workplaces', 'street', 'roads'].map(id =>
+      <h1>Town catalogue</h1>
+      <nav aria-label="Catalogue sections">{['cheap', 'mid', 'expensive', 'shops', 'workplaces', 'roads', 'vehicles', 'street'].map(id =>
         <a key={id} href={'#' + id}>{id === 'street' ? 'Sample street' : id}</a>)}</nav>
     </header>
     <p>Selected wall and roof combinations · Lot sizes in zone cells</p>
@@ -47,6 +49,12 @@ export function Catalogue() {
           <small>{edgeOffset(type, 'left') + edgeOffset(type, 'right')} m wide · ${road.cost}/m · ${road.upkeep}/m daily upkeep</small>
         </figure>;
       })}</div>
+    </section>
+    <section id="vehicles"><h2>Vehicles</h2>
+      <div className="design-grid">{VEHICLES.map(type =>
+        <figure key={type.model}><figcaption><strong>{type.name}</strong><span>{type.length} × {type.width} m</span></figcaption>
+          <canvas width={512} data-vehicle={type.model} aria-label={type.name} />
+        </figure>)}</div>
     </section>
     <section id="street"><h2>Sample street</h2><p>Garden Road · 16 lots</p>
       <canvas width={1920} aria-label="Sixteen generated residential lots lining Garden Road" />

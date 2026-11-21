@@ -62,7 +62,8 @@ test('building catalogue and sample street render', async ({ page }) => {
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/?catalogue=1');
   await expect(page.locator('.catalogue')).toHaveAttribute('data-ready', 'true', { timeout: 30_000 });
-  await expect(page.locator('figure canvas')).toHaveCount(36);
+  await expect(page.locator('figure canvas')).toHaveCount(42);
+  await page.locator('#vehicles').screenshot({ path: 'artifacts/screens/vehicle-catalogue.png' });
   await page.locator('#roads').screenshot({ path: 'artifacts/screens/road-catalogue.png' });
   await page.locator('#shops').screenshot({ path: 'artifacts/screens/shop-catalogue.png' });
   await page.locator('#workplaces').screenshot({ path: 'artifacts/screens/workplace-catalogue.png' });
@@ -181,6 +182,22 @@ test('businesses grow beside homes on a mixed street', async ({ page }) => {
   await page.evaluate(() => window.__towns!.setSpeed(0));
   await expect(page.locator('.budget')).toContainText('settle at midnight');
   await page.screenshot({path: 'artifacts/screens/budget-accrual.png'});
+  await page.locator('.budget summary').click();
+  await page.waitForFunction(() => {
+    if ((window.__towns!.stats()?.active ?? 0) < 10) return false;
+    window.__towns!.setSpeed(0);
+    return true;
+  });
+  await page.screenshot({path: 'artifacts/screens/mixed-vehicles.png'});
+  // Pause in the browser as soon as a delivery is unloading, before the next worker frame.
+  await page.evaluate(() => window.__towns!.setSpeed(40));
+  await page.waitForFunction(() => {
+    if (!window.__towns!.town()!.businesses.some(b => b.zone === 'workplaces' && b.unloading)) return false;
+    window.__towns!.setSpeed(0);
+    return true;
+  }, null, { timeout: 90_000, polling: 'raf' });
+  await page.screenshot({path: 'artifacts/screens/workplace-lorry.png'});
+
 });
 
 test('road quote, salvage and insufficient funds agree with the HUD', async ({ page }) => {

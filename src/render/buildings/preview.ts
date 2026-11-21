@@ -1,3 +1,5 @@
+import { vehicleGeometry } from '../vehicles';
+import { vehicleType } from '../../vehicles/catalogue';
 import * as THREE from 'three';
 import { CELL_WIDTH, CELL_DEPTH } from '../../sim/zoning/cells';
 import { disposeLayer } from '../dispose';
@@ -46,6 +48,18 @@ export class PreviewRenderer {
     canvas.getContext('2d')!.drawImage(this.renderer.domElement, 0, 0);
     sun.shadow.dispose();
     disposeLayer(lots);
+  }
+
+  vehicle(canvas: HTMLCanvasElement, model: number) {
+    const type = vehicleType(model);
+    const group = new THREE.Group();
+    const mesh = new THREE.Mesh(vehicleGeometry(type), new THREE.MeshLambertMaterial({
+      vertexColors: true, color: PALETTE.vehicles[type.colours[0]],
+    }));
+    mesh.position.x = type.length / 2;
+    mesh.castShadow = true;
+    group.add(mesh);
+    this.paint(canvas, group, 13, 5.2);
   }
 
   sheet(canvas: HTMLCanvasElement, blueprint: Blueprint) {

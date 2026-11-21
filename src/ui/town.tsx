@@ -1,3 +1,4 @@
+import { vehicleType } from '../vehicles/catalogue';
 import { dollars as money } from '../sim/town/budget';
 import { ZONE_KINDS } from '../sim/zoning/paint';
 import { PALETTE } from '../render/palette';
@@ -5,7 +6,6 @@ import type { HouseholdView, PersonView, TownEventView, TownView } from '../sim/
 
 const FEED_LENGTH = 3;
 const ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth'];
-export const CAR_MODELS = ['Compact', 'Estate', 'Tourer'] as const;
 const HOMES = ['Cottage', 'Family home', 'Two-storey home'];
 
 const pad = (n: number): string => String(n).padStart(2, '0');
@@ -31,7 +31,7 @@ function describe(event: TownEventView, town: TownView): string {
   switch (event.kind) {
     case 'movedIn': return `${family(household)} moved into a new home`;
     case 'boughtCar': return `${family(household)} bought a ${ORDINALS[event.cars - 1] ?? 'new'} car`;
-    case 'newerCar': return `${family(household)} traded up to the ${CAR_MODELS[event.model - 1]}`;
+    case 'newerCar': return `${family(household)} traded up to the ${vehicleType(event.model).name}`;
     case 'upgradedHouse': return event.level >= 3
       ? `${family(household)} built a second storey`
       : `${family(household)} moved up to a larger home`;
@@ -110,7 +110,7 @@ function Need({ label, value }: { label: string; value: number }) {
 
 export function HouseholdCard({ household, onClose }: { household: HouseholdView; onClose: () => void }) {
   const { needs } = household;
-  const model = CAR_MODELS[household.carModel - 1];
+  const model = vehicleType(household.carModel).name;
   return (
     <section className="household panel" aria-label="Household">
       <div className="panel-heading">
@@ -119,7 +119,7 @@ export function HouseholdCard({ household, onClose }: { household: HouseholdView
       </div>
       <h2 className="household-name">{family(household)}</h2>
       <p className="household-meta">
-        <span><i className="car-swatch" style={{ background: PALETTE.carModels[household.carModel - 1] }} aria-hidden="true" />{household.cars} {model}{household.cars === 1 ? '' : 's'}</span>
+        <span><i className="car-swatch" style={{ background: PALETTE.vehicles[vehicleType(household.carModel).colours[0]] }} aria-hidden="true" />{household.cars} {model}{household.cars === 1 ? '' : 's'}</span>
         <span>{money(household.funds)}</span>
       </p>
       <div className="needs">

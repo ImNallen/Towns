@@ -1,3 +1,4 @@
+import { Model } from '../../vehicles/catalogue';
 import { arcPoints, cubicPoints } from '../math/curves';
 import { polyline, sampleAt, type PathSample, type Polyline } from '../math/polyline';
 import { add, distance, fromAngle, normalize, perp, scale, sub, vec2, type Vec2 } from '../math/vec';
@@ -95,7 +96,7 @@ export function roundaboutTown(): Scenario {
     if (a.spec.houses) placeHouses(b, a.centerline, a.spec.houses, houses);
   }
 
-  const demand: Demand[] = approaches.map((a) => ({ lane: a.road.backward, rate: a.spec.demand }));
+  const demand: Demand[] = approaches.map((a) => ({ lane: a.road.backward, model: Model.Estate, rate: a.spec.demand }));
 
   return {
     name: 'roundabout',

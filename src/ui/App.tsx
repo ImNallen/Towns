@@ -181,6 +181,7 @@ export function App({ game }: { game: Game }) {
           <dl><dt>Jobs filled</dt><dd>{business.filled} / {business.jobs}</dd>
             <dt>Yesterday’s wages and taxes</dt><dd>{money(business.lastDailyCost)}</dd>
             <dt>Taxes paid to date</dt><dd>{money(business.taxesPaid)}</dd>
+            <dt>Deliveries today</dt><dd>{business.deliveries}</dd>
             <dt>Customers today</dt><dd>{business.customers}</dd></dl>
         </section>}
         {household && <HouseholdCard household={household} onClose={() => selectHouse(null)} />}

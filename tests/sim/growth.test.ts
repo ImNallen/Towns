@@ -1,6 +1,5 @@
 import { expect, it } from 'vitest';
 import { accessPoints, meadowScenario, planMeadowRoad } from '../../src/sim/scenarios/meadow';
-import { VEHICLE_LENGTH } from '../../src/sim/traffic/idm';
 import { DT, World } from '../../src/sim/world';
 import { decodeCellKey, ZONE_KERB, type CellKey } from '../../src/sim/zoning/cells';
 import { zonedLots } from '../../src/sim/zoning/lots';
@@ -62,12 +61,12 @@ it('grows homes at the vacancy-driven rate, commutes and upgrades deterministica
         }
       }
       for (let j = 0; j < i; j++) {
-        if (v.alive[j] && v.lane[i] === v.lane[j]) minGap = Math.min(minGap, Math.abs(v.s[i]! - v.s[j]!));
+        if (v.alive[j] && v.lane[i] === v.lane[j]) minGap = Math.min(minGap, Math.abs(v.s[i]! - v.s[j]!) - v.length[v.s[i]! >= v.s[j]! ? i : j]!);
       }
     }
   }
   expect(sawDeparture).toBe(true);
-  expect(minGap).toBeGreaterThanOrEqual(VEHICLE_LENGTH - 0.01);
+  expect(minGap).toBeGreaterThanOrEqual(-0.01);
   // With more adults competing for the same off-map jobs, allow time to save for an upgrade.
   step(world, 32 * day);
   const grown = world.townView()!.households.filter(h => h.lot);

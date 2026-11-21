@@ -5,8 +5,9 @@ import { sameParcel, zonedLots } from './zoning/lots';
 import type { Zoning } from './zoning/paint';
 import { accessPoints } from './scenarios/meadow';
 import type { Scenario } from './scenarios/types';
-import { IDM, VEHICLE_LENGTH, idmAccel } from './traffic/idm';
+import { IDM, idmAccel } from './traffic/idm';
 import { Routing } from './traffic/routing';
+import { Model, VEHICLES, throughModel, vehicleType } from '../vehicles/catalogue';
 import { Vehicles } from './traffic/vehicles';
 import { CLOCK_START, Town, type TownView } from './town/town';
 
@@ -16,6 +17,7 @@ export const DT = 1 / 20;
 const TICKS_PER_MINUTE = 20;
 
 /** How far ahead a driver looks along their route for leaders, slow lanes and give-ways (m). */
+const MAX_LENGTH = Math.max(...VEHICLES.map(type => type.length));
 const LOOKAHEAD = 90;
 /** Start checking a give-way this far before the merge point (m). */
 const YIELD_ZONE = 45;
@@ -28,8 +30,8 @@ const CONFLICT_BEFORE = 1.5;
 const CONFLICT_AFTER = 2.5;
 /** Speed for turning off the road into a driveway (m/s). */
 const TURN_SPEED = 4;
-/** A new car needs the car ahead this far beyond its own front bumper (m). */
-const SPAWN_SPACING = VEHICLE_LENGTH + IDM.minGap + 3;
+/** Minimum free space between bumpers at admission (m). */
+const SPAWN_SPACING = IDM.minGap + 3;
 
 export interface SimStats {
   tick: number;
@@ -39,6 +41,7 @@ export interface SimStats {
   spawned: number;
   completed: number;
   /** Vehicles removed because they could not continue (should stay 0). */
+  deliveries: number;
   lost: number;
   meanTripTime: number;
   meanSpeed: number;
@@ -48,6 +51,7 @@ export interface SimStats {
 }
 
 interface Spawner {
+  model?: Model;
   lane: number;
   rate: number;
   /** Reachable destination indices, excluding a U-turn back down the same road. */
@@ -81,13 +85,14 @@ export class World {
   private readonly order: Int32Array;
   /** Position of each slot within its lane bucket (0 = frontmost). */
   private readonly rank: Int32Array;
-  /** Smallest `s` on each lane after the last move; used for spawn spacing. */
-  private readonly laneMinS: Float64Array;
+  /** Smallest rear bumper position on each lane after the last move; used for spawn spacing. */
+  private readonly laneMinRear: Float64Array;
 
   private readonly spawners: Spawner[];
 
   private spawned = 0;
   private completed = 0;
+  private deliveries = 0;
   private lost = 0;
   private tripTimeSum = 0;
   private readonly completedPerSecond = new Uint32Array(60);
@@ -116,7 +121,7 @@ export class World {
     this.bucketCursor = new Int32Array(n);
     this.order = new Int32Array(capacity);
     this.rank = new Int32Array(capacity);
-    this.laneMinS = new Float64Array(n).fill(Infinity);
+    this.laneMinRear = new Float64Array(n).fill(Infinity);
 
     this.spawners = scenario.demand.map((d) => {
       const start = startOf(this.lanes[d.lane]!.path);
@@ -128,7 +133,7 @@ export class World {
         const uTurn = dx * dx + dy * dy < 100;
         if (!uTurn && this.routing.canReach(idx, d.lane)) destinations.push(idx);
       });
-      return { lane: d.lane, rate: d.rate, destinations };
+      return { lane: d.lane, rate: d.rate, model: d.model, destinations };
     });
   }
 
@@ -262,7 +267,7 @@ export class World {
       edited.vehicles.lane[slot] = best.lane;
       edited.vehicles.s[slot] = best.s;
       edited.vehicles.dest[slot] = dest;
-      edited.laneMinS[best.lane] = Math.min(edited.laneMinS[best.lane]!, best.s);
+      edited.laneMinRear[best.lane] = Math.min(edited.laneMinRear[best.lane]!, best.s - V.length[slot]!);
     }
 
     // A split can put two cars on opposite sides of a lane boundary. Check spacing
@@ -275,13 +280,13 @@ export class World {
       const rank = edited.rank[slot]!;
       if (rank > 0) {
         const leader = edited.order[edited.bucketStart[lane]! + rank - 1]!;
-        if (edited.vehicles.s[leader]! - s < VEHICLE_LENGTH - 1e-4) return fail(slot);
+        if (edited.vehicles.s[leader]! - s < V.length[leader]! - 1e-4) return fail(slot);
       }
       let distance = edited.laneLen[lane]! - s;
       let next = edited.routing.nextHop(edited.vehicles.dest[slot]!, lane);
-      while (next >= 0 && distance < VEHICLE_LENGTH) {
+      while (next >= 0 && distance < MAX_LENGTH) {
         if (edited.bucketCount[next]! > 0
-          && distance + edited.vehicles.s[edited.tail(next)]! < VEHICLE_LENGTH - 1e-4) return fail(slot);
+          && distance + edited.vehicles.s[edited.tail(next)]! < V.length[edited.tail(next)]! - 1e-4) return fail(slot);
         distance += edited.laneLen[next]!;
         next = edited.routing.nextHop(edited.vehicles.dest[slot]!, next);
       }
@@ -291,6 +296,7 @@ export class World {
     edited.admissionsOpen = this.admissionsOpen;
     edited.spawned = this.spawned;
     edited.completed = this.completed;
+    edited.deliveries = this.deliveries;
     edited.lost = this.lost;
     edited.tripTimeSum = this.tripTimeSum;
     edited.completedPerSecond.set(this.completedPerSecond);
@@ -350,28 +356,28 @@ export class World {
       const si = s[i]!;
       const vi = v[i]!;
       const d = dest[i]!;
-      const v0 = this.laneSpeed[L]!;
+      const v0 = Math.min(V.topSpeed[i]!, this.laneSpeed[L]!);
 
       let a: number;
       let leaderFound = false;
       const k = this.rank[i]!;
       if (k > 0) {
         const j = this.order[this.bucketStart[L]! + k - 1]!;
-        a = idmAccel(vi, v0, s[j]! - si - VEHICLE_LENGTH, vi - v[j]!);
+        a = idmAccel(vi, v0, s[j]! - si - V.length[j]!, vi - v[j]!, V.maxAccel[i]!, V.brake[i]!);
         leaderFound = true;
       } else {
-        a = idmAccel(vi, v0, Infinity, 0);
+        a = idmAccel(vi, v0, Infinity, 0, V.maxAccel[i]!, V.brake[i]!);
       }
 
       let dist = this.laneLen[L]! - si;
-      if (this.lanes[L]!.yieldTo.length > 0) a = Math.min(a, this.yieldAccel(L, dist, vi, v0));
+      if (this.lanes[L]!.yieldTo.length > 0) a = Math.min(a, this.yieldAccel(i, L, dist, vi, v0));
 
       let cur = L;
       let nxt = this.routing.nextHop(d, cur);
       while (nxt >= 0 && dist < LOOKAHEAD) {
         if ((this.lanes[nxt]!.crossingYieldTo.length || this.yieldingMovements[nxt]!.length) && dist < YIELD_ZONE
           && dist >= COMMIT_DISTANCE && this.junctionBlocked(nxt, dist, vi)) {
-          a = Math.min(a, idmAccel(vi, v0, dist, vi));
+          a = Math.min(a, idmAccel(vi, v0, dist, vi, V.maxAccel[i]!, V.brake[i]!));
         }
         const limit = this.laneSpeed[nxt]!;
         if (limit < vi) a = Math.min(a, (limit * limit - vi * vi) / (2 * Math.max(dist, 2)));
@@ -379,12 +385,12 @@ export class World {
           const j = this.nearestEntering(nxt, cur);
           if (j >= 0) {
             const lead = lane[j] === nxt ? s[j]! : s[j]! - this.laneLen[lane[j]!]!;
-            a = Math.min(a, idmAccel(vi, v0, dist + lead - VEHICLE_LENGTH, vi - v[j]!));
+            a = Math.min(a, idmAccel(vi, v0, dist + lead - V.length[j]!, vi - v[j]!, V.maxAccel[i]!, V.brake[i]!));
             leaderFound = true;
           }
         }
         if (this.lanes[nxt]!.yieldTo.length > 0 && dist < YIELD_ZONE) {
-          a = Math.min(a, this.yieldAccel(nxt, dist + this.laneLen[nxt]!, vi, v0));
+          a = Math.min(a, this.yieldAccel(i, nxt, dist + this.laneLen[nxt]!, vi, v0));
         }
         dist += this.laneLen[nxt]!;
         cur = nxt;
@@ -411,26 +417,26 @@ export class World {
     let bestS = Infinity;
     if (this.bucketCount[lane]! > 0) {
       best = this.tail(lane);
-      bestS = s[best]!;
+      bestS = s[best]! - this.vehicles.length[best]!;
     }
     for (const p of this.lanes[lane]!.prev) {
       if (p === from || (this.lanes[p]!.yieldTo.length === 0 && this.lanes[p]!.crossingYieldTo.length === 0)
         || this.bucketCount[p]! === 0) continue;
       const j = this.order[this.bucketStart[p]!]!; // frontmost on the give-way lane
       const front = s[j]! - this.laneLen[p]!;
-      if (front > -COMMIT_DISTANCE && front < bestS) {
+      if (front > -COMMIT_DISTANCE && front - this.vehicles.length[j]! < bestS) {
         best = j;
-        bestS = front;
+        bestS = front - this.vehicles.length[j]!;
       }
     }
     return best;
   }
 
   /** Acceleration to respect a give-way at the end of `yieldLane`, `dEnd` meters ahead. */
-  private yieldAccel(yieldLane: number, dEnd: number, v: number, v0: number): number {
+  private yieldAccel(i: number, yieldLane: number, dEnd: number, v: number, v0: number): number {
     if (dEnd < COMMIT_DISTANCE) return Infinity;
     if (!this.mergeBlocked(yieldLane, dEnd, v)) return Infinity;
-    return idmAccel(v, v0, dEnd, v); // treat the merge point as a stopped obstacle
+    return idmAccel(v, v0, dEnd, v, this.vehicles.maxAccel[i]!, this.vehicles.brake[i]!); // treat the merge point as a stopped obstacle
   }
 
   /** Reserve the conflict area before entry; vehicles already inside finish clearing it. */
@@ -472,7 +478,7 @@ export class World {
   private mergeBlocked(yieldLane: number, dEnd: number, v: number): boolean {
     const tMe = dEnd / Math.max(v, 2);
     const target = this.lanes[yieldLane]!.next[0]!;
-    if (tMe < 3 && this.bucketCount[target]! > 0 && this.vehicles.s[this.tail(target)]! < VEHICLE_LENGTH + 1.5) {
+    if (tMe < 3 && this.bucketCount[target]! > 0 && this.vehicles.s[this.tail(target)]! < this.vehicles.length[this.tail(target)]! + 1.5) {
       return true; // merge zone still occupied
     }
     for (const p of this.lanes[yieldLane]!.yieldTo) {
@@ -519,6 +525,7 @@ export class World {
       for (;;) {
         if (si >= this.routing.exit(d, L)) {
           this.recordArrival(i);
+          if (owner[i]! < -1 && this.town?.freightArrived(owner[i]!, minute)) this.deliveries++;
           if (owner[i]! >= 0) this.town?.arrived(owner[i]!, minute);
           V.despawn(i);
           break;
@@ -538,9 +545,9 @@ export class World {
       lane[i] = L;
     }
 
-    this.laneMinS.fill(Infinity);
+    this.laneMinRear.fill(Infinity);
     for (let i = 0; i < V.highWater; i++) {
-      if (V.alive[i] && s[i]! < this.laneMinS[lane[i]!]!) this.laneMinS[lane[i]!] = s[i]!;
+      if (V.alive[i]) this.laneMinRear[lane[i]!] = Math.min(this.laneMinRear[lane[i]!]!, s[i]! - V.length[i]!);
     }
   }
 
@@ -551,16 +558,18 @@ export class World {
       const pick = this.rng.next();
       if (!this.admissionsOpen) continue;
       if (arrival >= sp.rate * DT || sp.destinations.length === 0) continue;
-      if (this.laneMinS[sp.lane]! < SPAWN_SPACING) continue;
+      if (this.laneMinRear[sp.lane]! < SPAWN_SPACING) continue;
       const dest = sp.destinations[Math.floor(pick * sp.destinations.length)]!;
       // Enter no faster than allows a comfortable stop behind whoever is already on the lane.
-      const room = this.laneMinS[sp.lane]! - VEHICLE_LENGTH - IDM.minGap;
-      const safe = Math.sqrt(2 * IDM.decel * Math.max(room, 0));
-      const speed = Math.min(this.laneSpeed[sp.lane]!, 10, safe);
-      const slot = this.vehicles.spawn(sp.lane, 0, speed, dest, this.time);
+      const model = sp.model ?? throughModel((pick * sp.destinations.length) % 1);
+      const type = vehicleType(model);
+      const room = this.laneMinRear[sp.lane]! - IDM.minGap;
+      const safe = Math.sqrt(2 * type.brake * Math.max(room, 0));
+      const speed = Math.min(this.laneSpeed[sp.lane]!, type.speed, 10, safe);
+      const slot = this.vehicles.spawn(sp.lane, 0, speed, dest, this.time, -1, model);
       if (slot >= 0) {
         this.spawned++;
-        this.laneMinS[sp.lane] = 0;
+        this.laneMinRear[sp.lane] = -type.length;
       }
     }
   }
@@ -570,17 +579,17 @@ export class World {
    * admissions are closed, when `dest` cannot be reached from there, or when a car is too
    * close ahead or could not stop comfortably behind it.
    */
-  trySpawnAt(lane: number, s: number, dest: number, owner: number): boolean {
-    if (!this.admissionsOpen || this.routing.timeFrom(dest, lane, s) === Infinity || this.crowded(lane, s)) return false;
-    const slot = this.vehicles.spawn(lane, s, 0, dest, this.time, owner);
+  trySpawnAt(lane: number, s: number, dest: number, owner: number, model = Model.Estate): boolean {
+    if (!this.admissionsOpen || this.routing.timeFrom(dest, lane, s) === Infinity || this.crowded(lane, s, vehicleType(model).length)) return false;
+    const slot = this.vehicles.spawn(lane, s, 0, dest, this.time, owner, model);
     if (slot < 0) return false;
     this.spawned++;
-    if (s < this.laneMinS[lane]!) this.laneMinS[lane] = s;
+    this.laneMinRear[lane] = Math.min(this.laneMinRear[lane]!, s - this.vehicles.length[slot]!);
     return true;
   }
 
   /** Would a car standing at `s` on `lane` be too close to another? Also checks adjacent lanes. */
-  private crowded(lane: number, s: number): boolean {
+  private crowded(lane: number, s: number, length: number): boolean {
     const V = this.vehicles;
     const { next, prev } = this.lanes[lane]!;
     for (let j = 0; j < V.highWater; j++) {
@@ -592,11 +601,11 @@ export class World {
       else if (prev.includes(other)) front = V.s[j]! - this.laneLen[other]!;
       else continue;
       if (front >= s) {
-        if (front - s < SPAWN_SPACING) return true;
+        if (front - V.length[j]! - s < SPAWN_SPACING) return true;
         continue;
       }
-      const room = s - VEHICLE_LENGTH - IDM.minGap - front;
-      if (room < 0 || V.v[j]! * V.v[j]! > 2 * IDM.decel * room) return true;
+      const room = s - length - IDM.minGap - front;
+      if (room < 0 || V.v[j]! * V.v[j]! > 2 * V.brake[j]! * room) return true;
     }
     return false;
   }
@@ -636,6 +645,7 @@ export class World {
       active: V.count,
       spawned: this.spawned,
       completed: this.completed,
+      deliveries: this.deliveries,
       lost: this.lost,
       meanTripTime: this.completed > 0 ? this.tripTimeSum / this.completed : 0,
       meanSpeed: V.count > 0 ? speedSum / V.count : 0,
@@ -646,9 +656,9 @@ export class World {
 
   /**
    * Write per-slot render data: positions as [x, y, heading] triples, ids (-1 = empty slot) and
-   * the driver's household car model (0 = through traffic). Returns the number of slots written.
+   * the model selected at departure. Returns the number of slots written.
    */
-  writeSnapshot(positions: Float32Array, ids: Int32Array, models: Uint8Array): number {
+  writeSnapshot(positions: Float32Array, ids: Int32Array, models: Uint8Array, paint?: Uint8Array): number {
     const V = this.vehicles;
     const sample: PathSample = { x: 0, y: 0, hx: 0, hy: 0 };
     for (let i = 0; i < V.highWater; i++) {
@@ -661,8 +671,11 @@ export class World {
       positions[i * 3 + 1] = sample.y;
       positions[i * 3 + 2] = Math.atan2(sample.hy, sample.hx);
       ids[i] = V.id[i]!;
-      const owner = V.owner[i]!;
-      models[i] = owner >= 0 && this.town ? this.town.carModelOf(owner) : 0;
+      models[i] = V.model[i]!;
+      if (paint) {
+        const colours = vehicleType(V.model[i]!).colours;
+        paint[i] = colours[V.owner[i] === -1 ? V.id[i]! % colours.length : 0]!;
+      }
     }
     return V.highWater;
   }
@@ -693,8 +706,9 @@ export class World {
       mix(V.lane[i]!);
       mix(Math.round(V.s[i]! * 1e4));
       mix(Math.round(V.v[i]! * 1e4));
-      if (this.town) mix(V.owner[i]!);
+      if (this.town) { mix(V.owner[i]!); mix(V.model[i]!); }
     }
+    if (this.town) mix(this.deliveries);
     this.town?.hash(mix);
     return (h >>> 0).toString(16).padStart(8, '0');
   }

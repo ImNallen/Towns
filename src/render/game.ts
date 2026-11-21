@@ -170,6 +170,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
       editor?.reject(msg.reason);
     } else if (msg.type === 'town') {
       latestTown = msg.view;
+      if (vehicles) vehicles.businesses = msg.view.businesses;
       editor?.setBalance(msg.view.budget.balance);
       houses?.update(msg.view.households, msg.view.businesses);
       if (selectedHouse !== null && !msg.view.households.some(h => h.home === selectedHouse)

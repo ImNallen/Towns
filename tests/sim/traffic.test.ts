@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { buildScenario, type ScenarioName } from '../../src/sim/scenarios';
-import { VEHICLE_LENGTH } from '../../src/sim/traffic/idm';
 import { DT, World } from '../../src/sim/world';
 
 const MINUTE = 60 / DT;
@@ -21,13 +20,13 @@ function overlaps(world: World): number {
   for (let i = 0; i < V.highWater; i++) {
     if (!V.alive[i]) continue;
     const list = byLane.get(V.lane[i]!) ?? [];
-    list.push(V.s[i]!);
+    list.push(i);
     byLane.set(V.lane[i]!, list);
   }
   let count = 0;
   for (const list of byLane.values()) {
-    list.sort((a, b) => a - b);
-    for (let k = 1; k < list.length; k++) if (list[k]! - list[k - 1]! < VEHICLE_LENGTH - 0.25) count++;
+    list.sort((a, b) => V.s[a]! - V.s[b]!);
+    for (let k = 1; k < list.length; k++) if (V.s[list[k]!]! - V.s[list[k - 1]!]! < V.length[list[k]!]! - 0.25) count++;
   }
   return count;
 }

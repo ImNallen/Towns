@@ -4,6 +4,8 @@ import type { ZoneCells } from '../zoning/cells';
 
 /** Vehicles entering the map at the start of a source lane. */
 export interface Demand {
+  /** Fixed fleet for reference traffic scenarios. Town traffic uses a mix. */
+  model?: import('../../vehicles/catalogue').Model;
   lane: number;
   /** Mean arrivals per second. */
   rate: number;

@@ -40,7 +40,8 @@ export type FromWorker =
       positions: Float32Array;
       /** Per slot vehicle id, -1 for empty slots. */
       ids: Int32Array;
-      /** Per slot car model of the driver's household; 0 for through traffic. */
+      /** Catalogue model for each occupied slot. */
       models: Uint8Array;
+      paint: Uint8Array;
       stats: SimStats;
     };
