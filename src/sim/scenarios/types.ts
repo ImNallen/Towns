@@ -1,5 +1,6 @@
 import type { Network } from '../network/types';
 import type { AccessPoint } from '../traffic/routing';
+import type { ZoneCells } from '../zoning/cells';
 
 /** Vehicles entering the map at the start of a source lane. */
 export interface Demand {
@@ -79,4 +80,6 @@ export interface Scenario {
   bounds: Bounds;
   /** Residents and the places they travel to. Absent for traffic-only maps. */
   town?: TownSpec;
+  /** Zone cells beside the streets. Absent on maps without zoning; the World never reads them. */
+  zones?: ZoneCells;
 }

@@ -8,6 +8,7 @@ import { streetCrossings, throughArms, type StreetCrossing } from '../network/ju
 import { buildStreetNetwork } from '../network/streets';
 import type { Network } from '../network/types';
 import type { AccessPoint } from '../traffic/routing';
+import { buildZoneCells, type RoadIndex, type ZoneRoad } from '../zoning/cells';
 import type { Bounds, Decor, House, RegionSpec, Scenario } from './types';
 
 export interface MeadowRoad {
@@ -86,46 +87,103 @@ function splitAt(original: Vec2[], node: Vec2): Vec2[][] {
   return [chain];
 }
 
-export function meadowRoadSections(road: MeadowRoad): Vec2[][] {
-  let sections = [[...road.points]];
-  for (const { point } of road.fourWays ?? []) sections = sections.flatMap((section) => splitAt(section, point));
+/** A chain and the arc-length range [from, to] it covers on the road it was built as. */
+interface Section {
+  readonly points: Vec2[];
+  readonly road: RoadIndex;
+  readonly from: number;
+  readonly to: number;
+}
+
+function splitSection(section: Section, node: Vec2): Section[] {
+  const parts = splitAt(section.points, node);
+  if (parts.length === 1) return [{ ...section, points: parts[0]! }];
+  const middle = section.from + polyline(parts[0]!).length;
+  return [
+    { points: parts[0]!, road: section.road, from: section.from, to: middle },
+    { points: parts[1]!, road: section.road, from: middle, to: section.to },
+  ];
+}
+
+function roadSections(road: MeadowRoad, index: RoadIndex): Section[] {
+  let sections: Section[] = [{ points: [...road.points], road: index, from: 0, to: polyline(road.points).length }];
+  for (const { point } of road.fourWays ?? []) sections = sections.flatMap((section) => splitSection(section, point));
   return sections;
+}
+
+export function meadowRoadSections(road: MeadowRoad): Vec2[][] {
+  return roadSections(road, 0 as RoadIndex).map((section) => section.points);
 }
 
 function removable(chain: readonly Vec2[]): boolean {
   return !isPortal(chain[0]!) && !isPortal(tip(chain));
 }
 
+const STARTER_ROADS: readonly (readonly Vec2[])[] = [
+  [PORTALS[0]!, { x: MEADOW_BUILD_BOUNDS.minX, y: -8 }],
+  [{ x: MEADOW_BUILD_BOUNDS.minX, y: -8 }, { x: -45, y: -8 }],
+  [PORTALS[1]!, { x: MEADOW_BUILD_BOUNDS.maxX, y: 8 }],
+  [{ x: MEADOW_BUILD_BOUNDS.maxX, y: 8 }, { x: 45, y: 8 }],
+];
+
+interface Replay {
+  chains: Vec2[][];
+  /** Parallel to `chains`. */
+  sections: Section[];
+  /** Built roads by index: the starter roads, then one slot per edit (empty for a removal). */
+  roads: (readonly Vec2[] | undefined)[];
+  crossings: StreetCrossing[];
+  removedArms: RemovedArm[];
+}
+
 /** Keep construction boundaries so each bulldozer edit removes one reproducible section. */
-function replayMeadow(edits: readonly MeadowEdit[]): { chains: Vec2[][]; crossings: StreetCrossing[]; removedArms: RemovedArm[] } {
-  let chains: Vec2[][] = [
-    [PORTALS[0]!, { x: MEADOW_BUILD_BOUNDS.minX, y: -8 }],
-    [{ x: MEADOW_BUILD_BOUNDS.minX, y: -8 }, { x: -45, y: -8 }],
-    [PORTALS[1]!, { x: MEADOW_BUILD_BOUNDS.maxX, y: 8 }],
-    [{ x: MEADOW_BUILD_BOUNDS.maxX, y: 8 }, { x: 45, y: 8 }],
-  ];
+function replayMeadow(edits: readonly MeadowEdit[]): Replay {
+  let sections: Section[] = STARTER_ROADS.map((points, road) => ({
+    points: [...points], road: road as RoadIndex, from: 0, to: polyline(points).length,
+  }));
+  const roads: (readonly Vec2[] | undefined)[] = [...STARTER_ROADS];
   const crossings: StreetCrossing[] = [];
   const removedArms: RemovedArm[] = [];
   for (const edit of edits) {
     if ('remove' in edit) {
-      const selected = chains.filter(removable)[edit.remove];
+      roads.push(undefined);
+      const selected = sections.filter((section) => removable(section.points))[edit.remove];
       if (selected) {
+        const chain = selected.points;
         removedArms.push(
-          { point: selected[0]!, tangent: normalize(sub(selected[1]!, selected[0]!)) },
-          { point: tip(selected), tangent: normalize(sub(selected[selected.length - 2]!, tip(selected))) },
+          { point: chain[0]!, tangent: normalize(sub(chain[1]!, chain[0]!)) },
+          { point: tip(chain), tangent: normalize(sub(chain[chain.length - 2]!, tip(chain))) },
         );
-        chains.splice(chains.indexOf(selected), 1);
+        sections.splice(sections.indexOf(selected), 1);
       }
       continue;
     }
     const endpoints = [edit.points[0]!, tip(edit.points)];
     for (const node of [...endpoints, ...(edit.fourWays ?? []).map((c) => c.point)]) {
-      chains = chains.flatMap((chain) => splitAt(chain, node));
+      sections = sections.flatMap((section) => splitSection(section, node));
     }
-    chains.push(...meadowRoadSections(edit));
+    sections.push(...roadSections(edit, roads.length as RoadIndex));
+    roads.push(edit.points);
     crossings.push(...(edit.fourWays ?? []));
   }
-  return { chains, crossings, removedArms };
+  return { chains: sections.map((section) => section.points), sections, roads, crossings, removedArms };
+}
+
+/** Each built road with the arc-length spans of it still standing, in construction order. */
+function zoneRoads({ roads, sections }: Replay): ZoneRoad[] {
+  const out: ZoneRoad[] = [];
+  for (const [index, points] of roads.entries()) {
+    if (!points) continue;
+    const ranges = sections.filter((s) => s.road === index).sort((a, b) => a.from - b.from);
+    const spans: [number, number][] = [];
+    for (const { from, to } of ranges) {
+      const last = spans.at(-1);
+      if (last && from <= last[1] + 1e-6) last[1] = Math.max(last[1], to);
+      else spans.push([from, to]);
+    }
+    if (spans.length) out.push({ index: index as RoadIndex, points, spans });
+  }
+  return out;
 }
 
 export function meadowSegments(edits: readonly MeadowEdit[]): readonly (readonly Vec2[])[] {
@@ -243,9 +301,25 @@ export function snapToMeadowStreet(chains: readonly (readonly Vec2[])[], point: 
   return best;
 }
 
+/** The roads alone, without zone cells: what the editor previews while a road is being placed. */
+export function meadowNetwork(roads: readonly MeadowEdit[]): Network {
+  return meadowWithoutZones(replayMeadow(roads)).network;
+}
+
 export function meadowScenario(roads: readonly MeadowEdit[] = []): Scenario {
   const replay = replayMeadow(roads);
-  const streets = coalesceStreets(replay.chains);
+  const scenario = meadowWithoutZones(replay);
+  const { lakes, hills } = scenario.decor;
+  const zones = buildZoneCells(zoneRoads(replay), {
+    surfaces: scenario.network.surfaces,
+    blobs: [...lakes, ...hills].map((blob) => ({ x: blob.x, y: blob.y, radius: blob.radius * SCENERY_REACH })),
+    bounds: MEADOW_BUILD_BOUNDS,
+  });
+  return { ...scenario, zones };
+}
+
+function meadowWithoutZones(replay: Replay): Scenario {
+  const streets = coalesceStreets([...replay.chains]);
   const crossings = replay.crossings.filter((crossing) => degree(streets, crossing.point) === 4);
   const { network, demand, entries } = buildStreetNetwork(new NetworkBuilder(), streets, PORTALS, crossings);
   const decor = scenery();
@@ -292,8 +366,11 @@ function containsPoint(chain: readonly Vec2[], p: Vec2): boolean {
   return chain.some((b, i) => i > 0 && pointSegmentDistance(p, chain[i - 1]!, b) < 1e-6);
 }
 
+/** How far beyond its radius a lake or hill keeps roads and zone cells away. */
+const SCENERY_REACH = 1.3;
+
 function blockedByScenery(p: Vec2, decor: Decor): boolean {
-  if ([...decor.lakes, ...decor.hills].some((blob) => distance(p, blob) < blob.radius * 1.3 + WIDTH / 2 + 2)) return true;
+  if ([...decor.lakes, ...decor.hills].some((blob) => distance(p, blob) < blob.radius * SCENERY_REACH + WIDTH / 2 + 2)) return true;
   return decor.houses.some((house) => {
     const garden = house.garden;
     if (garden && p.x >= garden.minX - WIDTH / 2 && p.x <= garden.maxX + WIDTH / 2
