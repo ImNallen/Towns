@@ -28,8 +28,10 @@ Run studies with `pnpm exec tsx scripts/<name>.ts`.
 | `junction-comparison` | Queues, delay, and throughput under give-way, fixed, and actuated control. Add `--peak` for heavier demand. |
 | `avenue-comparison` | Lane use on an Avenue approach and traffic in mixed-zone Meadow |
 | `grow` | Builds a North Valley town and reports simulation costs, memory, frame bytes and hashes near 150, 500 and 1,000 homes. |
-| `valley-browser` | Measures live FPS and worker ticks/s at the same milestones. Start `pnpm dev --port 5198` first. |
+| `valley-browser` | Measures live FPS and worker ticks/s at the same milestones. Start `pnpm dev --port 5198` first. At 1,000 homes the script measures 1×, 4× and 8×. Set `VALLEY_THROTTLE=1` to repeat with 4× Chromium main-thread slowdown. |
 | `walker-benchmark` | Time per update for 300 moving walkers |
+
+For a retained heap snapshot at 1,000 homes, run `VALLEY_HEAP_SNAPSHOT=/tmp/valley.heapsnapshot node --expose-gc --import tsx scripts/grow.ts`.
 
 Browser options live in `src/main.tsx`. Use `?scenario=meadow` (also `valley`, `mill`, `roundabout`, or `straight`), `seed=1`, and `speed=1` (0 pauses). Combine parameters with `&`. Use `lanes=1` for the lane graph, `zones=1` for the zoning grid, and `walkLimit` for the base walking range in metres (default 600). Set `mpp` (metres per pixel) to enable the initial camera override with centre `x` and `y` in metres. Open `?catalogue=1` to browse buildings, road cross-sections, and vehicles.
 

@@ -26,37 +26,48 @@ try {
     await page.waitForFunction((n) => (window.__towns?.town()?.households.length ?? 0) >= n, target, {
       timeout: 1200000,
     });
-    await page.evaluate((n) => window.__towns!.setSpeed(n === 1000 ? 1 : 8), target);
-    const client = process.env.VALLEY_PROFILE ? await page.context().newCDPSession(page) : undefined;
-    if (client) {
-      await client.send('Profiler.enable');
-      await client.send('Profiler.start');
+    const client = await page.context().newCDPSession(page);
+    const cpuRates = target === 1000 && process.env.VALLEY_THROTTLE === '1' ? [1, 4] : [1];
+    for (const cpuRate of cpuRates) {
+      // Chromium applies this to the page main thread. The worker and GPU run at native speed.
+      await client.send('Emulation.setCPUThrottlingRate', { rate: cpuRate });
+      for (const speed of target === 1000 ? [1, 4, 8] : [8]) {
+        await page.evaluate((n) => window.__towns!.setSpeed(n), speed);
+        await page.waitForTimeout(500);
+        if (process.env.VALLEY_PROFILE) {
+          await client.send('Profiler.enable');
+          await client.send('Profiler.start');
+        }
+        const result = await page.evaluate(async () => {
+          const game = window.__towns!;
+          const start = performance.now(),
+            tick = game.stats()!.tick;
+          let frames = 0;
+          do {
+            await new Promise(requestAnimationFrame);
+            frames++;
+          } while (performance.now() - start < 5000);
+          const seconds = (performance.now() - start) / 1000;
+          return {
+            homes: game.town()!.households.length,
+            fps: frames / seconds,
+            tps: (game.stats()!.tick - tick) / seconds,
+            lost: game.stats()!.lost,
+          };
+        });
+        if (process.env.VALLEY_PROFILE) {
+          const { profile } = await client.send('Profiler.stop');
+          const { writeFile } = await import('node:fs/promises');
+          await writeFile(
+            'artifacts/valley-' + target + '-' + speed + 'x-' + cpuRate + 'cpu.cpuprofile',
+            JSON.stringify(profile),
+          );
+        }
+        console.log(JSON.stringify({ target, speed, cpuRate, ...result }));
+        if (!result.tps || result.lost) throw new Error('Invalid live sample');
+      }
     }
-    const result = await page.evaluate(async () => {
-      const game = window.__towns!;
-      const start = performance.now(),
-        tick = game.stats()!.tick;
-      let frames = 0;
-      do {
-        await new Promise(requestAnimationFrame);
-        frames++;
-      } while (performance.now() - start < 5000);
-      const seconds = (performance.now() - start) / 1000;
-      return {
-        homes: game.town()!.households.length,
-        fps: frames / seconds,
-        tps: (game.stats()!.tick - tick) / seconds,
-        lost: game.stats()!.lost,
-      };
-    });
-    if (client) {
-      const { profile } = await client.send('Profiler.stop');
-      const { writeFile } = await import('node:fs/promises');
-      await writeFile('artifacts/valley-' + target + '.cpuprofile', JSON.stringify(profile));
-      await client.detach();
-    }
-    console.log(JSON.stringify({ target, ...result }));
-    if (!result.tps || result.lost) throw new Error('Invalid live sample');
+    await client.detach();
     if (target === 500) {
       await page.evaluate(() => window.__towns!.setSpeed(0));
       const zoom = async (deltaY: number) =>
