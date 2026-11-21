@@ -175,6 +175,11 @@ test('businesses grow beside homes on a mixed street', async ({ page }) => {
   await page.locator('.budget summary').click();
   await expect(page.locator('.budget')).toContainText('Day 3');
   await page.screenshot({path: 'artifacts/screens/budget-day-four.png'});
+  await page.evaluate(() => window.__towns!.setSpeed(120));
+  await expect.poll(async () => (await town()).budget.today.homes, {timeout: 45_000}).toBeGreaterThan(0);
+  await page.evaluate(() => window.__towns!.setSpeed(0));
+  await expect(page.locator('.budget')).toContainText('settle at midnight');
+  await page.screenshot({path: 'artifacts/screens/budget-accrual.png'});
 });
 
 test('road quote, salvage and insufficient funds agree with the HUD', async ({ page }) => {

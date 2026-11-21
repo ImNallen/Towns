@@ -343,6 +343,13 @@ export class Town {
     for (let h = 0; h < source.spec.homes.length; h++) {
       const old = source.spec.homes[h]!.lot;
       if (!old || this.spec.homes[h]!.lot === old) continue;
+      // Preserve tax on earnings already recorded even if the payer leaves before settlement.
+      if (source.level[h]) this.treasury.today.homes += source.dailyTax(h);
+      if (source.open[h]) {
+        const shop = lotZone(old) === 'shops';
+        const earnedTax = shop ? Math.round(source.taxable[h]! * BUDGET.shopTax) : source.dailyTax(h);
+        this.treasury.today[shop ? 'shops' : 'workplaces'] += earnedTax;
+      }
       this.taxable[h] = this.taxesPaid[h] = this.payroll[h] = this.lastDailyCost[h] = 0;
       if (this.level[h]) this.moveOut(h);
       if (!this.open[h]) continue;
@@ -578,21 +585,29 @@ export class Town {
 
   // --- Days ---------------------------------------------------------------------
 
+  private dailyTax(h: number): number {
+    if (this.level[h]) return Math.round(this.taxable[h]! * BUDGET.homeTax);
+    const lot = this.spec.homes[h]!.lot!;
+    if (lotZone(lot) === 'shops') {
+      return Math.round(this.taxable[h]! * BUDGET.shopTax + lot.columns * lot.rows * BUDGET.shopRatePerCell);
+    }
+    return Math.round(this.payroll[h]! * BUDGET.workplaceTax);
+  }
+
   private midnight(minute: number, routing: Routing): void {
     this.customers.fill(0);
     for (let h = 0; h < this.spec.homes.length; h++) {
-      const gross = this.taxable[h]!;
+      if (!this.open[h] && !this.level[h]) continue;
+      const tax = this.dailyTax(h);
       this.taxable[h] = 0;
       if (this.open[h]) {
         const shop = lotZone(this.spec.homes[h]!.lot!) === 'shops';
-        const tax = Math.round(shop ? gross * BUDGET.shopTax : this.payroll[h]! * BUDGET.workplaceTax);
         this.lastDailyCost[h] = this.payroll[h]! + tax;
         this.payroll[h] = 0;
         this.treasury.today[shop ? 'shops' : 'workplaces'] += tax;
         this.taxesPaid[h] += tax;
       }
       if (!this.level[h]) continue;
-      const tax = Math.round(gross * BUDGET.homeTax);
       this.treasury.today.homes += tax;
       this.funds[h] -= this.dailyCost(h) + tax;
       this.pantry[h] = Math.max(0, this.pantry[h]! - 1);
@@ -857,6 +872,9 @@ export class Town {
         case LOST_JOB: events.push({ ...at, kind: 'lostJob', region: this.eventPlace[i]!, person }); break;
       }
     }
+    const budget = this.treasury.view();
+    budget.today.upkeep = Math.round(this.spec.roadMetres * BUDGET.upkeepPerMetre);
+    for (const household of households) budget.today.homes += this.dailyTax(household.home);
     const businesses: BusinessView[] = [];
     for (let h = 0; h < homes.length; h++) {
       if (!this.open[h]) continue;
@@ -864,11 +882,12 @@ export class Town {
       const r = h + regions.length;
       const zone = lotZone(lot);
       if (zone === 'residential') throw new Error('A residence cannot be an open business');
+      budget.today[zone] += this.dailyTax(h);
       businesses.push({ lastDailyCost: this.lastDailyCost[h]!, taxesPaid: this.taxesPaid[h]!, home: h, lot: visibleLot(lot), name: this.placeName(r), zone,
         jobs: lotJobs(lot), filled: this.filled[r]!, customers: this.customers[h]! });
     }
     return {
-      budget: this.treasury.view(),
+      budget,
       businesses,
       demand: { residential: this.demandFor('residential'), shops: this.demandFor('shops'), workplaces: this.demandFor('workplaces') },
       day: dayOf(minute),
