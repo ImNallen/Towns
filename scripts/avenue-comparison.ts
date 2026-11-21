@@ -1,7 +1,9 @@
 /** Ten days of eastbound through demand at a fixed-time Avenue T-junction. */
 import { NetworkBuilder } from '../src/sim/network/builder';
 import { buildStreetNetwork } from '../src/sim/network/streets';
-import { meadowScenario } from '../src/sim/scenarios/meadow';
+import { meadowScenario, meadowSegmentInfo, meadowTips, planMeadowRoad, type MeadowEdit } from '../src/sim/scenarios/meadow';
+import { decodeCellKey, type CellKey } from '../src/sim/zoning/cells';
+import type { LandUse } from '../src/sim/zoning/paint';
 import { World } from '../src/sim/world';
 
 const west = {x:-320, y:0}, fork = {x:-160, y:0}, junction = {x:0, y:0};
@@ -42,3 +44,30 @@ console.log('Both lanes queued / queued ticks', bothQueuedTicks/queuedTicks, 'me
 console.table(counts.map((row,i) => ({lane:i?'outer':'inner', entries:row.through,
   meanQueue:row.stoppedTicks/ticks, peakQueue:row.peak})));
 console.log('Mean completed trip (s)',world.stats().meanTripTime,'lost',world.stats().lost,'hash',world.hash());
+
+// Use the same signalised T and east approach as avenue-lights.png, with mixed land use.
+const [westTip, eastTip] = meadowTips([]);
+const edits: MeadowEdit[] = [];
+for (const [start, end] of [[eastTip!, westTip!], [junction, {x:0, y:45}]] as const) {
+  const plan = planMeadowRoad(edits, start, end);
+  if (!plan.ok) throw new Error(plan.reason);
+  edits.push(plan.road);
+}
+const eastApproach = meadowSegmentInfo(edits).findIndex(section =>
+  section.points.some(point => point.x >= 40) && section.points.some(point => Math.abs(point.x) < 3));
+if (eastApproach < 0) throw new Error('Missing east approach');
+edits.push({upgrade:eastApproach, roadType:'avenue'});
+edits.push({lights:meadowScenario(edits).network.junctions![0]!.point});
+const mixed = new World(meadowScenario(edits), 1);
+const zoning = new Map<CellKey, LandUse>();
+for (const raw of mixed.scenario.zones!.keys) {
+  const key = raw as CellKey;
+  const {column, side} = decodeCellKey(key);
+  const band = (column + side * 2) % 6;
+  zoning.set(key, band < 3 ? 'residential' : band === 3 ? 'shops' : 'workplaces');
+}
+mixed.setZoning(zoning);
+for (let t = 0; t < ticks; t++) mixed.step();
+const stats = mixed.stats();
+console.log('Mixed Meadow with Avenue T: mean completed trip (s)', stats.meanTripTime,
+  'completed', stats.completed, 'lost', stats.lost, 'hash', mixed.hash());
