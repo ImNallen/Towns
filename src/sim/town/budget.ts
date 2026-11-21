@@ -1,3 +1,4 @@
+import type { SnapshotIO } from '../snapshot';
 import { ROAD_TYPES } from '../network/roadTypes';
 import { polyline } from '../math/polyline';
 import { isZoneStroke, meadow, type MeadowEdit } from '../scenarios/meadow';
@@ -41,6 +42,15 @@ export class Treasury {
   readonly yesterday = emptyDay();
   private readonly closing = new Float64Array(7);
   private days = 0;
+
+  snapshotState(io: SnapshotIO): void {
+    io.arrays(this.closing);
+    this.days = io.number(this.days);
+    this.balance = io.number(this.balance);
+    for (const day of [this.today, this.yesterday]) {
+      for (const key of ['homes', 'shops', 'workplaces', 'building', 'upkeep'] as const) day[key] = io.number(day[key]);
+    }
+  }
 
   book(cost: number): string | undefined {
     const reason = shortage(this.balance, cost);

@@ -4,8 +4,12 @@ import { planZoneStroke } from '../sim/zoning/paint';
 import { editCost, shortage, undoCost } from '../sim/town/budget';
 import { World } from '../sim/world';
 import type { FromWorker } from './protocol';
-import type { EditCommand, ReplayEvent, TownSave, InitialTown } from './save';
+import { SAVE_VERSION } from './save';
+import type { EditCommand, ReplayEvent, TownSave, InitialTown, Checkpoint } from './save';
 
+import { packWorld, unpackWorld } from './snapshot';
+
+export const CHECKPOINT_INTERVAL = 6000;
 export const CAPACITY = 4096;
 export type Session = ReturnType<typeof createSession>;
 
@@ -15,7 +19,10 @@ export function createSession(initial: InitialTown, post: (msg: FromWorker) => v
   type RoadChange = { edits: MeadowEdit[]; scenario: Scenario; cost: number; allowLaneShift: boolean };
   let waiting: RoadChange | null = null;
   let world = new World(buildScenario(initial.scenario), initial.seed, CAPACITY, 0, initial.walkLimit);
-  const events: ReplayEvent[] = [];
+  let events: ReplayEvent[] = [];
+  let snapshot: Checkpoint | undefined;
+  let capturing = false;
+  let lastCaptureTick = 0;
 
   function apply(msg: EditCommand): void {
     switch (msg.type) {
@@ -140,8 +147,33 @@ export function createSession(initial: InitialTown, post: (msg: FromWorker) => v
       events.push({ tick: world.tick, command });
       apply(command);
     },
+    checkpointDue() {
+      return !waiting && !capturing && world.tick - lastCaptureTick >= CHECKPOINT_INTERVAL;
+    },
+    async checkpoint() {
+      if (waiting || capturing) return;
+      capturing = true;
+      lastCaptureTick = world.tick;
+      try {
+        const header = { tick: world.tick, hash: world.hash(), eventCount: events.length, edits, parcels: world.parcelSlots() };
+        snapshot = { ...header, state: await packWorld(world) };
+      } finally {
+        capturing = false;
+      }
+    },
+    async restore(saved: Checkpoint, history: ReplayEvent[], signal?: AbortSignal) {
+      edits = saved.edits;
+      const scenario = map && edits.length ? map.meadowScenario(edits) : buildScenario(initial.scenario);
+      world = new World(scenario, initial.seed, CAPACITY, saved.tick, initial.walkLimit);
+      world.restoreParcelSlots(saved.parcels, scenario.zones ? meadowZoning(edits, scenario.zones) : new Map());
+      await unpackWorld(world, saved.state, signal);
+      if (world.hash() !== saved.hash) throw new Error('Snapshot town hash mismatch.');
+      snapshot = saved;
+      lastCaptureTick = saved.tick;
+      events = history.slice(0, saved.eventCount);
+    },
     save(): TownSave {
-      return { version: 1, ...initial, tick: world.tick, events: events.slice() };
+      return { version: SAVE_VERSION, ...initial, tick: world.tick, events: events.slice(), snapshot };
     },
   };
 }
@@ -149,8 +181,10 @@ export function createSession(initial: InitialTown, post: (msg: FromWorker) => v
 export async function replay(save: TownSave, notify: (msg: FromWorker) => void = () => {}, signal?: AbortSignal): Promise<Session> {
   let live = false;
   const session = createSession({ scenario: save.scenario, seed: save.seed, walkLimit: save.walkLimit }, msg => { if (live) notify(msg); });
+  const snapshot = save.version === SAVE_VERSION ? save.snapshot : undefined;
+  if (snapshot) await session.restore(snapshot, save.events, signal);
   let nextYield = performance.now() + 40;
-  let index = 0;
+  let index = snapshot?.eventCount ?? 0;
   while (true) {
     const event = save.events[index];
     const until = event?.tick ?? save.tick;

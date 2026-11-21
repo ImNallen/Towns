@@ -1,3 +1,4 @@
+import type { SnapshotIO } from './snapshot';
 import { AvenueLanes } from './traffic/avenueLanes';
 import { TrafficConditions } from './traffic/conditions';
 import { nextActuatedClock, signalAspect } from './network/signals';
@@ -6,10 +7,10 @@ import type { WalkRouting } from './network/walkRouting';
 import { endOf, sampleAt, startOf, type PathSample } from './math/polyline';
 import type { Lane, Network } from './network/types';
 import { Rng } from './rng';
-import { sameParcel, zonedLots } from './zoning/lots';
+import { sameParcel, zonedLots, saveParcel, restoreParcels, type ParcelSlot } from './zoning/lots';
 import type { Zoning } from './zoning/paint';
 import { accessPoints } from './scenarios/meadow';
-import type { Scenario } from './scenarios/types';
+import type { HomeSpec, Scenario } from './scenarios/types';
 import { IDM, idmAccel } from './traffic/idm';
 import { Routing } from './traffic/routing';
 import { Model, VEHICLES, throughModel, vehicleType } from '../vehicles/catalogue';
@@ -123,6 +124,24 @@ export class World {
   private tripTimeSum = 0;
   private readonly completedPerSecond = new Uint32Array(60);
   private lastSecond = 0;
+
+  snapshotState(io: SnapshotIO): void {
+    io.arrays(this.waitingTicks, this.signalClocks, this.previousMovement, this.previousVehicle, this.enteredAt);
+    io.arrays(this.completedPerSecond, this.laneMinRear, this.bucketStart, this.bucketCount, this.order);
+    io.arrays(this.rank);
+    this.spawned = io.number(this.spawned);
+    this.completed = io.number(this.completed);
+    this.deliveries = io.number(this.deliveries);
+    this.lost = io.number(this.lost);
+    this.tripTimeSum = io.number(this.tripTimeSum);
+    this.lastSecond = io.number(this.lastSecond);
+    this.rng.snapshotState(io);
+    this.vehicles.snapshotState(io);
+    this.traffic.snapshotState(io);
+    this.routing.snapshotState(io);
+    this.avenueLanes?.snapshotState(io);
+    this.town?.snapshotState(io);
+  }
 
   constructor(scenario: Scenario, seed: number, capacity = 4096, initialTick = 0, private readonly walkLimit?: number, previousWalking?: WalkRouting) {
     this._tick = initialTick;
@@ -265,10 +284,31 @@ export class World {
       const access = accessPoints(this.network, { x: lot.streetX, y: lot.streetY });
       homes[h] = { lot, access, region: lot.streetX < 0 ? 0 : 1 };
     }
+    this.buildTown(homes, zoning, previous.walkers.graph.routing);
+    this.town!.copyFrom(previous, this.routing, this.minute());
+  }
+
+  parcelSlots(): (ParcelSlot | null)[] {
+    return this.town?.spec.homes.slice(this.scenario.town!.homes.length).map(h => h.lot ? saveParcel(h.lot) : null) ?? [];
+  }
+
+  restoreParcelSlots(slots: (ParcelSlot | null)[], zoning: Zoning): void {
+    this.zoning = zoning;
+    if (!slots.length && !zoning.size) return;
+    if (!this.scenario.zones || !this.scenario.town) throw new Error('Snapshot parcels require an editable map.');
+    const homes = [...this.scenario.town.homes];
+    for (const lot of restoreParcels(this.scenario.zones, slots, zoning)) {
+      homes.push(lot ? { lot, access: accessPoints(this.network, { x: lot.streetX, y: lot.streetY }),
+        region: lot.streetX < 0 ? 0 : 1 } : { access: [], region: 0 });
+    }
+    this.buildTown(homes, zoning);
+  }
+
+  private buildTown(homes: HomeSpec[], zoning: Zoning, previous?: WalkRouting): void {
+    const base = this.scenario.town!;
     const bays = parkingBays(this.scenario, homes, zoning);
     this.routing = new Routing(this.network, [...homes.map(home => home.access), ...bays.map(b => b.access)]);
-    this.town = new Town({ ...base, homes }, this.routing.sinks.length, 0, this.routing, new Parking(bays, this.routing.sinks.length + homes.length), this.scenario.decor.houses, this.network, this.walkLimit, base.homes.length, previous.walkers.graph.routing, parksOn(this.scenario.zones,zoning));
-    this.town.copyFrom(previous, this.routing, this.minute());
+    this.town = new Town({ ...base, homes }, this.routing.sinks.length, 0, this.routing, new Parking(bays, this.routing.sinks.length + homes.length), this.scenario.decor.houses, this.network, this.walkLimit, base.homes.length, previous, parksOn(this.scenario.zones,zoning));
   }
 
   /**

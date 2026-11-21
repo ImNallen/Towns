@@ -110,6 +110,9 @@ setInterval(() => {
   }
   if (steps === MAX_STEPS_PER_PUMP) accumulator = 0; // falling behind: drop time rather than spiral
   if (steps > 0) {
+    if (session.checkpointDue()) void session.checkpoint().catch(() => {
+      // The last completed checkpoint and edit log still form a complete save.
+    });
     if (session.pending && (world.vehicles.count === 0 || Math.floor(world.tick / 20) !== Math.floor((world.tick - steps) / 20))) {
       session.command({ type: 'retry' });
       if (!session.pending) return;

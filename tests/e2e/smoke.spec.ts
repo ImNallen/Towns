@@ -686,7 +686,7 @@ test('saves a paused town across a page reload and a file round trip', async ({ 
   expect(await page.evaluate(() => window.__towns!.save())).toBe(saved);
   await page.screenshot({ path: 'artifacts/screens/save-menu-phone.png' });
   await menu.getByLabel('Import town file').setInputFiles({
-    name: 'newer.json', mimeType: 'application/json', buffer: Buffer.from('{"version":2}'),
+    name: 'newer.json', mimeType: 'application/json', buffer: Buffer.from('{"version":999}'),
   });
   await expect(menu.getByRole('status')).toContainText('Unsupported town save version');
   expect(await page.evaluate(() => window.__towns!.save())).toBe(saved);
@@ -751,4 +751,31 @@ test('loads an edited North Valley from the Saves tray in Meadow Vale', async ({
   await toggle.click();
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect.poll(roadCount).toBe(0);
+});
+
+test('restores a legacy slot and saves an automatic snapshot in browser storage', async ({ page }) => {
+  await page.goto('/?scenario=meadow&speed=0');
+  await expect(page.locator('.town')).toBeVisible();
+  await page.evaluate(() => {
+    localStorage.setItem('towns.save.Town 2', JSON.stringify({
+      version: 1, scenario: 'meadow', seed: 7, tick: 6000, events: [],
+    }));
+  });
+  await page.getByRole('button', { name: 'Save and load' }).click();
+  const menu = page.getByRole('region', { name: 'Town saves' });
+  await menu.getByLabel('Save slot').selectOption('Town 2');
+  await menu.getByRole('button', { name: 'Load', exact: true }).click();
+  await expect(menu.getByRole('status')).toHaveText('Town 2 loaded.');
+  await page.evaluate(() => window.__towns!.setSpeed(8));
+  await expect.poll(() => page.evaluate(async () => JSON.parse(await window.__towns!.save()).snapshot?.tick ?? 0)).toBeGreaterThanOrEqual(6000);
+  await page.evaluate(() => window.__towns!.setSpeed(0));
+  await menu.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(menu.getByRole('status')).toHaveText('Town 2 saved.');
+  const saved = await page.evaluate(() => window.__towns!.save());
+  await page.reload();
+  await page.getByRole('button', { name: 'Save and load' }).click();
+  await menu.getByLabel('Save slot').selectOption('Town 2');
+  await menu.getByRole('button', { name: 'Load', exact: true }).click();
+  await expect(menu.getByRole('status')).toHaveText('Town 2 loaded.');
+  expect(await page.evaluate(() => window.__towns!.save())).toBe(saved);
 });

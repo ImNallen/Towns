@@ -1,3 +1,4 @@
+import type { SnapshotIO } from '../snapshot';
 import { signalAspect } from './signals';
 import { crossingAt, observeCrossings, type Crossing, type CrossingStop } from '../traffic/pedestrianConflicts';
 import type { Vehicles } from '../traffic/vehicles';
@@ -136,6 +137,27 @@ export class Walkers {
   readonly crowd: Uint16Array;
   count = 0;
   peak = 0;
+  snapshotState(io: SnapshotIO): void {
+    io.arrays(this.goal, this.node, this.along, this.speed, this.firstHop);
+    io.arrays(this.crowd);
+    this.cleared = io.number(this.cleared);
+    this.count = io.number(this.count);
+    this.peak = io.number(this.peak);
+    if (!Number.isInteger(this.count) || this.count < 0 || this.count > this.goal.length) throw new Error('Invalid snapshot walker count.');
+    for (const crossing of this.graph.crossings) {
+      crossing.served = io.number(crossing.served);
+      crossing.yieldingTicks = io.number(crossing.yieldingTicks);
+      crossing.occupied = Boolean(io.number(Number(crossing.occupied)));
+      crossing.blocked = Boolean(io.number(Number(crossing.blocked)));
+      crossing.requested = Boolean(io.number(Number(crossing.requested)));
+      const waiting = io.number(crossing.waiting === undefined ? -1 : Number(crossing.waiting));
+      if (waiting < 0) delete crossing.waiting;
+      else crossing.waiting = Boolean(waiting);
+      crossing.clock = io.number(crossing.clock ?? -1);
+      if (crossing.clock === -1) delete crossing.clock;
+    }
+  }
+
   constructor(
     readonly graph: WalkingNetwork,
     capacity: number,
