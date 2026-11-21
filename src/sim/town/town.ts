@@ -76,7 +76,7 @@ const NEW_JOB = 3;
 const CHANGED_JOB = 4;
 const LOST_JOB = 5;
 const MOVED_IN = 6;
-const PARKING_FAILED = 7;
+const PARKING_FAILED = 7, NO_WALK_ROUTE = 8;
 
 export type Activity = 'home' | 'outbound' | 'away' | 'homebound' | 'walking' | 'searching';
 export type Errand = 'work' | 'shop';
@@ -128,11 +128,13 @@ export interface HouseholdView {
   pantry: number;
   needs: Needs;
   /** Mean of the needs. */
+  walkIssue?: string;
   happiness: number;
   members: PersonView[];
 }
 
 export type TownEventView = { day: number; minute: number; household: number } & (
+  | { kind: 'noWalkRoute'; region: string }
   | { kind: 'parkingFailed'; region: string; shopper: boolean }
   | { kind: 'movedIn' }
   | { kind: 'boughtCar'; cars: number }
@@ -282,6 +284,7 @@ export class Town {
   private readonly door: Vec2[];
   private readonly outside: AccessPoint[][];
   readonly walkers: Walkers;
+  private readonly walkIssue: Int32Array;
   private readonly modeDay: Int32Array;
   private readonly modeRoll: Float64Array;
   private walkedTrips = 0;
@@ -297,6 +300,7 @@ export class Town {
     const H = spec.homes.length;
     const P = H * MAX_MEMBERS;
     this.carBay = new Int32Array(H * 2).fill(-1);
+    this.walkIssue = new Int32Array(H).fill(-1);
     this.modeDay = new Int32Array(P).fill(-1);
     this.modeRoll = new Float64Array(P);
     this.driverCar = new Int32Array(P).fill(-1);
@@ -448,7 +452,7 @@ export class Town {
     for (let p = 0; p < source.people; p++) this.target[p] = remap(source.target[p]!);
     this.treasury.copyFrom(source.treasury);
     for (const key of [
-      'modeDay', 'modeRoll', 'origin', 'driverCar', 'failed', 'circled', 'due', 'denied', 'frustration',
+      'walkIssue', 'modeDay', 'modeRoll', 'origin', 'driverCar', 'failed', 'circled', 'due', 'denied', 'frustration',
       'taxable', 'taxesPaid', 'payroll', 'lastDailyCost', 'surname', 'funds', 'wages', 'level', 'cars', 'carModel', 'pantry', 'firstMember', 'memberCount', 'adults',
       'household', 'role', 'age', 'firstName', 'job', 'activity', 'errand', 'at', 'arrivedAt', 'until', 'workedDay',
       'deliveries', 'freightState', 'freightDue', 'open', 'customers', 'early', 'eventDay', 'eventMinute', 'eventHousehold', 'eventKind', 'eventDetail', 'eventPerson',
@@ -831,12 +835,21 @@ export class Town {
       const origin = this.door.length + bay;
       if (graph.distance(origin,local) < graph.distance(origin,h)) carNearDestination = true;
     }
+    if (local >= 0 && distance > this.walkLimit && this.modeDay[p] !== 2*day+errand) {
+      const a = this.door[h]!, b = this.door[local]!;
+      if ((a.x-b.x)**2+(a.y-b.y)**2 < this.walkLimit*this.walkLimit) {
+        this.walkIssue[h]=region;
+        this.record((day-1)*MINUTES_PER_DAY + (errand === SHOP ? SHOP_OPENS : SHIFT_START), h, NO_WALK_ROUTE, errand, p, this.placeName(region));
+        this.modeDay[p]=2*day+errand;
+      }
+    }
     const chance = walkChance(distance, this.walkLimit, !this.cars[h], errand === SHOP, youngFamily, carNearDestination);
     if (chance > 0 && this.modeDay[p] !== 2*day + errand) {
       this.modeDay[p] = 2*day + errand;
       this.modeRoll[p] = this.rng.next();
     }
     if (this.modeRoll[p]! < chance) {
+      this.walkIssue[h]=-1;
       this.errand[p] = errand;
       this.at[p] = region;
       this.failed[p] = 0;
@@ -1350,6 +1363,7 @@ export class Town {
         wages: this.wages[h]!,
         pantry: this.pantry[h]!,
         needs,
+        walkIssue: this.walkIssue[h]! >= 0 && this.spec.homes[this.walkIssue[h]! - this.spec.regions.length]?.lot ? this.placeName(this.walkIssue[h]!) : undefined,
         happiness: Math.max(0, (needs.food + needs.comfort + needs.mobility + needs.security) / 4 - this.frustration[h]! * 0.04),
         members,
       });
@@ -1362,6 +1376,7 @@ export class Town {
       const detail = this.eventDetail[i]!;
       const person = this.eventPerson[i]!;
       switch (this.eventKind[i]) {
+        case NO_WALK_ROUTE: events.push({ ...at, kind: 'noWalkRoute', region: this.eventPlace[i]! }); break;
         case PARKING_FAILED: events.push({ ...at, kind: 'parkingFailed', shopper: detail === SHOP, region: this.eventPlace[i]! }); break;
         case MOVED_IN: events.push({ ...at, kind: 'movedIn' }); break;
         case BOUGHT_CAR: events.push({ ...at, kind: 'boughtCar', cars: detail }); break;

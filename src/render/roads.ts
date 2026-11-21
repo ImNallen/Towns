@@ -24,8 +24,8 @@ export function buildRoads(network: Network, marking: 'dashed' | 'solid' = 'soli
   const bayMarks = new FlatMesh(0.15);
   for (const s of network.surfaces) {
     outline.ribbon(s.centerline, s.width + OUTLINE * 2);
-    if (s.style === 'pavement' || s.style === 'parking') {
-      const strip = s.style === 'pavement' ? pavement : parking;
+    if (s.style === 'footpath' || s.style === 'pavement' || s.style === 'parking') {
+      const strip = s.style === 'parking' ? parking : pavement;
       strip.ribbon(s.centerline, s.width - 0.14);
       if (s.style === 'parking') {
         for (let at = 3; at < s.centerline.length - 1; at += 6) {
@@ -79,6 +79,12 @@ export function buildRoads(network: Network, marking: 'dashed' | 'solid' = 'soli
     }
   }
 
+  const stripes = new FlatMesh(0.16);
+  for (const link of network.pedestrianLinks ?? []) {
+    if (!link.zebra) continue;
+    const path = polyline([link.a, link.b]);
+    stripes.dashes(path, 3.2, 0.6, 1.15);
+  }
   const group = new THREE.Group();
   group.name = 'roads';
   const add = (mesh: FlatMesh, color: string): void => {
@@ -93,6 +99,7 @@ export function buildRoads(network: Network, marking: 'dashed' | 'solid' = 'soli
   add(parking, PALETTE.parking);
   add(bayMarks, PALETTE.roadSurface);
   add(centerLines, PALETTE.centerLine);
+  add(stripes, PALETTE.crossing);
   add(giveWay, PALETTE.giveWay);
   return group;
 }

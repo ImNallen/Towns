@@ -46,7 +46,7 @@ test('mixed vehicles share the road between the neighbourhoods', async ({ page }
   await expect.poll(() => page.evaluate(() => window.__towns?.editor()?.connected)).toBe(true);
   await page.getByRole('button', { name: 'Pan', exact: true }).click();
   await page.mouse.move(0, 0);
-  await page.evaluate(() => window.__towns!.setSpeed(40));
+  await page.evaluate(() => window.__towns!.setSpeed(120));
   await page.waitForFunction(() => {
     if ((window.__towns!.stats()?.active ?? 0) < 18) return false;
     window.__towns!.setSpeed(0);
@@ -135,7 +135,7 @@ test('painted residential frontage grows into a lived-in street', async ({ page 
   expect(errors).toEqual([]);
 });
 
-async function connectedStreet(page: Page, query = '') {
+async function connectedStreet(page: Page, query = '', connect = false) {
   await page.goto('/?scenario=meadow&seed=1&speed=0&x=20&y=8&mpp=0.15' + query);
   const editor = () => page.evaluate(() => window.__towns?.editor());
   await expect.poll(editor).toMatchObject({ tool: 'road', pending: false });
@@ -150,7 +150,12 @@ async function connectedStreet(page: Page, query = '') {
     await page.mouse.move(...at(end, y), { steps: 16 });
     await page.mouse.up();
   };
-  await drag(45, 8, -35);
+  if (connect) {
+    await page.mouse.move(...at(45,8));
+    await page.mouse.down();
+    await page.mouse.move(...at(-45,-8),{steps:16});
+    await page.mouse.up();
+  } else await drag(45, 8, -35);
   await expect.poll(editor).toMatchObject({ roadCount: 1, pending: false });
   await page.keyboard.press('z');
   return { at, drag, editor };
@@ -409,4 +414,67 @@ test('residents walk along the shop frontage', async ({ page }) => {
     return true;
   }, null, { timeout: 100_000 });
   await page.screenshot({ path: 'artifacts/screens/pavement-walkers.png' });
+});
+
+test('a footpath joins the frontage and a zebra carries residents across the street', async ({ page }) => {
+  test.setTimeout(180000);
+  const { at, drag, editor } = await connectedStreet(page,'',true);
+  const stroke = async (x:number,y:number,endX:number,endY:number) => {
+    await page.mouse.move(...at(x,y));
+    await page.mouse.down();
+    await page.mouse.move(...at(endX,endY),{steps:12});
+    await page.mouse.up();
+  };
+  await expect.poll(editor).toMatchObject({connected:true,pending:false});
+  await page.getByRole('button',{name:'Build footpath'}).click();
+  const balance=()=>page.evaluate(()=>window.__towns!.town()!.budget.balance);
+  const before=await balance();
+  await stroke(50,3.75,30,-19);
+  await expect.poll(balance).toBeLessThan(before);
+  await page.screenshot({path:'artifacts/screens/footpath.png'});
+  await page.getByRole('button',{name:'Build zebra crossing'}).click();
+  const beforeZebra=await balance();
+  await page.mouse.click(...at(65,8));
+  await expect.poll(balance).toBe(beforeZebra-45);
+  await page.keyboard.press('z');
+  for(const [brush,start,y,end] of [['h',-34,-8,76],['w',20,24,90]] as const){
+    await page.keyboard.press(brush);
+    await drag(start,y,end);
+    await expect.poll(editor).toMatchObject({pending:false});
+  }
+  await page.keyboard.press('v');
+  await page.evaluate(()=>window.__towns!.setSpeed(200));
+  await page.waitForFunction(()=>{
+    const g=window.__towns!;
+    if(!g.stats()?.zebraWaits) return false;
+    g.setSpeed(0);return true;
+  },null,{timeout:140000});
+  await page.screenshot({path:'artifacts/screens/zebra-crossing.png'});
+});
+
+test('pedestrians use the side-street crossing at a junction', async ({page})=>{
+  test.setTimeout(150000);
+  const {at,drag,editor}=await connectedStreet(page);
+  await page.keyboard.press('r');
+  await page.mouse.move(...at(20,8));
+  await page.mouse.down();
+  await page.mouse.move(...at(20,48),{steps:12});
+  await page.mouse.up();
+  await expect.poll(editor).toMatchObject({roadCount:2,pending:false});
+  await page.keyboard.press('z');
+  for(const [brush,start,end] of [['h',-32,8],['w',34,78]] as const){
+    await page.keyboard.press(brush);
+    await drag(start,24,end);
+    await expect.poll(editor).toMatchObject({pending:false});
+  }
+  await page.keyboard.press('v');
+  await page.evaluate(()=>window.__towns!.setSpeed(180));
+  await page.waitForFunction(()=>{
+    const g=window.__towns!, p=g.walkerPositions();
+    for(let i=0;i<p.length;i+=3) if(Math.abs(p[i]!-20)<3 && Math.abs(p[i+1]!-18)<1) {
+      g.setSpeed(0); return true;
+    }
+    return false;
+  },null,{timeout:120000});
+  await page.screenshot({path:'artifacts/screens/junction-walker.png'});
 });

@@ -28,6 +28,7 @@ export const PALETTE = {
   roadSurface: '#ffffff',
   coats: ['#9f4937', '#275c77', '#776395', '#d59936', '#28786c'],
   faces: ['#ecc69b', '#c79570', '#ab7757'],
+  crossing: '#6c7372',
   pavement: '#e2ded1',
   parking: '#d3d6ce',
   parkingFree: '#8ac8a2',

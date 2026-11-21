@@ -4,7 +4,7 @@ import { editCost, shortage } from '../sim/town/budget';
 import * as THREE from 'three';
 import { offsetPolyline, polyline, slicePolyline, type Polyline } from '../sim/math/polyline';
 import { add, scale, distance, dot, projectOntoSegment, type Vec2 } from '../sim/math/vec';
-import { MEADOW_BUILD_BOUNDS, MEADOW_ROAD_WIDTH, meadowLayout, meadowNetwork, meadowRoadSections, upgradeFailure, snapToMeadowStreet, planMeadowRoad, isZoneStroke, type MeadowEdit } from '../sim/scenarios/meadow';
+import { MEADOW_BUILD_BOUNDS, MEADOW_ROAD_WIDTH, planWalk, meadowScenario, meadowLayout, meadowNetwork, meadowRoadSections, upgradeFailure, snapToMeadowStreet, planMeadowRoad, isZoneStroke, type MeadowEdit } from '../sim/scenarios/meadow';
 import { angleGuide, crossingAngleGuide, fitGuideToStreet, squareStreetGuide, type StreetPoint, type AngleGuide } from '../sim/network/angleSnap';
 import { JUNCTION_MOUTH } from '../sim/network/streets';
 import { cellsAlong, type CellKey, type ZoneCells } from '../sim/zoning/cells';
@@ -17,7 +17,7 @@ import { PALETTE } from './palette';
 import { buildRoads } from './roads';
 import { buildStrokePreview } from './zones';
 
-export type MapTool = 'road' | 'curve' | 'upgrade' | 'bulldoze' | 'zone' | 'parking' | 'pan';
+export type MapTool = 'road' | 'curve' | 'upgrade' | 'bulldoze' | 'zone' | 'parking' | 'pan' | 'footpath' | 'zebra';
 export interface EditorState {
   tool: MapTool;
   roadType: RoadType;
@@ -56,6 +56,7 @@ export interface HousePicker {
 type EditPhase =
   | { kind: 'idle' }
   | { kind: 'drawing'; id: number; host: StreetPoint | undefined; start: Vec2; press: Vec2; pointer: PointerEvent }
+  | { kind: 'walk'; id: number; start: Vec2; network: ReturnType<typeof meadowNetwork>; tool: 'footpath' | 'zebra' }
   | { kind: 'editingSegment'; id: number; segment: number; press: Vec2 }
   /** A press on a house (or, with the pan tool, on open ground) that selects it if released in place. */
   | { kind: 'selecting'; id: number; house: number | null; press: Vec2 }
@@ -387,6 +388,12 @@ export class RoadEditor {
     }
     if (this.phase.kind !== 'idle') return;
     const cursor = this.world(e);
+    if (this.tool === 'footpath' || this.tool === 'zebra') {
+      this.phase = { kind: 'walk', tool: this.tool, start: cursor, network: meadowScenario(this.edits).network, id: e.pointerId };
+      this.canvas.setPointerCapture(e.pointerId);
+      this.point(e,false);
+      return;
+    }
     const house = this.clickableHouse(cursor);
     if (house !== null) {
       this.mark();
@@ -450,6 +457,25 @@ export class RoadEditor {
       else if (this.hint === HOUSE_HINT) this.hint = '';
     }
     if (this.tool === 'pan') return;
+    if (phase.kind === 'walk') {
+      if (phase.id !== e.pointerId) return;
+      const plan = planWalk(phase.network,phase.tool,phase.start,cursor,{cells:this.cells,zoning:this.zoning});
+      this.clearPreview();
+      if (typeof plan === 'string') {
+        if (release) this.finish();
+        this.hint = plan;
+        return;
+      }
+      this.cost = editCost(this.edits,plan);
+      this.guide(polyline([plan.a,plan.b]),PALETTE.editorHandle,plan.walk === 'zebra' ? 3 : 1.8);
+      this.hint = 'Release to build ' + (plan.walk === 'zebra' ? 'the zebra crossing.' : 'the footpath.');
+      if (release) {
+        this.finish();
+        this.phase = { kind: 'pending' };
+        this.send({type:'buildWalk',walk:phase.tool,start:phase.start,end:cursor});
+      }
+      return;
+    }
     if (phase.kind === 'editingSegment') {
       if (phase.id !== e.pointerId) return;
       if (Math.hypot(e.clientX - phase.press.x, e.clientY - phase.press.y) > CLICK_SLOP || this.segmentAt(cursor) !== phase.segment) {

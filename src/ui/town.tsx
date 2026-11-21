@@ -29,6 +29,7 @@ function memberName(town: TownView, household: number, person: number): string {
 function describe(event: TownEventView, town: TownView): string {
   const household = town.households.find(h => h.id === event.household)!;
   switch (event.kind) {
+    case 'noWalkRoute': return 'No safe way to walk from the ' + household.surname + ' home to ' + event.region;
     case 'parkingFailed': return (event.shopper ? 'Shoppers' : 'Workers') + ' couldn’t park near ' + event.region;
     case 'movedIn': return `${family(household)} moved into a new home`;
     case 'boughtCar': return `${family(household)} bought a ${ORDINALS[event.cars - 1] ?? 'new'} car`;
@@ -132,6 +133,7 @@ export function HouseholdCard({ household, onClose }: { household: HouseholdView
         <Need label="Security" value={needs.security} />
         <Need label="Happiness" value={household.happiness} />
       </div>
+      {household.walkIssue && <p>No safe way to walk to {household.walkIssue}.</p>}
       <ul className="members">
         {household.members.map((person) => (
           <li key={person.id}>

@@ -26,7 +26,7 @@ export interface Lane {
 }
 
 /** Drawable road surface. Purely visual; traffic only uses lanes. */
-export type SurfaceStyle = 'twoWay' | 'oneWay' | 'junction' | 'driveway' | 'parking' | 'pavement';
+export type SurfaceStyle = 'twoWay' | 'oneWay' | 'junction' | 'driveway' | 'parking' | 'pavement' | 'footpath';
 
 export interface Surface {
   readonly roadType?: RoadType;
@@ -37,7 +37,7 @@ export interface Surface {
 }
 
 export interface Network {
-  readonly pedestrianLinks?: { a: { x: number; y: number }; b: { x: number; y: number }; crossing: boolean }[];
+  readonly pedestrianLinks?: { a: { x: number; y: number }; b: { x: number; y: number }; crossing: boolean; zebra?: boolean }[];
   readonly lanes: Lane[];
   readonly surfaces: Surface[];
   /** Lanes with no predecessor: where vehicles enter the map. */

@@ -10,7 +10,7 @@ import { decodeCellKey, type CellKey } from '../src/sim/zoning/cells';
 import { planZoneStroke, type LandUse } from '../src/sim/zoning/paint';
 import { parseArgs } from 'node:util';
 import { buildScenario, isScenarioName, SCENARIOS } from '../src/sim/scenarios';
-import { meadowScenario, meadowTips, planMeadowRoad } from '../src/sim/scenarios/meadow';
+import { meadowScenario, planWalk, meadowTips, planMeadowRoad } from '../src/sim/scenarios/meadow';
 import { BUDGET } from '../src/sim/town/economy';
 import { editCost } from '../src/sim/town/budget';
 import { CLOCK_START, MINUTES_PER_DAY, type TownView } from '../src/sim/town/town';
@@ -27,6 +27,7 @@ const { values } = parseArgs({
     every: { type: 'string', default: '0' },
     json: { type: 'boolean', default: false },
     paint: { type: 'string' },
+    zebra: { type: 'string' },
     'parking-lot': { type: 'string' },
     connect: { type: 'boolean', default: false },
   },
@@ -103,12 +104,20 @@ if (values.connect && scenarioName !== 'meadow') {
   process.exit(1);
 }
 const road = values.connect ? connectingRoad() : undefined;
-const world = new World(road ? meadowScenario([road]) : buildScenario(scenarioName), seed);
+const edits: import('../src/sim/scenarios/meadow').MeadowEdit[] = road ? [road] : [];
+if (values.zebra) {
+  const [x,y] = values.zebra.split(',').map(Number);
+  if (x === undefined || y === undefined || scenarioName !== 'meadow') throw new Error('--zebra expects a Meadow street position x,y');
+  const point={x,y}, plan=planWalk(meadowScenario(edits).network,'zebra',point,point);
+  if (typeof plan === 'string') throw new Error(plan);
+  edits.push(plan);
+}
+const world = new World(edits.length ? meadowScenario(edits) : buildScenario(scenarioName), seed);
 function pay(cost: number): void {
   const reason = world.treasury!.book(cost);
   if (reason) throw new Error(reason);
 }
-if (road) pay(editCost([], road));
+edits.forEach((edit,i) => pay(editCost(edits.slice(0,i),edit)));
 if (values.paint !== undefined) {
   if (values.paint !== 'homes' && values.paint !== 'mixed') throw new Error('--paint expects homes or mixed');
   const cells = world.scenario.zones;
@@ -154,6 +163,7 @@ const summary = {
   msPerTick: Number((elapsedMs / ticks).toFixed(4)),
   stats: world.stats(),
   parking: finalTown?.parking,
+  crossings: world.walkers?.graph.crossings.map(c => ({zebra:c.zebra, served:c.served, yieldingTicks:c.yieldingTicks})),
   customers,
   happiness: finalTown ? happiness(finalTown) : undefined,
 };
