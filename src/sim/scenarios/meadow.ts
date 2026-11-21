@@ -10,7 +10,7 @@ import { buildStreetNetwork } from '../network/streets';
 import type { Network } from '../network/types';
 import { ECONOMY } from '../town/economy';
 import type { AccessPoint } from '../traffic/routing';
-import { buildZoneCells, type CellKey, type RoadIndex, type ZoneCells, type ZoneRoad } from '../zoning/cells';
+import { cellsAlong, buildZoneCells, type CellKey, type RoadIndex, type ZoneCells, type ZoneRoad } from '../zoning/cells';
 import type { LandUse, ZoneStroke, Zoning } from '../zoning/paint';
 import type { Bounds, Decor, House, RegionSpec, Scenario } from './types';
 
@@ -437,7 +437,7 @@ function crossesCarriageway(network: Network, a: Vec2, b: Vec2): boolean {
   return false;
 }
 
-export function planWalk(network: Network, walk: WalkEdit['walk'], start: Vec2, end: Vec2): WalkEdit | string {
+export function planWalk(network: Network, walk: WalkEdit['walk'], start: Vec2, end: Vec2, occupied?: { cells: ZoneCells; zoning: Zoning }): WalkEdit | string {
   if (!insideMeadow(start) || !insideMeadow(end)) return 'Stay inside the meadow.';
   if (walk === 'zebra') {
     const crossing = zebraAt(network,end);
@@ -447,6 +447,7 @@ export function planWalk(network: Network, walk: WalkEdit['walk'], start: Vec2, 
   }
   const snap = (p: Vec2) => nearestSurface(network,p,['footpath','pavement'],3)?.point ?? p;
   const a = snap(start), b = snap(end);
+  if (occupied && cellsAlong(occupied.cells,a,b).some(key=>occupied.zoning.has(key))) return 'Keep the path on open ground beside the plots.';
   const length = distance(a,b), decor = scenery();
   if (length < 3) return 'Drag a path at least three metres long.';
   if (crossesCarriageway(network,a,b)) return 'Use a crossing to cross the street.';

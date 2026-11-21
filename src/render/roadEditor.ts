@@ -459,7 +459,7 @@ export class RoadEditor {
     if (this.tool === 'pan') return;
     if (phase.kind === 'walk') {
       if (phase.id !== e.pointerId) return;
-      const plan = planWalk(phase.network,phase.tool,phase.start,cursor);
+      const plan = planWalk(phase.network,phase.tool,phase.start,cursor,{cells:this.cells,zoning:this.zoning});
       this.clearPreview();
       if (typeof plan === 'string') {
         if (release) this.finish();
