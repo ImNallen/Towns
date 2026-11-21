@@ -2,6 +2,8 @@ export const BUDGET = {
   startingBalance: 6000,
   roadPerMetre: 12,
   zonePerCell: 2,
+  parkingPerCell: 80,
+  upkeepPerBay: 1,
   salvageShare: 0.5,
   upkeepPerMetre: 1.4,
   homeTax: 0.045,

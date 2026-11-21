@@ -1,4 +1,4 @@
-import type { ZoneKind } from '../sim/zoning/paint';
+import type { LandUse } from '../sim/zoning/paint';
 
 /** All colours used on the map. Flat surfaces render at exactly these values (see lighting in scene.ts). */
 export const PALETTE = {
@@ -28,6 +28,8 @@ export const PALETTE = {
   roadSurface: '#ffffff',
   pavement: '#e2ded1',
   parking: '#d3d6ce',
+  parkingFree: '#8ac8a2',
+  parkingFull: '#e38865',
   roadOutline: '#a3a29c',
   centerLine: '#e6c440',
   giveWay: '#8a8983',
@@ -46,7 +48,7 @@ export const PALETTE = {
   editorInvalid: '#bb5941',
   buildBoundary: '#aaa99b',
   zoneGrid: '#d9d8cf',
-  zonePaint: { residential: '#d4e3ad', shops: '#9bcbd3', workplaces: '#e3be85' } satisfies Record<ZoneKind, string>,
+  zonePaint: { parking: '#84aaa9', residential: '#d4e3ad', shops: '#9bcbd3', workplaces: '#e3be85' } satisfies Record<LandUse, string>,
   editorPaper: '#fffdf4',
   selection: '#21705d',
 

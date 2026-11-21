@@ -29,6 +29,7 @@ function memberName(town: TownView, household: number, person: number): string {
 function describe(event: TownEventView, town: TownView): string {
   const household = town.households.find(h => h.id === event.household)!;
   switch (event.kind) {
+    case 'parkingFailed': return (event.shopper ? 'Shoppers' : 'Workers') + ' couldn’t park near ' + event.region;
     case 'movedIn': return `${family(household)} moved into a new home`;
     case 'boughtCar': return `${family(household)} bought a ${ORDINALS[event.cars - 1] ?? 'new'} car`;
     case 'newerCar': return `${family(household)} traded up to the ${vehicleType(event.model).name}`;
@@ -89,6 +90,8 @@ export function TownPanel({ town }: { town: TownView }) {
 function activity(person: PersonView): string {
   const { place } = person;
   switch (person.activity) {
+    case 'walking': return 'Walking';
+    case 'searching': return 'Looking for parking';
     case 'home': return 'At home';
     case 'homebound': return 'Driving home';
     case 'outbound': return person.errand === 'work' ? `Driving to work in ${place}` : `Driving to the shops in ${place}`;
@@ -119,7 +122,7 @@ export function HouseholdCard({ household, onClose }: { household: HouseholdView
       </div>
       <h2 className="household-name">{family(household)}</h2>
       <p className="household-meta">
-        <span><i className="car-swatch" style={{ background: PALETTE.vehicles[vehicleType(household.carModel).colours[0]] }} aria-hidden="true" />{household.cars} {model}{household.cars === 1 ? '' : 's'}</span>
+        <span><i className="car-swatch" style={{ background: PALETTE.vehicles[vehicleType(household.carModel).colours[0]] }} aria-hidden="true" />{household.cars} {model}{household.cars === 1 ? '' : 's'} · {household.parked.join(', ')}</span>
         <span>{money(household.funds)}</span>
       </p>
       <div className="needs">

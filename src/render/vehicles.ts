@@ -21,6 +21,8 @@ interface Frame {
 export class VehicleLayer {
   readonly mesh = new THREE.Group();
   private readonly batches: THREE.InstancedMesh[];
+  overflowCars: import('../sim/town/town').TownView['overflowCars'] = [];
+  bays: import('../sim/town/town').TownView['bays'] = [];
   businesses: readonly BusinessView[] = [];
   private prev: Frame | null = null;
   private cur: Frame | null = null;
@@ -80,19 +82,31 @@ export class VehicleLayer {
       }
       this.place(cur.models[i]!, cur.paint[i]!, x, y, h);
     }
+    for (const b of this.overflowCars) this.parkedCar(b);
+    for (const b of this.bays) {
+      if (!b.model) continue;
+      this.parkedCar(b);
+    }
     for (const business of this.businesses) {
-      if (!business.unloading) continue;
+      if (!business.unloading && !business.waitingAtKerb) continue;
       const { streetX, streetY, angle, x, y } = business.lot;
       const model = business.zone === 'shops' ? Model.DeliveryVan : Model.Lorry;
       const inset = 4.6 / Math.hypot(x - streetX, y - streetY);
       const half = vehicleType(model).length / 2;
-      this.place(model, vehicleType(model).colours[0], streetX + (x - streetX) * inset + Math.cos(angle) * half,
-        streetY + (y - streetY) * inset + Math.sin(angle) * half, angle);
+      const bay = business.waitingAtKerb
+        ? { x: streetX + (x - streetX) * inset, y: streetY + (y - streetY) * inset, angle }
+        : business.loadingBay;
+      this.place(model, vehicleType(model).colours[0], bay.x + Math.cos(bay.angle) * half, bay.y + Math.sin(bay.angle) * half, bay.angle);
     }
     for (const batch of this.batches) {
       batch.instanceMatrix.needsUpdate = true;
       if (batch.instanceColor) batch.instanceColor.needsUpdate = true;
     }
+  }
+
+  private parkedCar(b: { model: number; x: number; y: number; angle: number }) {
+    const type = vehicleType(b.model);
+    this.place(b.model, type.colours[0], b.x + Math.cos(b.angle) * type.length / 2, b.y + Math.sin(b.angle) * type.length / 2, b.angle);
   }
 
   private place(model: number, paint: number, x: number, y: number, heading: number) {

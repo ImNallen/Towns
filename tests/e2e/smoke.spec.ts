@@ -323,3 +323,60 @@ test('road type preview, upgrades and residential growth', async ({ page }) => {
   await page.evaluate(() => window.__towns!.setSpeed(0));
   await page.screenshot({ path: 'artifacts/screens/road-upgrade-growth.png' });
 });
+
+test('parking occupancy and a new lot serving the shops', async ({ page }) => {
+  test.setTimeout(150_000);
+  const { at, drag, editor } = await connectedStreet(page);
+  await page.keyboard.press('s');
+  await drag(-21, 24, 6);
+  await expect.poll(editor).toMatchObject({ pending: false });
+  await page.keyboard.press('v');
+  await page.evaluate(() => window.__towns!.setSpeed(360));
+  await page.waitForFunction(() => {
+    if (!window.__towns!.town()!.businesses.some(b => b.zone === 'shops' && b.capacity > 0 && b.occupied === b.capacity)) return false;
+    window.__towns!.setSpeed(0);
+    return true;
+  }, null, { timeout: 90_000 });
+  const shop = await page.evaluate(() => window.__towns!.town()!.businesses.find(b => b.zone === 'shops' && b.capacity && b.occupied === b.capacity)!);
+  await page.mouse.click(...at(shop.lot.x, shop.lot.y));
+  await page.getByLabel('Parking occupancy').check();
+  await expect(page.getByRole('region', { name: 'Business' })).toContainText('Parking');
+  await page.screenshot({ path: 'artifacts/screens/parking-full-yard.png' });
+  await page.getByRole('button', { name: 'Close business card' }).click();
+  await page.getByRole('button', { name: 'Build parking lot' }).click();
+  await page.getByLabel('Lot size').selectOption('2');
+  await page.mouse.move(...at(6, -1));
+  await expect(page.locator('.preview-cost')).toContainText('$160');
+  await page.screenshot({ path: 'artifacts/screens/parking-lot-preview.png' });
+  await page.mouse.click(...at(6, -1));
+  await expect.poll(() => page.evaluate(() => window.__towns!.town()!.bays.filter(b => b.kind === 'lot').length)).toBe(4);
+  await page.keyboard.press('v');
+  await page.evaluate(() => window.__towns!.setSpeed(360));
+  await page.waitForFunction(() => {
+    if (!window.__towns!.town()!.bays.some(b => b.kind === 'lot' && b.model)) return false;
+    window.__towns!.setSpeed(0);
+    return true;
+  }, null, { timeout: 90_000 });
+  await page.screenshot({ path: 'artifacts/screens/parking-lot-serving.png' });
+});
+
+test('drivers park on a street with side bays', async ({ page }) => {
+  const { at, drag, editor } = await connectedStreet(page);
+  await page.keyboard.press('u');
+  await page.keyboard.press('7');
+  await page.mouse.click(...at(0, 8));
+  await expect.poll(editor).toMatchObject({ pending: false });
+  await page.keyboard.press('z');
+  await page.keyboard.press('s');
+  await drag(-21, 18, 6);
+  await expect.poll(editor).toMatchObject({ pending: false });
+  await page.keyboard.press('v');
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => window.__towns!.setSpeed(360));
+  await page.waitForFunction(() => {
+    if (!window.__towns!.town()!.bays.some(b => b.kind === 'street' && b.model)) return false;
+    window.__towns!.setSpeed(0);
+    return true;
+  }, null, { timeout: 55_000 });
+  await page.screenshot({ path: 'artifacts/screens/parking-street.png' });
+});

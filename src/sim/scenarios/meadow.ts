@@ -11,7 +11,7 @@ import type { Network } from '../network/types';
 import { ECONOMY } from '../town/economy';
 import type { AccessPoint } from '../traffic/routing';
 import { buildZoneCells, type CellKey, type RoadIndex, type ZoneCells, type ZoneRoad } from '../zoning/cells';
-import type { ZoneKind, ZoneStroke, Zoning } from '../zoning/paint';
+import type { LandUse, ZoneStroke, Zoning } from '../zoning/paint';
 import type { Bounds, Decor, House, RegionSpec, Scenario } from './types';
 
 export interface MeadowRoad {
@@ -204,11 +204,11 @@ function zoneRoads({ roads, sections }: Replay): ZoneRoad[] {
 }
 
 export function meadowZoning(edits: readonly MeadowEdit[], cells: ZoneCells): Zoning {
-  const named = new Map<CellKey, ZoneKind | null>();
+  const named = new Map<CellKey, LandUse | null>();
   for (const edit of edits) {
     if (isZoneStroke(edit)) for (const key of edit.cells) named.set(key, edit.zone);
   }
-  const zoning = new Map<CellKey, ZoneKind>();
+  const zoning = new Map<CellKey, LandUse>();
   if (named.size === 0) return zoning;
   for (let i = 0; i < cells.count; i++) {
     const key = cells.keys[i]! as CellKey;
@@ -375,6 +375,11 @@ export function meadowScenario(roads: readonly MeadowEdit[] = []): Scenario {
     surfaces: scenario.network.surfaces,
     blobs: [...lakes, ...hills].map((blob) => ({ x: blob.x, y: blob.y, radius: blob.radius * SCENERY_REACH })),
     bounds: MEADOW_BUILD_BOUNDS,
+  });
+  zones.gardenCells = Uint8Array.from(zones.keys, (_, i) => {
+    const q = zones.corners.subarray(i * 8, i * 8 + 8);
+    const xs = [q[0]!, q[2]!, q[4]!, q[6]!], ys = [q[1]!, q[3]!, q[5]!, q[7]!];
+    return Number(scenario.decor.houses.some(({ garden: g }) => g && Math.min(...xs) < g.maxX && Math.max(...xs) > g.minX && Math.min(...ys) < g.maxY && Math.max(...ys) > g.minY));
   });
   return { ...scenario, zones };
 }

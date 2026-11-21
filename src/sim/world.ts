@@ -9,6 +9,7 @@ import { IDM, idmAccel } from './traffic/idm';
 import { Routing } from './traffic/routing';
 import { Model, VEHICLES, throughModel, vehicleType } from '../vehicles/catalogue';
 import { Vehicles } from './traffic/vehicles';
+import { Parking, parkingBays } from './town/parking';
 import { CLOCK_START, Town, type TownView } from './town/town';
 
 /** Fixed simulation timestep, seconds (20 Hz). */
@@ -108,10 +109,12 @@ export class World {
     for (const lane of this.lanes) {
       for (const priority of lane.crossingYieldTo) this.yieldingMovements[priority]!.push(lane.id);
     }
-    this.routing = new Routing(this.network, scenario.town?.homes.map((home) => home.access));
+    const homes = scenario.town?.homes ?? [];
+    const bays = scenario.town ? parkingBays(scenario, homes, this.zoning) : [];
+    this.routing = new Routing(this.network, [...homes.map(h => h.access), ...bays.map(b => b.access)]);
     this.vehicles = new Vehicles(capacity);
     this.rng = new Rng(seed);
-    this.town = scenario.town ? new Town(scenario.town, this.routing.sinks.length, seed, this.routing) : null;
+    this.town = scenario.town ? new Town(scenario.town, this.routing.sinks.length, seed, this.routing, new Parking(bays, this.routing.sinks.length + homes.length), scenario.decor.houses) : null;
 
     const n = this.lanes.length;
     this.laneLen = Float64Array.from(this.lanes, (l) => l.length);
@@ -167,10 +170,13 @@ export class World {
   /** Paint edits change driveway targets without remapping cars already on the street. */
   setZoning(zoning: Zoning): void {
     if (!this.town) return;
-    this.installLots(zoning, this.town);
+    const previous = this.town;
+    this.installLots(zoning, previous);
     const v = this.vehicles;
     for (let i = 0; i < v.highWater; i++) {
-      if (v.alive[i] && !this.town.driving(v.owner[i]!)) v.despawn(i);
+      if (!v.alive[i]) continue;
+      if (!this.town.driving(v.owner[i]!)) v.despawn(i);
+      else if (v.dest[i]! >= previous.parking.firstDest) v.dest[i] = this.town.driverDestination(v.owner[i]!);
     }
   }
 
@@ -195,8 +201,9 @@ export class World {
       const access = accessPoints(this.network, { x: lot.streetX, y: lot.streetY });
       homes[h] = { lot, access, region: lot.streetX < 0 ? 0 : 1 };
     }
-    this.routing = new Routing(this.network, homes.map(home => home.access));
-    this.town = new Town({ ...base, homes }, this.routing.sinks.length, 0, this.routing, base.homes.length);
+    const bays = parkingBays(this.scenario, homes, zoning);
+    this.routing = new Routing(this.network, [...homes.map(home => home.access), ...bays.map(b => b.access)]);
+    this.town = new Town({ ...base, homes }, this.routing.sinks.length, 0, this.routing, new Parking(bays, this.routing.sinks.length + homes.length), this.scenario.decor.houses, base.homes.length);
     this.town.copyFrom(previous, this.routing, this.minute());
   }
 
@@ -241,7 +248,8 @@ export class World {
         edited.vehicles.despawn(slot);
         continue;
       }
-      const dest = destinations[V.dest[slot]!]!;
+      const dest = this.town && edited.town && V.dest[slot]! >= this.town.parking.firstDest
+        ? edited.town.driverDestination(V.owner[slot]!) : destinations[V.dest[slot]!]!;
       if (dest < 0) return fail(slot);
       const pose = sampleAt(this.lanes[V.lane[slot]!]!.path, V.s[slot]!, { x: 0, y: 0, hx: 0, hy: 0 });
       let best: { lane: number; s: number; error: number } | undefined;
@@ -399,9 +407,10 @@ export class World {
       // The route ends on `cur`. A building's driveway part-way along it is a turn to slow for;
       // a sink at the lane end is not.
       const exit = nxt < 0 ? this.routing.exit(d, cur) : Infinity;
-      if (exit < this.laneLen[cur]! && vi > TURN_SPEED) {
+      const turnSpeed = this.town?.parking.bays[d - this.town.parking.firstDest]?.kind === 'street' ? 1 : TURN_SPEED;
+      if (exit < this.laneLen[cur]! && vi > turnSpeed) {
         const toExit = dist - this.laneLen[cur]! + exit;
-        a = Math.min(a, (TURN_SPEED * TURN_SPEED - vi * vi) / (2 * Math.max(toExit, 2)));
+        a = Math.min(a, (turnSpeed * turnSpeed - vi * vi) / (2 * Math.max(toExit, 2)));
       }
       acc[i] = Math.max(a, -IDM.maxDecel);
     }

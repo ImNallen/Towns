@@ -7,7 +7,7 @@ import { meadowZoning, type MeadowEdit } from '../sim/scenarios/meadow';
 import type { TownView } from '../sim/town/town';
 import type { SimStats } from '../sim/world';
 import type { ZoneCells } from '../sim/zoning/cells';
-import type { ZoneKind } from '../sim/zoning/paint';
+import type { LandUse } from '../sim/zoning/paint';
 import type { FromWorker, ToWorker } from '../worker/protocol';
 import { MapCamera } from './camera';
 import { buildLaneOverlay } from './debug';
@@ -18,7 +18,7 @@ import { HouseLayer } from './houses';
 import { PALETTE } from './palette';
 import { buildRoads } from './roads';
 import { VehicleLayer } from './vehicles';
-import { buildZoneLayer, buildZonePaint } from './zones';
+import { buildParkingView, buildZoneLayer, buildZonePaint } from './zones';
 
 export interface GameOptions {
   scenario: ScenarioName;
@@ -35,7 +35,8 @@ export interface Game {
   setAngleSnapping(enabled: boolean): void;
   setRoadType(type: RoadType): void;
   setTool(tool: MapTool): void;
-  setBrush(brush: ZoneKind | null): void;
+  setLotColumns(columns: number): void;
+  setBrush(brush: LandUse | null): void;
   undo(): void;
   cancelRoadEdit(): void;
   stats(): SimStats | null;
@@ -48,6 +49,7 @@ export interface Game {
   speed(): number;
   setSpeed(speed: number): void;
   showLanes(): boolean;
+  setParkingView(show: boolean): void;
   setShowLanes(show: boolean): void;
   dispose(): void;
 }
@@ -89,6 +91,17 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   let paintLayer: THREE.Group | null = null;
   let cells: ZoneCells | undefined;
   let showLanes = options.showLanes;
+  let parkingLayer: THREE.Group | null = null;
+  let occupancy = false;
+  let parkingSignature = '';
+  function drawParking(view: TownView) {
+    const signature = JSON.stringify(view.bays) + occupancy;
+    if (signature === parkingSignature) return;
+    parkingSignature = signature;
+    if (parkingLayer) disposeLayer(parkingLayer);
+    parkingLayer = buildParkingView(view.bays, occupancy);
+    scene.add(parkingLayer);
+  }
   let speed = options.speed;
   let latestStats: SimStats | null = null;
   let latestTown: TownView | null = null;
@@ -117,7 +130,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     scene.add(roadLayer, laneOverlay);
   };
 
-  const gridVisible = (): boolean => options.showZones || editor?.state().tool === 'zone';
+  const gridVisible = (): boolean => options.showZones || editor?.state().tool === 'zone' || editor?.state().tool === 'parking';
   const drawZones = (): void => {
     if (zoneLayer) disposeLayer(zoneLayer);
     zoneLayer = cells ? buildZoneLayer(cells) : null;
@@ -170,7 +183,8 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
       editor?.reject(msg.reason);
     } else if (msg.type === 'town') {
       latestTown = msg.view;
-      if (vehicles) vehicles.businesses = msg.view.businesses;
+      drawParking(msg.view);
+      if (vehicles) { vehicles.businesses = msg.view.businesses; vehicles.bays = msg.view.bays; vehicles.overflowCars = msg.view.overflowCars; }
       editor?.setBalance(msg.view.budget.balance);
       houses?.update(msg.view.households, msg.view.businesses);
       if (selectedHouse !== null && !msg.view.households.some(h => h.home === selectedHouse)
@@ -220,6 +234,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
       editor?.setTool(tool);
       if (zoneLayer) zoneLayer.visible = gridVisible();
     },
+    setLotColumns: columns => editor?.setLotColumns(columns),
     setBrush: (brush) => editor?.setBrush(brush),
     undo: () => editor?.undo(),
     cancelRoadEdit: () => editor?.cancel(),
@@ -233,6 +248,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
       speed = next;
       send({ type: 'setSpeed', speed });
     },
+    setParkingView(show) { occupancy = show; if (latestTown) drawParking(latestTown); },
     showLanes: () => showLanes,
     setShowLanes(show) {
       showLanes = show;

@@ -1,3 +1,7 @@
+import { decodeCellKey } from '../zoning/cells';
+import { Parking, sameEntrance, WALK_LIMIT, walkMinutes, type Bay } from './parking';
+import type { AccessPoint } from '../traffic/routing';
+import type { Vec2 } from '../math/vec';
 import { Model } from '../../vehicles/catalogue';
 import { BUDGET, ECONOMY } from './economy';
 import { Treasury, type BudgetView } from './budget';
@@ -24,6 +28,7 @@ const HOME = 0;
 const OUTBOUND = 1;
 const AWAY = 2;
 const HOMEBOUND = 3;
+const WALK_TO_CAR = 4, WALK_TO_DOOR = 5, SEARCH = 6, WALK_BACK = 7, WALK_HOME = 8, RETURN_FAILED = 9, SEEK_HOME = 10;
 const WORK = 0;
 const SHOP = 1;
 const ADULT = 0;
@@ -44,7 +49,7 @@ const PANTRY_LOW = 1.5;
 const HOUSE_CAPACITY = [0, 3, 5, 7];
 const MAX_LEVEL = 3;
 const MAX_MODEL = Model.SUV;
-const IDLE = 0, INBOUND = 1, UNLOADING = 2, RETURNING = 3;
+const IDLE = 0, INBOUND = 1, UNLOADING = 2, RETURNING = 3, WAIT_KERB = 4;
 type Demand = Record<ZoneKind, number>;
 const GROWTH_THRESHOLD = 360;
 const lotZone = (lot: Lot) => lot.designs[0]!.blueprint.zone;
@@ -67,10 +72,11 @@ const NEW_JOB = 3;
 const CHANGED_JOB = 4;
 const LOST_JOB = 5;
 const MOVED_IN = 6;
+const PARKING_FAILED = 7;
 
-export type Activity = 'home' | 'outbound' | 'away' | 'homebound';
+export type Activity = 'home' | 'outbound' | 'away' | 'homebound' | 'walking' | 'searching';
 export type Errand = 'work' | 'shop';
-const ACTIVITIES: readonly Activity[] = ['home', 'outbound', 'away', 'homebound'];
+const ACTIVITIES: readonly Activity[] = ['home', 'outbound', 'away', 'homebound', 'walking', 'walking', 'searching', 'walking', 'walking', 'searching', 'searching'];
 const ERRANDS: readonly Errand[] = ['work', 'shop'];
 
 /** Each 0..1, where 1 is fully met. */
@@ -90,6 +96,8 @@ export interface PersonView {
   /** Name of the region they work in. */
   job: string | null;
   activity: Activity;
+  /** Mode of the current trip leg. Parking includes a kerbside search or manoeuvre. */
+  leg: 'walk' | 'drive' | 'park' | null;
   /** Why they are out; null at home. */
   errand: Errand | null;
   /** Region they are driving to, staying in or coming back from; null at home. */
@@ -106,6 +114,8 @@ export interface HouseholdView {
   surname: string;
   level: number;
   cars: number;
+  drivewayOverflow: number;
+  parked: string[];
   carModel: number;
   funds: number;
   /** All wages earned since the start. */
@@ -119,6 +129,7 @@ export interface HouseholdView {
 }
 
 export type TownEventView = { day: number; minute: number; household: number } & (
+  | { kind: 'parkingFailed'; region: string; shopper: boolean }
   | { kind: 'movedIn' }
   | { kind: 'boughtCar'; cars: number }
   | { kind: 'newerCar'; model: number }
@@ -137,10 +148,18 @@ export interface BusinessView {
   jobs: number;
   filled: number;
   deliveries: number;
+  occupied: number;
+  capacity: number;
+  turnedAway: number;
   unloading: boolean;
+  waitingAtKerb: boolean;
+  loadingBay: { x: number; y: number; angle: number };
   customers: number;
 }
 export interface TownView {
+  overflowCars: Array<Vec2 & { angle: number; model: number }>;
+  bays: Array<Pick<Bay, 'kind' | 'x' | 'y' | 'angle'> & { model: number }>;
+  parking: { trips: number; parked: number; turnedAway: number; walkMetres: number };
   budget: BudgetView;
   businesses: BusinessView[];
   demand: Demand;
@@ -175,7 +194,7 @@ const dayOf = (minute: number): number => Math.floor(minute / MINUTES_PER_DAY) +
 export class Town {
   readonly treasury = new Treasury();
   private get dailyRoadUpkeep(): number {
-    return this.spec.roadUpkeep ?? Math.round(this.spec.roadMetres * BUDGET.upkeepPerMetre);
+    return (this.spec.roadUpkeep ?? Math.round(this.spec.roadMetres * BUDGET.upkeepPerMetre)) + this.lotUpkeep;
   }
 
   // Daily gross wages for homes and receipts for shops.
@@ -224,6 +243,8 @@ export class Town {
   private readonly open: Uint8Array;
   private readonly deliveries: Uint16Array;
   private readonly freightState: Uint8Array;
+  private readonly loadingGroup: Int32Array;
+  private readonly loadingPose: { x: number; y: number; angle: number }[];
   private readonly freightDue: Int32Array;
   private readonly customers: Uint32Array;
   private readonly growth: Demand = { residential: 0, shops: 0, workplaces: 0 };
@@ -241,12 +262,43 @@ export class Town {
   private eventHead = 0;
   private eventCount = 0;
 
-  constructor(spec: TownSpec, homeDest: number, seed: number, routing: Routing, starterHomes = spec.homes.length) {
+  // A car slot is 2 * household + ordinal. A resident keeps that slot until the round trip ends.
+  private readonly carBay: Int32Array;
+  private readonly driverCar: Int32Array;
+  // Target is a bay index. Origin is a routing destination used when restarting from the kerb.
+  private readonly target: Int32Array;
+  private readonly origin: Int32Array;
+  private readonly failed: Uint8Array;
+  private readonly circled: Uint8Array;
+  private readonly due: Int32Array;
+  private readonly denied: Uint16Array;
+  private readonly frustration: Uint8Array;
+  private readonly lotUpkeep: number;
+  private readonly door: Vec2[];
+  private readonly outside: AccessPoint[][];
+  private trips = 0;
+  private parked = 0;
+  private turnedAway = 0;
+  private walkMetres = 0;
+
+  constructor(spec: TownSpec, homeDest: number, seed: number, routing: Routing, readonly parking: Parking, houses: Vec2[], starterHomes = spec.homes.length) {
     this.spec = spec;
     this.homeDest = homeDest;
     this.rng = new Rng((seed ^ TOWN_SEED) >>> 0);
     const H = spec.homes.length;
     const P = H * MAX_MEMBERS;
+    this.carBay = new Int32Array(H * 2).fill(-1);
+    this.driverCar = new Int32Array(P).fill(-1);
+    this.target = new Int32Array(P).fill(-1);
+    this.origin = new Int32Array(P).fill(-1);
+    this.failed = new Uint8Array(P);
+    this.circled = new Uint8Array(P);
+    this.due = new Int32Array(P);
+    this.denied = new Uint16Array(H);
+    this.frustration = new Uint8Array(H);
+    this.door = spec.homes.map((h, i) => h.lot ?? houses[i] ?? { x: 0, y: 0 });
+    this.outside = spec.regions.map(r => [{ lane: r.source, s: 0 }]);
+    this.lotUpkeep = parking.bays.filter(b => b.kind === 'lot').length * BUDGET.upkeepPerBay;
     this.surname = new Uint16Array(H);
     this.funds = new Float64Array(H);
     this.taxable = new Float64Array(H);
@@ -276,6 +328,23 @@ export class Town {
     this.filled = new Int32Array(spec.regions.length + H);
     this.open = new Uint8Array(H);
     this.deliveries = new Uint16Array(H);
+    // Two adjacent frontages on the same side can share a service entrance.
+    this.loadingGroup = new Int32Array(H).fill(-1);
+    this.loadingPose = new Array(H);
+    const loadingEntrances = new Map<number, number>();
+    for (let h = 0; h < H; h++) {
+      const lot = spec.homes[h]!.lot;
+      if (!lot || lotZone(lot) === 'residential') continue;
+      const { column } = decodeCellKey(lot.key);
+      const key = lot.key - (column % 2) * 8;
+      const group = loadingEntrances.get(key) ?? h;
+      loadingEntrances.set(key, group);
+      this.loadingGroup[h] = group;
+      const entrance = spec.homes[group]!.lot!;
+      const dx = entrance.x - entrance.streetX, dy = entrance.y - entrance.streetY;
+      const inset = 5.4 / Math.sqrt(dx * dx + dy * dy);
+      this.loadingPose[h] = { x: entrance.streetX + dx * inset, y: entrance.streetY + dy * inset, angle: entrance.angle };
+    }
     this.freightState = new Uint8Array(H);
     this.freightDue = new Int32Array(H);
     this.customers = new Uint32Array(H);
@@ -303,6 +372,8 @@ export class Town {
       const p = start + k;
       this.people = Math.max(this.people, p + 1);
       this.activity[p] = HOME;
+      this.driverCar[p] = this.origin[p] = this.target[p] = -1;
+      this.due[p] = this.failed[p] = this.circled[p] = 0;
       this.at[p] = this.job[p] = -1;
       this.errand[p] = this.workedDay[p] = this.until[p] = this.arrivedAt[p] = 0;
       this.household[p] = h;
@@ -314,6 +385,7 @@ export class Town {
     this.funds[h] = ECONOMY.initialFunds + rng.int(ECONOMY.initialFundsRange);
     this.level[h] = 1;
     this.cars[h] = 1;
+    this.parkAtHome(h * 2);
     this.carModel[h] = this.funds[h]! >= ECONOMY.carPrice[Model.Estate] && this.memberCount[h]! > adults
       ? Model.Estate : Model.Hatchback;
     this.pantry[h] = 2 + rng.next() * 2;
@@ -332,6 +404,7 @@ export class Town {
       this.role[p] = VACANT;
       this.job[p] = -1;
     }
+    for (let car = 2 * h; car < 2 * h + this.cars[h]!; car++) this.assign(car, -1);
     this.memberCount[h] = this.level[h] = 0;
     for (let i = 0; i < EVENT_CAPACITY; i++) {
       if (this.eventHousehold[i] === h) this.eventHousehold[i] = -1;
@@ -344,12 +417,33 @@ export class Town {
       throw new Error('Town copy requires enough home slots and the same regions');
     }
     this.rng.copyFrom(source.rng);
+    this.trips = source.trips;
+    this.parked = source.parked;
+    this.turnedAway = source.turnedAway;
+    this.walkMetres = source.walkMetres;
+    const index = new Map(this.parking.bays.map((b, i) => [b.key, i]));
+    const remap = (b: number) => b < 0 ? -1 : index.get(source.parking.bays[b]!.key) ?? -1;
+    this.parking.occupant.fill(-1);
+    this.carBay.fill(-1);
+    for (let car = 0; car < source.carBay.length; car++) {
+      const b = remap(source.carBay[car]!);
+      this.assign(car, b);
+    }
+    for (let p = 0; p < source.people; p++) this.target[p] = remap(source.target[p]!);
     this.treasury.copyFrom(source.treasury);
     for (const key of [
+      'origin', 'driverCar', 'failed', 'circled', 'due', 'denied', 'frustration',
       'taxable', 'taxesPaid', 'payroll', 'lastDailyCost', 'surname', 'funds', 'wages', 'level', 'cars', 'carModel', 'pantry', 'firstMember', 'memberCount', 'adults',
       'household', 'role', 'age', 'firstName', 'job', 'activity', 'errand', 'at', 'arrivedAt', 'until', 'workedDay',
       'deliveries', 'freightState', 'freightDue', 'open', 'customers', 'early', 'eventDay', 'eventMinute', 'eventHousehold', 'eventKind', 'eventDetail', 'eventPerson',
     ] as const) this[key].set(source[key]);
+    for (let p = 0; p < source.people; p++) {
+      const origin = this.origin[p]!;
+      if (origin >= source.parking.firstDest) {
+        const bay = remap(origin - source.parking.firstDest);
+        this.origin[p] = bay < 0 ? this.destination(this.at[p]!) : this.parking.firstDest + bay;
+      }
+    }
     Object.assign(this.growth, source.growth);
     Object.assign(this.eventPlace, source.eventPlace);
     this.eventHead = source.eventHead;
@@ -380,9 +474,19 @@ export class Town {
           this.record(minute, this.household[p]!, LOST_JOB, place, p, source.placeName(place));
         }
         if (this.at[p] === place) {
+          if (this.driverCar[p]! >= 0 && this.role[p] !== VACANT) this.parkAtHome(this.driverCar[p]!);
+          this.driverCar[p] = -1;
           this.activity[p] = HOME;
           this.at[p] = -1;
+          this.origin[p] = this.target[p] = -1;
+          this.due[p] = 0;
         }
+      }
+    }
+    for (let h = 0; h < this.level.length; h++) {
+      if (!this.level[h]) continue;
+      for (let car = 2 * h; car < 2 * h + this.cars[h]!; car++) {
+        if (this.carBay[car]! < 0 && !this.driverCar.includes(car)) this.parkAtHome(car);
       }
     }
     this.people = source.people;
@@ -405,8 +509,17 @@ export class Town {
     const day = dayOf(minute);
     for (let p = 0; p < this.people; p++) {
       if (this.role[p] !== ADULT) continue;
-      if (this.activity[p] === HOME) this.leaveHome(p, day, clock, roads);
-      else if (this.activity[p] === AWAY && minute >= this.until[p]!) this.leaveRegion(p, roads);
+      if (minute < this.due[p]!) continue;
+      const phase = this.activity[p];
+      if (phase === WALK_TO_CAR || phase === SEARCH) this.startDrive(p, roads, minute);
+      else if (phase === WALK_TO_DOOR || phase === WALK_HOME) this.enterDoor(p, minute);
+      else if (phase === RETURN_FAILED || phase === WALK_BACK || phase === SEEK_HOME) this.leaveRegion(p, roads, minute);
+      else if (this.activity[p] === HOME) this.leaveHome(p, day, clock, roads, minute);
+      else if (this.activity[p] === AWAY && minute >= this.until[p]!) {
+        if (this.at[p]! < this.spec.regions.length) { this.leaveRegion(p, roads, minute); continue; }
+        this.activity[p] = WALK_BACK;
+        this.due[p] = minute + walkMinutes(this.walkDistance(p, false));
+      }
     }
   }
 
@@ -420,6 +533,11 @@ export class Town {
       const owner = -2 - h;
       const access = roads.routing.bestAccess(home.access, depot.sink);
       if (access < 0) continue;
+      if (this.freightState[h] === WAIT_KERB && !this.loadingBusy(h)) {
+        this.freightState[h] = UNLOADING;
+        this.freightDue[h] = minute + 15;
+        continue;
+      }
       if (this.freightState[h] === UNLOADING) {
         const start = home.access[access]!;
         if (roads.trySpawnAt(start.lane, start.s, depot.sink, owner, model)) this.freightState[h] = RETURNING;
@@ -429,12 +547,20 @@ export class Town {
     }
   }
 
+  private loadingBusy(h: number): boolean {
+    for (let i = 0; i < this.freightState.length; i++) {
+      if (this.loadingGroup[i] === this.loadingGroup[h] && this.freightState[i] === UNLOADING) return true;
+    }
+    return false;
+  }
+
   freightArrived(owner: number, minute: number): boolean {
     const h = -2 - owner;
     if (this.freightState[h] === INBOUND) {
       this.deliveries[h]++;
-      this.freightState[h] = UNLOADING;
-      this.freightDue[h] = minute + 15;
+      const waiting = this.loadingBusy(h);
+      this.freightState[h] = waiting ? WAIT_KERB : UNLOADING;
+      this.freightDue[h] = waiting ? minute : minute + 15;
       return true;
     }
     this.freightState[h] = IDLE;
@@ -518,70 +644,224 @@ export class Town {
 
   /** A resident's car reached its destination. */
   arrived(p: number, minute: number): void {
-    if (this.activity[p] === OUTBOUND) {
-      this.activity[p] = AWAY;
-      const slot = this.at[p]! - this.spec.regions.length;
-      if (slot >= 0 && this.errand[p] === SHOP) this.customers[slot]++;
-      this.arrivedAt[p] = minute;
-      this.until[p] = this.errand[p] === WORK
-        ? (this.workedDay[p]! - 1) * MINUTES_PER_DAY + SHIFT_END
-        : minute + SHOP_STAY;
-    } else if (this.activity[p] === HOMEBOUND) {
-      this.activity[p] = HOME;
-      if (this.errand[p] === SHOP) this.buyGroceries(this.household[p]!, this.at[p]!);
+    if (this.activity[p] !== HOMEBOUND && this.activity[p] !== OUTBOUND) return;
+    const back = this.activity[p] === HOMEBOUND;
+    const home = this.household[p]!;
+    const place = back ? home : this.at[p]! - this.spec.regions.length;
+    if (place < 0) {
+      this.activity[p] = WALK_TO_DOOR;
+      this.enterDoor(p, minute);
+      return;
     }
+    const bay = this.target[p]!;
+    if (!back && (bay < 0 || this.parking.occupant[bay]! >= 0)) {
+      if (this.circled[p] !== 1 || bay >= 0) this.origin[p] = bay >= 0 ? this.parking.firstDest + bay : this.homeDest + place;
+      this.activity[p] = SEARCH;
+      this.due[p] = minute + 1;
+      return;
+    }
+    if (back && bay >= 0 && this.parking.occupant[bay]! >= 0) {
+      this.origin[p] = this.parking.firstDest + bay;
+      this.activity[p] = SEEK_HOME;
+      this.due[p] = minute + 1;
+      return;
+    }
+    const car = this.driverCar[p]!;
+    if (bay >= 0 && this.parking.occupant[bay]! < 0) this.assign(car, bay);
+    else this.assign(car, -1); // Home driveway apron.
+    const distance = this.walkDistance(p, back);
+    if (this.carBay[car]! >= 0) {
+      this.parked++;
+      this.walkMetres += distance;
+    }
+    this.activity[p] = back ? WALK_HOME : WALK_TO_DOOR;
+    this.due[p] = minute + walkMinutes(distance);
+  }
+
+  private enterDoor(p: number, minute: number): void {
+    if (this.activity[p] === WALK_HOME) {
+      this.activity[p] = HOME;
+      if (!this.failed[p] && this.errand[p] === SHOP) this.buyGroceries(this.household[p]!, this.at[p]!);
+      this.driverCar[p] = -1;
+      if (this.failed[p] && this.errand[p] === SHOP) this.due[p] = minute + 180;
+      return;
+    }
+    this.activity[p] = AWAY;
+    const slot = this.at[p]! - this.spec.regions.length;
+    if (slot >= 0 && this.errand[p] === SHOP) this.customers[slot]++;
+    this.arrivedAt[p] = minute;
+    this.until[p] = this.errand[p] === WORK
+      ? (this.workedDay[p]! - 1) * MINUTES_PER_DAY + SHIFT_END : minute + SHOP_STAY;
+  }
+
+  private walkDistance(p: number, home: boolean): number {
+    const b = this.parking.bays[this.carBay[this.driverCar[p]!]!];
+    const d = this.door[home ? this.household[p]! : this.at[p]! - this.spec.regions.length];
+    if (!b || !d) return 4;
+    const dx = b.x - d.x, dy = b.y - d.y;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  private assign(car: number, bay: number): void {
+    const old = this.carBay[car]!;
+    if (old >= 0) this.parking.occupant[old] = -1;
+    this.carBay[car] = bay;
+    if (bay >= 0) this.parking.occupant[bay] = car;
+  }
+
+  private parkAtHome(car: number): void {
+    const h = Math.floor(car / 2);
+    const door = this.door[h]!;
+    let best = -1, distance = WALK_LIMIT * WALK_LIMIT;
+    for (let i = 0; i < this.parking.bays.length; i++) {
+      const b = this.parking.bays[i]!;
+      if (this.parking.occupant[i]! >= 0) continue;
+      if (b.home === h && b.kind === 'driveway') { best = i; break; }
+      if (b.kind !== 'street') continue;
+      const dx = door.x - b.x, dy = door.y - b.y;
+      const d = dx * dx + dy * dy;
+      if (d < distance) { best = i; distance = d; }
+    }
+    this.assign(car, best);
+  }
+
+  driverDestination(p: number): number {
+    if (this.target[p]! >= 0) return this.parking.firstDest + this.target[p]!;
+    return this.activity[p] === HOMEBOUND ? this.homeDest + this.household[p]! : this.destination(this.at[p]!);
   }
 
   /** A resident's car was removed without arriving: the trip is abandoned at home. */
   lost(p: number): void {
+    if (this.driverCar[p]! >= 0) this.parkAtHome(this.driverCar[p]!);
+    this.driverCar[p] = -1;
     this.activity[p] = HOME;
   }
 
   // --- Trips --------------------------------------------------------------------
 
-  private leaveHome(p: number, day: number, clock: number, roads: TownRoads): void {
+  private leaveHome(p: number, day: number, clock: number, roads: TownRoads, minute: number): void {
     const h = this.household[p]!;
     if (this.freeCars(h) === 0) return;
     const job = this.job[p]!;
     if (job >= 0 && this.workedDay[p] !== day) {
       const travel = this.outTime(h, job, roads.routing);
       if (clock >= SHIFT_START - travel - this.early[p]! && clock + travel <= SHIFT_END - MIN_SHIFT) {
-        if (this.depart(p, WORK, job, roads)) this.workedDay[p] = day;
+        if (this.depart(p, WORK, job, minute)) this.workedDay[p] = day;
         return;
       }
     }
     if (clock < SHOP_OPENS || clock >= SHOP_CLOSES || this.pantry[h]! >= PANTRY_LOW || this.shopping(h)) return;
     const shop = this.nearestShop(h, roads.routing);
-    if (shop >= 0) this.depart(p, SHOP, shop, roads);
+    if (shop >= 0) this.depart(p, SHOP, shop, minute);
   }
 
-  private depart(p: number, errand: number, region: number, roads: TownRoads): boolean {
-    const access = this.spec.homes[this.household[p]!]!.access;
-    const dest = this.destination(region);
-    const k = roads.routing.bestAccess(access, dest);
-    if (k < 0 || !roads.trySpawnAt(access[k]!.lane, access[k]!.s, dest, p, this.carModelOf(p))) return false;
-    this.activity[p] = OUTBOUND;
+  private depart(p: number, errand: number, region: number, minute: number): boolean {
+    const h = this.household[p]!;
+    let car = h * 2;
+    for (let k = 0; k < this.memberCount[h]!; k++) {
+      if (this.driverCar[this.firstMember[h]! + k] === car) { car++; break; }
+    }
+    this.trips++;
+    this.driverCar[p] = car;
+    this.target[p] = -1;
+    this.origin[p] = -1;
+    this.failed[p] = this.circled[p] = 0;
+    this.activity[p] = WALK_TO_CAR;
     this.errand[p] = errand;
     this.at[p] = region;
+    this.due[p] = minute + walkMinutes(this.walkDistance(p, true));
     return true;
   }
 
-  private leaveRegion(p: number, roads: TownRoads): void {
+  private originAccess(p: number): AccessPoint[] {
+    const origin = this.origin[p]!;
+    if (origin >= this.parking.firstDest) return this.parking.bays[origin - this.parking.firstDest]!.access;
+    if (origin >= this.homeDest) return this.spec.homes[origin - this.homeDest]!.access;
+    const bay = this.carBay[this.driverCar[p]!]!;
+    return this.parking.bays[bay]?.access ?? this.spec.homes[this.household[p]!]!.access;
+  }
+
+  /** Search both on the far side of the block and on returning to the destination frontage. */
+  private circleBlock(p: number, local: number, access: AccessPoint[], roads: TownRoads): boolean {
+    const stage = this.circled[p]!;
+    if (stage >= 2) return false;
+    const destination = this.homeDest + local;
+    let waypoint = destination;
+    if (stage === 0) {
+      let nearest = Infinity;
+      waypoint = -1;
+      for (let h = 0; h < this.spec.homes.length; h++) {
+        if (h === local || h === this.household[p]) continue;
+        const candidate = this.homeDest + h;
+        const from = this.spec.homes[h]!.access;
+        const k = roads.routing.bestAccess(access, candidate);
+        if (k < 0 || roads.routing.bestAccess(from, destination) < 0) continue;
+        const cost = roads.routing.timeFrom(candidate, access[k]!.lane, access[k]!.s);
+        if (cost < nearest) { nearest = cost; waypoint = candidate; }
+      }
+      if (waypoint < 0) return false;
+    }
+    const k = roads.routing.bestAccess(access, waypoint);
+    if (k < 0) return false;
+    if (roads.trySpawnAt(access[k]!.lane, access[k]!.s, waypoint, p, this.carModelOf(p))) {
+      this.activity[p] = OUTBOUND;
+      this.origin[p] = waypoint;
+      this.circled[p]++;
+    }
+    return true;
+  }
+
+  private startDrive(p: number, roads: TownRoads, minute: number): void {
+    const place = this.at[p]!;
+    const local = place - this.spec.regions.length;
+    const access = this.originAccess(p);
+    let dest = this.destination(place);
+    this.target[p] = -1;
+    if (local >= 0) {
+      const bay = this.parking.nearest(local, this.door[local]!, false, this.open, access, roads.routing);
+      if (bay >= 0) { this.target[p] = bay; dest = this.parking.firstDest + bay; }
+      else if (this.activity[p] === SEARCH) {
+        if (this.circleBlock(p, local, access, roads)) return;
+        this.failed[p] = 1;
+        this.denied[local]++;
+        this.turnedAway++;
+        this.frustration[this.household[p]!] = 2;
+        this.record(minute, this.household[p]!, PARKING_FAILED, this.errand[p]!, p, this.placeName(place));
+        this.due[p] = 0;
+        this.activity[p] = RETURN_FAILED;
+        return;
+      }
+    }
+    const bay = this.parking.bays[this.target[p]!];
+    if (bay && sameEntrance(access, bay.access)) {
+      this.activity[p] = OUTBOUND;
+      this.arrived(p, minute);
+      return;
+    }
+    const k = roads.routing.bestAccess(access, dest);
+    if (k < 0 || !roads.trySpawnAt(access[k]!.lane, access[k]!.s, dest, p, this.carModelOf(p))) return;
+    this.assign(this.driverCar[p]!, -1);
+    this.activity[p] = OUTBOUND;
+  }
+
+  private leaveRegion(p: number, roads: TownRoads, minute: number): void {
     const h = this.household[p]!;
     const place = this.at[p]!;
-    const region = this.spec.regions[place];
-    const dest = this.homeDest + h;
-    let lane = region?.source ?? -1, s = 0;
-    if (!region) {
-      const access = this.spec.homes[place - this.spec.regions.length]!.access;
-      const k = roads.routing.bestAccess(access, dest);
-      if (k < 0) return;
-      lane = access[k]!.lane;
-      s = access[k]!.s;
-    }
-    if (!roads.trySpawnAt(lane, s, dest, p, this.carModelOf(p))) return;
+    const car = this.driverCar[p]!;
+    const b = this.parking.bays[this.carBay[car]!];
+    const reparking = this.activity[p] === SEEK_HOME;
+    const access = this.failed[p] || reparking ? this.originAccess(p) : b?.access ?? this.outside[place] ?? this.spec.homes[place - this.spec.regions.length]!.access;
+    const bay = this.parking.nearest(h, this.door[h]!, true, this.open, access, roads.routing);
+    const dest = bay < 0 ? this.homeDest + h : this.parking.firstDest + bay;
+    const k = roads.routing.bestAccess(access, dest);
+    const entrance = this.parking.bays[bay]?.access ?? this.spec.homes[h]!.access;
+    const here = sameEntrance(access, entrance);
+    if (!here && (k < 0 || !roads.trySpawnAt(access[k]!.lane, access[k]!.s, dest, p, this.carModelOf(p)))) return;
+    this.target[p] = bay;
+    this.assign(car, -1);
     this.activity[p] = HOMEBOUND;
-    if (this.errand[p] !== WORK) return;
+    if (here) this.arrived(p, minute);
+    if (this.errand[p] !== WORK || this.failed[p] || reparking) return;
     const start = this.until[p]! - (SHIFT_END - SHIFT_START);
     const hours = Math.max(0, this.until[p]! - Math.max(this.arrivedAt[p]!, start)) / 60;
     const pay = hours * this.wage(place);
@@ -667,6 +947,8 @@ export class Town {
   private midnight(minute: number, routing: Routing): void {
     this.deliveries.fill(0);
     this.customers.fill(0);
+    this.denied.fill(0);
+    for (let h = 0; h < this.frustration.length; h++) if (this.frustration[h]) this.frustration[h]--;
     for (let h = 0; h < this.spec.homes.length; h++) {
       if (!this.open[h] && !this.level[h]) continue;
       const tax = this.dailyTax(h);
@@ -795,6 +1077,7 @@ export class Town {
       this.record(minute, h, NEWER_CAR, preferred);
     }
     this.funds[h] -= ECONOMY.carPrice[this.carModel[h]!]!;
+    this.parkAtHome(h * 2 + this.cars[h]!);
     this.cars[h]++;
     this.carsBought++;
     this.record(minute, h, BOUGHT_CAR, this.cars[h]!);
@@ -877,6 +1160,19 @@ export class Town {
       mix(this.freightDue[h]!);
       mix(this.customers[h]!);
     }
+    this.parking.occupant.forEach(mix);
+    this.driverCar.forEach(mix);
+    this.due.forEach(mix);
+    this.target.forEach(mix);
+    this.origin.forEach(mix);
+    this.failed.forEach(mix);
+    this.circled.forEach(mix);
+    this.frustration.forEach(mix);
+    this.denied.forEach(mix);
+    mix(this.trips);
+    mix(this.parked);
+    mix(this.turnedAway);
+    mix(Math.round(this.walkMetres * 100));
     mix(this.carsBought);
     mix(this.houseUpgrades);
     mix(this.carUpgrades);
@@ -907,6 +1203,7 @@ export class Town {
           age: this.age[p]!,
           job: regionName(job),
           activity: ACTIVITIES[this.activity[p]!]!,
+          leg: this.driving(p) ? 'drive' : ACTIVITIES[this.activity[p]!] === 'walking' ? 'walk' : ACTIVITIES[this.activity[p]!] === 'searching' ? 'park' : null,
           errand: home ? null : ERRANDS[this.errand[p]!]!,
           place: home ? null : regionName(this.at[p]!),
         });
@@ -931,12 +1228,17 @@ export class Town {
         surname: SURNAMES[this.surname[h]!]!,
         level: this.level[h]!,
         cars: this.cars[h]!,
+        drivewayOverflow: Array.from(this.carBay.subarray(h * 2, h * 2 + this.cars[h]!)).filter((b, i) => b < 0 && !members.some(m => this.driverCar[m.id] === h * 2 + i)).length,
+        parked: Array.from({ length: this.cars[h]! }, (_, i) => {
+          const bay = this.parking.bays[this.carBay[h * 2 + i]!];
+          return bay?.kind ?? (members.some(m => this.driverCar[m.id] === h * 2 + i) ? 'away' : 'apron (overflow)');
+        }),
         carModel: this.carModel[h]!,
         funds: this.funds[h]!,
         wages: this.wages[h]!,
         pantry: this.pantry[h]!,
         needs,
-        happiness: (needs.food + needs.comfort + needs.mobility + needs.security) / 4,
+        happiness: Math.max(0, (needs.food + needs.comfort + needs.mobility + needs.security) / 4 - this.frustration[h]! * 0.04),
         members,
       });
     }
@@ -948,6 +1250,7 @@ export class Town {
       const detail = this.eventDetail[i]!;
       const person = this.eventPerson[i]!;
       switch (this.eventKind[i]) {
+        case PARKING_FAILED: events.push({ ...at, kind: 'parkingFailed', shopper: detail === SHOP, region: this.eventPlace[i]! }); break;
         case MOVED_IN: events.push({ ...at, kind: 'movedIn' }); break;
         case BOUGHT_CAR: events.push({ ...at, kind: 'boughtCar', cars: detail }); break;
         case NEWER_CAR: events.push({ ...at, kind: 'newerCar', model: detail }); break;
@@ -969,10 +1272,24 @@ export class Town {
       if (zone === 'residential') throw new Error('A residence cannot be an open business');
       budget.today[zone] += this.dailyTax(h);
       businesses.push({ lastDailyCost: this.lastDailyCost[h]!, taxesPaid: this.taxesPaid[h]!, home: h, lot: visibleLot(lot), name: this.placeName(r), zone,
-        deliveries: this.deliveries[h]!, unloading: this.freightState[h] === UNLOADING,
+        deliveries: this.deliveries[h]!, unloading: this.freightState[h] === UNLOADING, waitingAtKerb: this.freightState[h] === WAIT_KERB, loadingBay: this.loadingPose[h]!,
+        occupied: this.parking.bays.filter((b, i) => b.home === h && this.parking.occupant[i]! >= 0).length,
+        capacity: this.parking.bays.filter(b => b.home === h).length, turnedAway: this.denied[h]!,
         jobs: lotJobs(lot), filled: this.filled[r]!, customers: this.customers[h]! });
     }
     return {
+      overflowCars: households.flatMap(h => {
+        if (!h.drivewayOverflow) return [];
+        const drive = this.parking.bays.find(b => b.home === h.home && b.kind === 'driveway');
+        if (!drive) return [];
+        return [{ x: drive.x + Math.cos(drive.angle) * 4.9, y: drive.y + Math.sin(drive.angle) * 4.9, angle: drive.angle, model: h.carModel }];
+      }),
+      bays: this.parking.bays.flatMap((b, i) => {
+        if (b.home >= 0 && !this.open[b.home] && !this.level[b.home]) return [];
+        const car = this.parking.occupant[i]!;
+        return [{ x: b.x, y: b.y, angle: b.angle, kind: b.kind, model: car < 0 ? 0 : this.carModel[Math.floor(car / 2)]! }];
+      }),
+      parking: { trips: this.trips, parked: this.parked, turnedAway: this.turnedAway, walkMetres: this.walkMetres },
       budget,
       businesses,
       demand: { residential: this.demandFor('residential'), shops: this.demandFor('shops'), workplaces: this.demandFor('workplaces') },

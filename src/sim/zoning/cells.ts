@@ -61,6 +61,7 @@ export interface ZoneCells {
   readonly keys: Float64Array;
   /** 8 numbers per cell: x0, y0 … x3, y3. */
   readonly corners: Float64Array;
+  gardenCells?: Uint8Array;
   readonly kerbs?: Float64Array;
 }
 

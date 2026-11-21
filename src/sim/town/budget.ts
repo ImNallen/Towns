@@ -6,7 +6,7 @@ import { BUDGET } from './economy';
 
 /** Signed cost in whole dollars, based on the geometry before the edit. */
 export function editCost(previous: readonly MeadowEdit[], edit: MeadowEdit): number {
-  if (isZoneStroke(edit)) return edit.zone ? edit.cells.length * BUDGET.zonePerCell : 0;
+  if (isZoneStroke(edit)) return edit.zone ? edit.cells.length * (edit.zone === 'parking' ? BUDGET.parkingPerCell : BUDGET.zonePerCell) : 0;
   if ('remove' in edit || 'upgrade' in edit) {
     const segment = meadowSegmentInfo(previous)['remove' in edit ? edit.remove : edit.upgrade]!;
     const before = ROAD_TYPES[segment.roadType].cost;
