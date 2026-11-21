@@ -1,4 +1,4 @@
-import { PARK_RADIUS, type Park } from './parks';
+import { parkBenefit, PARK_BENEFITS, type Park } from './parks';
 import type { WalkRouting } from '../network/walkRouting';
 import { walkChance, WALK_CHOICE } from './mode';
 import { Walkers, WalkingNetwork, WALK_TRIP_LIMIT } from '../network/walking';
@@ -130,7 +130,7 @@ export interface HouseholdView {
   pantry: number;
   needs: Needs;
   /** Mean of the needs. */
-  nearbyPark?: { name: string; metres: number };
+  nearbyPark?: { name: string; metres: number; happinessPoints: number };
   walkIssue?: string;
   happiness: number;
   members: PersonView[];
@@ -289,6 +289,7 @@ export class Town {
   private readonly door: Vec2[];
   private readonly outside: AccessPoint[][];
   readonly walkers: Walkers;
+  private readonly parkBonus: Float64Array;
   private readonly nearestPark: Int32Array;
   private readonly visitPark: Int32Array;
   private readonly leisureDay: Int32Array;
@@ -309,6 +310,7 @@ export class Town {
     const H = spec.homes.length;
     const P = H * MAX_MEMBERS;
     this.carBay = new Int32Array(H * 2).fill(-1);
+    this.parkBonus = new Float64Array(H);
     this.nearestPark=new Int32Array(H).fill(-1);
     this.visitPark=new Int32Array(P).fill(-1);
     this.leisureDay=new Int32Array(P).fill(-1);
@@ -327,10 +329,12 @@ export class Town {
     this.walkers = new Walkers(new WalkingNetwork(network, this.door, parking.bays, previous, parks), P);
     parking.walking = this.walkers.graph;
     for (let h=0; h<H; h++) {
-      let best=PARK_RADIUS;
+      let nearest = Infinity;
       for (let i=0; i<parks.length; i++) {
         const d=this.walkers.graph.distance(h,this.parkPlace(i));
-        if (d < best) { best=d; this.nearestPark[h]=i; }
+        const bonus = parkBenefit(parks[i]!.cells.length,d);
+        if (bonus > 0 && d < nearest) { nearest = d; this.nearestPark[h]=i; }
+        this.parkBonus[h] = Math.max(this.parkBonus[h]!,bonus);
       }
     }
     this.outside = spec.regions.map(r => [{ lane: r.source, s: 0 }]);
@@ -734,7 +738,8 @@ export class Town {
         }
       }
       if (next < 0) { this.growth[zone] = 0; continue; }
-      this.growth[zone] += this.demandFor(zone);
+      const growthBoost = zone === 'residential' ? PARK_BENEFITS.residentialGrowth * this.parkBonus[next]! / PARK_BENEFITS.pocketHappiness : 0;
+      this.growth[zone] += this.demandFor(zone) * (1 + growthBoost);
       if (this.growth[zone] < GROWTH_THRESHOLD) continue;
       this.growth[zone] -= GROWTH_THRESHOLD;
       if (zone === 'residential') {
@@ -1429,7 +1434,8 @@ export class Town {
       const parkIndex=this.nearestPark[h]!;
       const park=this.parks[parkIndex];
       const metres=park ? this.walkers.graph.distance(h,this.parkPlace(parkIndex)) : Infinity;
-      const benefit=0.08*Math.max(0,1-metres/PARK_RADIUS);
+      const baseHappiness = Math.max(0,(needs.food + needs.comfort + needs.mobility + needs.security) / 4 - this.frustration[h]! * 0.04);
+      const happiness = Math.min(1, baseHappiness + this.parkBonus[h]!);
       households.push({
         id: h,
         home: h,
@@ -1449,8 +1455,8 @@ export class Town {
         pantry: this.pantry[h]!,
         needs,
         walkIssue: this.walkIssue[h]! >= 0 && this.spec.homes[this.walkIssue[h]! - this.spec.regions.length]?.lot ? this.placeName(this.walkIssue[h]!) : undefined,
-        nearbyPark: park ? { name:park.name,metres:Math.round(metres) } : undefined,
-        happiness: Math.min(1, Math.max(0, benefit + (needs.food + needs.comfort + needs.mobility + needs.security) / 4 - this.frustration[h]! * 0.04)),
+        nearbyPark: park ? { name:park.name,metres:Math.round(metres), happinessPoints:Math.round((happiness-baseHappiness)*100) } : undefined,
+        happiness,
         members,
       });
     }
