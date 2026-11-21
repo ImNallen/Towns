@@ -714,7 +714,7 @@ test('autosaves with the tray closed and can cancel a long import', async ({ pag
 });
 
 test('North Valley opens with an editable starter street and three entrances', async ({page}) => {
-  await page.goto('/?scenario=valley&speed=0');
+  await page.goto('/?scenario=valley&speed=0&x=-120&y=0&mpp=2.55');
   await expect(page.getByRole('heading', {name:'North Valley'})).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.__towns?.town()?.households.length)).toBe(0);
   await page.screenshot({path:'artifacts/screens/valley-empty.png'});

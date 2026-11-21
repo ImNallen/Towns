@@ -36,7 +36,7 @@ export interface GameOptions {
 }
 
 export interface Game {
-  townName: string;
+  readonly scenario: string;
   save(): Promise<string>;
   load(json: string): Promise<void>;
   cancelLoad(): void;
@@ -232,6 +232,9 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
         mapCamera.centerX = options.view.x;
         mapCamera.centerY = options.view.y;
         mapCamera.mpp = options.view.mpp;
+      } else if (scenarioName === 'valley') {
+        // Open on the buildable western frontage, clear of the controls.
+        mapCamera.fit({ minX: -1080, maxX: -100, minY: -460, maxY: 460 }, 1.05);
       } else {
         mapCamera.fit(scenario.bounds);
       }
@@ -298,7 +301,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   raf = requestAnimationFrame(frame);
 
   const game: Game = {
-    townName: options.scenario === 'valley' ? 'North Valley' : 'Meadow Vale',
+    get scenario() { return scenarioName; },
     save: () => new Promise(resolve => {
       const id = ++requestId;
       saves.set(id, resolve);

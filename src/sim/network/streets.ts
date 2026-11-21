@@ -228,8 +228,8 @@ export function buildStreetNetwork(
   const portalArms = portals.flatMap((p) => nodes.get(key(p)) ?? []);
   const network: Network = { ...built, avenuePairs, reservedMovements, junctions, pedestrianLinks, sinks: portalArms.map((arm) => arm.incoming) };
   const routing = new Routing(network);
-  const connected = portals.length === 2 && portalArms.length === 2
-    && portalArms.every((arm, i) => routing.canReach(1 - i, arm.outgoing));
   const entries = portalArms.map((arm) => arm.outgoing);
-  return { network, demand: connected ? entries.map((lane) => ({ lane, rate: 0.16 })) : [], entries };
+  const demand = entries.flatMap((lane, source) =>
+    network.sinks.some((_, sink) => sink !== source && routing.canReach(sink, lane)) ? [{ lane, rate: 0.16 }] : []);
+  return { network, demand, entries };
 }

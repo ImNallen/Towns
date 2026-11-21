@@ -26,23 +26,23 @@ export function plantValley() {
     world.step();
   }
   function road(x: number, y: number, ex: number, ey: number, type: RoadType) {
-    const plan = valley.planMeadowRoad(edits, { x,y }, { x:ex, y:ey }, undefined, type);
+    const plan = valley.planMeadowRoad(edits, { x, y }, { x: ex, y: ey }, undefined, type);
     if (!plan.ok) throw new Error(type + ' at ' + x + ',' + y + ': ' + plan.reason);
     apply(plan.road);
   }
-  road(-870,0,180,0,'town');
-  road(-800,0,-800,-670,'avenue');
-  for (const y of [-100,-200,-300,-400,-500,-600]) road(-800,y,160,y,'town');
-  road(-320,-630,-320,0,'town');
-  road(80,-630,80,0,'town');
-  road(160,-300,230,-300,'parking');
-  for (const [i,j] of world.network.junctions!.entries()) {
+  road(-870, 0, 180, 0, 'town');
+  road(-800, 0, -800, -670, 'avenue');
+  for (const y of [-100, -200, -300, -400, -500, -600]) road(-800, y, 160, y, 'town');
+  road(-320, -630, -320, 0, 'town');
+  road(80, -630, 80, 0, 'town');
+  road(160, -300, 230, -300, 'parking');
+  for (const [i, j] of world.network.junctions!.entries()) {
     if (i >= 3) break;
-    apply({ lights:j.point, actuated:i % 2 === 0 });
+    apply({ lights: j.point, actuated: i % 2 === 0 });
   }
-  for (const y of [-100,-300,-500]) {
-    const p = { x:-420,y };
-    const plan = valley.planWalk(world.network,'zebra',p,p);
+  for (const y of [-100, -300, -500]) {
+    const p = { x: -420, y };
+    const plan = valley.planWalk(world.network, 'zebra', p, p);
     if (typeof plan === 'string') throw new Error(plan);
     apply(plan);
   }
@@ -51,16 +51,23 @@ export function plantValley() {
   const byUse = new Map<LandUse, CellKey[]>();
   for (const raw of cells.keys) {
     const key = raw as CellKey;
-    const { row,column,side,road } = decodeCellKey(key);
+    const { row, column, side, road } = decodeCellKey(key);
     if (row !== 0) continue;
-    const use: LandUse = column % 61 === 10 && side === 1 ? 'parking'
-      : column % 30 === 5 ? 'shops' : column % 19 === 2 ? 'workplaces'
-      : road === 4 && column === 10 && side === 0 ? 'park' : 'residential';
-    if (!byUse.has(use)) byUse.set(use,[]);
+    const use: LandUse =
+      column % 61 === 10 && side === 1
+        ? 'parking'
+        : column % 30 === 5
+          ? 'shops'
+          : column % 19 === 2
+            ? 'workplaces'
+            : road === 4 && column === 10 && side === 0
+              ? 'park'
+              : 'residential';
+    if (!byUse.has(use)) byUse.set(use, []);
     byUse.get(use)!.push(key);
   }
   for (const [use, keys] of byUse) {
-    const plan = planZoneStroke(cells, meadowZoning(edits,cells), use, keys);
+    const plan = planZoneStroke(cells, meadowZoning(edits, cells), use, keys);
     if (!plan.ok) throw new Error(plan.reason);
     apply(plan.stroke);
   }
@@ -70,9 +77,10 @@ export function plantValley() {
 export function growTo(world: World, target: number) {
   let count = 0;
   while (count < target) {
-    for (let i=0;i<400;i++) world.step();
+    for (let i = 0; i < 400; i++) world.step();
     count = world.townView()!.households.length;
-    if (world.stats().lost || world.tick > 500000) throw new Error(JSON.stringify({target,count,tick:world.tick,lost:world.stats().lost}));
+    if (world.stats().lost || world.tick > 500000)
+      throw new Error(JSON.stringify({ target, count, tick: world.tick, lost: world.stats().lost }));
   }
   return count;
 }
