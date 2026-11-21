@@ -6,7 +6,7 @@ export const PALETTE = {
       brick: '#c48e7c', ochre: '#ddc395', celadon: '#becdb8', rose: '#ddbfb6',
     },
     roofs: {
-      slate: '#82949e', terracotta: '#b9816c', charcoal: '#606971', moss: '#919b7d', tan: '#bdab8e',
+      slate: '#82949e', terracotta: '#b9816c', charcoal: '#969591', moss: '#919b7d', tan: '#bdab8e',
     },
     chimney: '#c79f86',
     trim: '#f5f0df', hedge: '#819774', trunk: '#9b8467', pool: '#94becb',
