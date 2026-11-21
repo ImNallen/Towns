@@ -158,7 +158,7 @@ export class World {
 
   step(): void {
     this.walkers?.step(DT,this.vehicles);
-    if (this.town && this._tick % TICKS_PER_MINUTE === 0) this.town.update(this.minute(), this);
+    if (this.town && this._tick % TICKS_PER_MINUTE === 0) this.town.update(this.minute(), this, this.admissionsOpen);
     this.buildBuckets();
     this.computeAccelerations();
     this.integrate();
@@ -189,7 +189,7 @@ export class World {
     }
   }
 
-  private installLots(zoning: Zoning, previous: Town): void {
+  private installLots(zoning: Zoning, previous: Town): boolean {
     const base = this.scenario.town!;
     this.zoning = zoning;
     const occupied = previous.occupiedLots();
@@ -213,7 +213,7 @@ export class World {
     const bays = parkingBays(this.scenario, homes, zoning);
     this.routing = new Routing(this.network, [...homes.map(home => home.access), ...bays.map(b => b.access)]);
     this.town = new Town({ ...base, homes }, this.routing.sinks.length, 0, this.routing, new Parking(bays, this.routing.sinks.length + homes.length), this.scenario.decor.houses, this.network, this.walkLimit, base.homes.length, parksOn(this.scenario.zones,zoning));
-    this.town.copyFrom(previous, this.routing, this.minute());
+    return this.town.copyFrom(previous, this.routing, this.minute());
   }
 
   /**
@@ -226,10 +226,11 @@ export class World {
     if (this.town && scenario.town?.homes.length !== this.scenario.town?.homes.length) {
       return { ok: false, reason: 'The edited map must keep every home.' };
     }
-    if (this.town && (zoning.size || this.town.spec.homes.length > scenario.town!.homes.length)) {
-      edited.installLots(zoning, this.town);
-    } else if (this.town) {
-      edited.town!.copyFrom(this.town, edited.routing, this.minute());
+    if (this.town) {
+      const preserveWalks = zoning.size || this.town.spec.homes.length > scenario.town!.homes.length
+        ? edited.installLots(zoning, this.town)
+        : edited.town!.copyFrom(this.town, edited.routing, this.minute());
+      if (!preserveWalks) return { ok: false, reason: 'A resident is still walking on the affected pavement.' };
     }
     const V = this.vehicles;
     const sinkCount = this.routing.sinks.length;
