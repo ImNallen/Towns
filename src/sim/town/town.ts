@@ -1,4 +1,5 @@
 import { PARK_RADIUS, type Park } from './parks';
+import type { WalkRouting } from '../network/walkRouting';
 import { walkChance, WALK_CHOICE } from './mode';
 import { Walkers, WalkingNetwork, WALK_TRIP_LIMIT } from '../network/walking';
 import type { Network } from '../network/types';
@@ -301,7 +302,7 @@ export class Town {
   private turnedAway = 0;
   private walkMetres = 0;
 
-  constructor(spec: TownSpec, homeDest: number, seed: number, private readonly routing: Routing, readonly parking: Parking, houses: Vec2[], network: Network, private readonly walkLimit = WALK_TRIP_LIMIT, starterHomes = spec.homes.length, readonly parks: Park[] = []) {
+  constructor(spec: TownSpec, homeDest: number, seed: number, private readonly routing: Routing, readonly parking: Parking, houses: Vec2[], network: Network, private readonly walkLimit = WALK_TRIP_LIMIT, starterHomes = spec.homes.length, previous?: WalkRouting, readonly parks: Park[] = []) {
     this.spec = spec;
     this.homeDest = homeDest;
     this.rng = new Rng((seed ^ TOWN_SEED) >>> 0);
@@ -323,7 +324,7 @@ export class Town {
     this.denied = new Uint16Array(H);
     this.frustration = new Uint8Array(H);
     this.door = spec.homes.map((h, i) => h.lot ?? houses[i] ?? { x: 0, y: 0 });
-    this.walkers = new Walkers(new WalkingNetwork(network, this.door, parking.bays,parks), P);
+    this.walkers = new Walkers(new WalkingNetwork(network, this.door, parking.bays, previous, parks), P);
     parking.walking = this.walkers.graph;
     for (let h=0; h<H; h++) {
       let best=PARK_RADIUS;

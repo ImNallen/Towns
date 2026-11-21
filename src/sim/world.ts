@@ -1,4 +1,5 @@
 import { parksOn } from './town/parks';
+import type { WalkRouting } from './network/walkRouting';
 import { endOf, sampleAt, startOf, type PathSample } from './math/polyline';
 import type { Lane, Network } from './network/types';
 import { Rng } from './rng';
@@ -103,7 +104,7 @@ export class World {
   private readonly completedPerSecond = new Uint32Array(60);
   private lastSecond = 0;
 
-  constructor(scenario: Scenario, seed: number, capacity = 4096, initialTick = 0, private readonly walkLimit?: number) {
+  constructor(scenario: Scenario, seed: number, capacity = 4096, initialTick = 0, private readonly walkLimit?: number, previousWalking?: WalkRouting) {
     this._tick = initialTick;
     this.lastSecond = Math.floor(this.time);
     this.scenario = scenario;
@@ -118,7 +119,7 @@ export class World {
     this.routing = new Routing(this.network, [...homes.map(h => h.access), ...bays.map(b => b.access)]);
     this.vehicles = new Vehicles(capacity);
     this.rng = new Rng(seed);
-    this.town = scenario.town ? new Town(scenario.town, this.routing.sinks.length, seed, this.routing, new Parking(bays, this.routing.sinks.length + homes.length), scenario.decor.houses, this.network, this.walkLimit) : null;
+    this.town = scenario.town ? new Town(scenario.town, this.routing.sinks.length, seed, this.routing, new Parking(bays, this.routing.sinks.length + homes.length), scenario.decor.houses, this.network, this.walkLimit, homes.length, previousWalking) : null;
 
     const n = this.lanes.length;
     this.laneLen = Float64Array.from(this.lanes, (l) => l.length);
@@ -212,7 +213,7 @@ export class World {
     }
     const bays = parkingBays(this.scenario, homes, zoning);
     this.routing = new Routing(this.network, [...homes.map(home => home.access), ...bays.map(b => b.access)]);
-    this.town = new Town({ ...base, homes }, this.routing.sinks.length, 0, this.routing, new Parking(bays, this.routing.sinks.length + homes.length), this.scenario.decor.houses, this.network, this.walkLimit, base.homes.length, parksOn(this.scenario.zones,zoning));
+    this.town = new Town({ ...base, homes }, this.routing.sinks.length, 0, this.routing, new Parking(bays, this.routing.sinks.length + homes.length), this.scenario.decor.houses, this.network, this.walkLimit, base.homes.length, previous.walkers.graph.routing, parksOn(this.scenario.zones,zoning));
     return this.town.copyFrom(previous, this.routing, this.minute());
   }
 
@@ -222,7 +223,7 @@ export class World {
    * close admissions, keep stepping this world, and retry when traffic has cleared.
    */
   editNetwork(scenario: Scenario, zoning: Zoning = this.zoning): { ok: true; world: World } | { ok: false; reason: string } {
-    const edited = new World(scenario, 0, this.vehicles.capacity, this.tick, this.walkLimit);
+    const edited = new World(scenario, 0, this.vehicles.capacity, this.tick, this.walkLimit, this.walkers?.graph.routing);
     if (this.town && scenario.town?.homes.length !== this.scenario.town?.homes.length) {
       return { ok: false, reason: 'The edited map must keep every home.' };
     }

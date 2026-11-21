@@ -46,7 +46,7 @@ test('mixed vehicles share the road between the neighbourhoods', async ({ page }
   await expect.poll(() => page.evaluate(() => window.__towns?.editor()?.connected)).toBe(true);
   await page.getByRole('button', { name: 'Pan', exact: true }).click();
   await page.mouse.move(0, 0);
-  await page.evaluate(() => window.__towns!.setSpeed(40));
+  await page.evaluate(() => window.__towns!.setSpeed(120));
   await page.waitForFunction(() => {
     if ((window.__towns!.stats()?.active ?? 0) < 18) return false;
     window.__towns!.setSpeed(0);

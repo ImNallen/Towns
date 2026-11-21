@@ -107,3 +107,15 @@ it('defers a moved pavement until walkers clear the edited road', () => {
   }
   throw new Error('Expected an active pavement to defer the edit');
 });
+
+it('repairs routes around changed pavement and preserves cold-build routing ties', () => {
+  const original = buildStreetNetwork(new NetworkBuilder(),street,[]).network;
+  const graph = new WalkingNetwork(original,doors,[]);
+  const changed = buildStreetNetwork(new NetworkBuilder(),street,[],[],['parking']).network;
+  const edited = new WalkingNetwork(changed,doors,[],graph.routing);
+  const cold = new WalkingNetwork(changed,doors,[]);
+  expect(edited.costs).toEqual(cold.costs);
+  expect(edited.next).toEqual(cold.next);
+  const removed = buildStreetNetwork(new NetworkBuilder(),street,[],[],['country']).network;
+  expect(new WalkingNetwork(removed,doors,[],edited.routing).distance(0,1)).toBe(Infinity);
+});
