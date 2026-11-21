@@ -1,3 +1,4 @@
+import { SaveMenu } from './SaveMenu';
 import { PALETTE } from '../render/palette';
 import { Disclosure } from './Disclosure';
 import { BUDGET } from '../sim/town/economy';
@@ -219,6 +220,10 @@ export function App({ game }: { game: Game }) {
   const tripStatus = editor?.pending ? 'Updating roads' : speed === 0 ? 'Paused' : editor && !editor.connected ? 'Waiting for a connection' : 'Traffic running';
 
   const openGroup = GROUPS.find(group => group.name === tray);
+  const savesButton = <button className="tool" aria-label="Save and load" aria-expanded={tray === 'Saves'}
+    onClick={() => setTray(tray === 'Saves' ? null : 'Saves')}>
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 3h11l3 3v11H3zM6 3v5h7V3M6 17v-6h8v6"/></svg><span>Saves</span>
+  </button>;
   const viewsButton = <button className="tool" aria-label="Views" aria-expanded={tray === 'Views'}
     onClick={() => setTray(tray === 'Views' ? null : 'Views')}>
     <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m2 7 8-4 8 4-8 4zM2 10l8 4 8-4M2 13l8 4 8-4" /></svg><span>Views</span>
@@ -298,8 +303,8 @@ export function App({ game }: { game: Game }) {
         {town && <BudgetPanel town={town} />}
       </div>
 
-      {editor && <section className="editor" aria-label="Road editor">
-        <div className="placement-info panel">
+      <section className={editor ? 'editor' : 'study-views'} aria-label={editor ? 'Road editor' : 'Map controls and saves'}>
+        {editor && <div className="placement-info panel">
           {editor.tool === 'lights' && <label className="road-picker">Signal plan <select value={editor.actuated ? 'actuated' : 'fixed'}
             onChange={event => { game.setActuated(event.target.value === 'actuated'); setEditor(game.editor()); }}>
             <option value="actuated">Traffic actuated</option><option value="fixed">Fixed time</option>
@@ -336,9 +341,10 @@ export function App({ game }: { game: Game }) {
             ))}
           </span>}
           <span className="mouse-help">{editor.tool === 'pan' ? '' : editor.chaining ? 'Esc finishes · ' : 'Esc cancels · '}Scroll to zoom · Right-drag to pan</span>
-        </div>
+        </div>}
+        <SaveMenu game={game} open={tray === 'Saves'} />
         {viewsTray}
-        {openGroup && <div className="tool-tray panel" role="group" aria-label={openGroup.name + ' tools'}>
+        {editor && openGroup && <div className="tool-tray panel" role="group" aria-label={openGroup.name + ' tools'}>
           {openGroup.tools.map(({ tool, label, action, path, shortcut }) => <button key={tool}
             aria-label={action} aria-pressed={editor.tool === tool} aria-keyshortcuts={shortcut}
             title={shortcut ? `${action} (${shortcut})` : action}
@@ -347,7 +353,7 @@ export function App({ game }: { game: Game }) {
             <span>{label}</span>{shortcut && <kbd>{shortcut}</kbd>}
           </button>)}
         </div>}
-        <div className="tool-bar panel" role="group" aria-label="Map tools">
+        {editor ? <div className="tool-bar panel" role="group" aria-label="Map tools">
           {GROUPS.map(group => <button key={group.name} aria-expanded={tray === group.name}
             className={'tool' + (group.tools.some(entry => entry.tool === editor.tool) ? ' active' : '')}
             onClick={() => setTray(tray === group.name ? null : group.name)}>
@@ -355,6 +361,7 @@ export function App({ game }: { game: Game }) {
             <span>{group.name}</span>
           </button>)}
           {viewsButton}
+          {savesButton}
           <button aria-label="Bulldoze road" aria-pressed={editor.tool === 'bulldoze'} aria-keyshortcuts="B" className={editor.tool === 'bulldoze' ? 'active tool bulldoze' : 'tool bulldoze'} onClick={() => changeTool('bulldoze')} title="Bulldoze road (B)">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 12V8h6l2 4M5 8V5h4l1 3m2 5 3 1m1-6v6l2 2h-3l-1-3"/><rect x="2" y="12" width="10" height="4" rx="2"/></svg><span>Bulldoze</span><kbd>B</kbd>
           </button>
@@ -365,9 +372,8 @@ export function App({ game }: { game: Game }) {
           <button aria-label="Undo" aria-keyshortcuts="Control+Z Meta+Z" className="tool undo" onClick={undo} disabled={!editor.canUndo || editor.pending} title="Undo (Ctrl / ⌘ Z)">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4 3 8l4 4M3 8h8a5 5 0 0 1 0 10" /></svg><span>Undo</span>
           </button>
-        </div>
-      </section>}
-      {!editor && <div className="study-views">{viewsTray}<div className="panel">{viewsButton}</div></div>}
+        </div> : <div className="panel">{viewsButton}{savesButton}</div>}
+      </section>
     </aside>
   );
 }
