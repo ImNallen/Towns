@@ -50,7 +50,7 @@ function when(event: TownEventView, town: TownView): string {
   return `Day ${event.day}`;
 }
 
-export function TownPanel({ town }: { town: TownView }) {
+export function TownPanel({ town, jam }: { town: TownView; jam: string | null }) {
   const { totals } = town;
   const upgraded = town.households.filter((h) => h.level > 1).length;
   const recent = town.events.slice(-(FEED_LENGTH - (town.day > 1 ? 1 : 0))).reverse();
@@ -76,7 +76,8 @@ export function TownPanel({ town }: { town: TownView }) {
           </div>
         </div>)}
       </section>
-      {(recent.length > 0 || town.day > 1) && <ol className="town-feed" aria-label="Recent events">
+      {(jam || recent.length > 0 || town.day > 1) && <ol className="town-feed" aria-label="Recent events">
+        {jam && <li><span>Long queues on {jam}</span><time>Now</time></li>}
         {town.day > 1 && <li><span>Taxes collected: +{money(town.budget.yesterday.homes + town.budget.yesterday.shops + town.budget.yesterday.workplaces)}</span><time>Midnight</time></li>}
         {recent.map((event) => (
           <li key={`${event.day}-${event.minute}-${event.household}-${event.kind}-${'person' in event ? `${event.person}-${event.region}` : ''}`}>

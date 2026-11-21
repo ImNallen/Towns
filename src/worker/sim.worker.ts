@@ -168,7 +168,7 @@ function postFrame(w: World): void {
   const paint = new Uint8Array(w.vehicles.highWater);
   const slots = w.writeSnapshot(positions, ids, models, paint);
   const walkers = w.pedestrianPositions();
-  post({ type: 'frame', walkers, tick: w.tick, slots, positions, ids, models, paint, stats: w.stats() }, [walkers.buffer, positions.buffer, ids.buffer, models.buffer, paint.buffer]);
+  post({ type: 'frame', walkers, traffic: w.traffic.view(), tick: w.tick, slots, positions, ids, models, paint, stats: w.stats() }, [walkers.buffer, positions.buffer, ids.buffer, models.buffer, paint.buffer]);
 }
 
 function postTown(w: World): void {

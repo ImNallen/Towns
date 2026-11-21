@@ -46,5 +46,6 @@ export type FromWorker =
       /** Catalogue model for each occupied slot. */
       models: Uint8Array;
       paint: Uint8Array;
+      traffic: import('../sim/traffic/conditions').TrafficView;
       stats: SimStats;
     };

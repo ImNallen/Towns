@@ -1,3 +1,5 @@
+import { TrafficLayer } from './traffic';
+import type { TrafficView } from '../sim/traffic/conditions';
 import { WalkerLayer } from './walkers';
 import type { RoadType } from '../sim/network/roadTypes';
 import { SUN_DIRECTION, SUN_INTENSITY, AMBIENT_INTENSITY } from './lighting';
@@ -56,6 +58,9 @@ export interface Game {
   speed(): number;
   setSpeed(speed: number): void;
   showLanes(): boolean;
+  setTrafficView(show: boolean): void;
+  traffic(): TrafficView | null;
+  approachName(lane: number): string;
   setParkingView(show: boolean): void;
   setShowLanes(show: boolean): void;
   dispose(): void;
@@ -96,6 +101,10 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   scene.add(walkerLayer.group);
   let vehicles: VehicleLayer | null = null;
   let houses: HouseLayer | null = null;
+  let trafficLayer: TrafficLayer | null = null;
+  let traffic: TrafficView | null = null;
+  let trafficVisible = false;
+  let laneNames: string[] = [];
   let laneOverlay: THREE.Group | null = null;
   let zoneLayer: THREE.Group | null = null;
   let paintLayer: THREE.Group | null = null;
@@ -134,6 +143,17 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   const drawNetwork = (network: Network): void => {
     if (roadLayer) disposeLayer(roadLayer);
     if (laneOverlay) disposeLayer(laneOverlay);
+    if (trafficLayer) disposeLayer(trafficLayer.group);
+    traffic = null;
+    trafficLayer = new TrafficLayer(network);
+    trafficLayer.group.visible = trafficVisible;
+    scene.add(trafficLayer.group);
+    laneNames = network.lanes.map(lane => {
+      if (options.scenario === 'mill') return ['West approach', 'Mill Street', 'Works Road', 'Mill Street', 'North Road', 'East approach'][lane.id]!;
+      const p = lane.path.pts;
+      const x = p[p.length - 2]!, y = p[p.length - 1]!;
+      return Math.abs(x) > Math.abs(y) ? (x < 0 ? 'West approach' : 'East approach') : (y < 0 ? 'South approach' : 'North approach');
+    });
     roadLayer = buildRoads(network, editor ? 'dashed' : 'solid');
     laneOverlay = buildLaneOverlay(network);
     laneOverlay.visible = showLanes;
@@ -205,6 +225,8 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
       vehicles?.push(msg, performance.now());
       roadLayer?.userData.updateSignals(msg.stats.tick);
       latestStats = msg.stats;
+      traffic = msg.traffic;
+      if (trafficVisible) trafficLayer?.update(traffic);
     }
   };
   send({ type: 'init', walkLimit: options.walkLimit, scenario: options.scenario, seed: options.seed, speed });
@@ -264,6 +286,13 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     setSpeed(next) {
       speed = next;
       send({ type: 'setSpeed', speed });
+    },
+    traffic: () => traffic,
+    approachName: lane => laneNames[lane] ?? 'Junction',
+    setTrafficView(show) {
+      trafficVisible = show;
+      if (trafficLayer) trafficLayer.group.visible = show;
+      if (show && traffic) trafficLayer?.update(traffic);
     },
     setParkingView(show) { occupancy = show; if (latestTown) drawParking(latestTown); },
     showLanes: () => showLanes,

@@ -14,7 +14,7 @@ export interface AccessPoint {
  * Destinations `[0, sinks.length)` are the network's sinks (leave at the lane end).
  * Further destinations are buildings, each reached at any of its access points.
  * Vehicles store only their destination index, so routes cost no per-vehicle memory.
- * TODO: congestion-aware costs, recomputed incrementally over several ticks.
+ * Each refresh publishes one complete destination tree so drivers see a coherent route.
  */
 export class Routing {
   readonly sinks: readonly number[];
@@ -24,48 +24,66 @@ export class Routing {
   private readonly costs: Float64Array[] = [];
   /** Per destination and lane: the `s` at which a vehicle arrives (Infinity = keep driving). */
   private readonly exits: Float64Array[] = [];
-  private readonly speed: Float64Array;
+  private readonly seeds: readonly (readonly AccessPoint[])[];
+  private readonly oldNext: Int32Array;
+  private readonly inverseSpeed: Float64Array[] = [];
+  private readonly heap: MinHeap;
+  private cursor = 0;
+  private sweepAt = 0;
 
-  constructor(network: Network, targets: readonly (readonly AccessPoint[])[] = []) {
+  constructor(private readonly network: Network, targets: readonly (readonly AccessPoint[])[] = []) {
     this.sinks = network.sinks;
-    this.destinations = this.sinks.length + targets.length;
+    this.seeds = [...this.sinks.map(lane => [{ lane, s: network.lanes[lane]!.length }]), ...targets];
+    this.destinations = this.seeds.length;
     const n = network.lanes.length;
-    const laneCost = new Float64Array(n);
-    this.speed = new Float64Array(n);
-    for (const lane of network.lanes) {
-      laneCost[lane.id] = lane.length / lane.speedLimit;
-      this.speed[lane.id] = lane.speedLimit;
+    this.oldNext = new Int32Array(n);
+    this.heap = new MinHeap(network.lanes.reduce((total, lane) => total + lane.prev.length, n + 1));
+    const free = Float64Array.from(network.lanes, l => l.length / l.speedLimit);
+    for (let d = 0; d < this.destinations; d++) {
+      this.nextHops.push(new Int32Array(n).fill(-1));
+      this.costs.push(new Float64Array(n));
+      this.exits.push(new Float64Array(n).fill(Infinity));
+      this.inverseSpeed.push(new Float64Array(n));
+      this.rebuild(d, free);
     }
-    const seeds: (readonly AccessPoint[])[] = [
-      ...this.sinks.map((sink) => [{ lane: sink, s: network.lanes[sink]!.length }]),
-      ...targets,
-    ];
+  }
 
-    for (const exitsAt of seeds) {
-      const cost = new Float64Array(n).fill(Infinity);
-      const next = new Int32Array(n).fill(-1);
-      const exit = new Float64Array(n).fill(Infinity);
-      const heap = new MinHeap();
-      for (const { lane, s } of exitsAt) {
-        exit[lane] = s;
-        cost[lane] = s / this.speed[lane]!;
-        heap.push(lane, cost[lane]!);
+  refresh(tick: number, seconds: Float64Array): void {
+    if (!this.destinations || tick < this.sweepAt) return;
+    this.rebuild(this.cursor++, seconds);
+    if (this.cursor === this.destinations) {
+      this.cursor = 0;
+      this.sweepAt = tick + 200;
+    }
+  }
+
+  private rebuild(d: number, seconds: Float64Array): void {
+    const cost = this.costs[d]!, next = this.nextHops[d]!, exit = this.exits[d]!;
+    const pace = this.inverseSpeed[d]!;
+    this.oldNext.set(next);
+    cost.fill(Infinity);
+    next.fill(-1);
+    for (const lane of this.network.lanes) pace[lane.id] = seconds[lane.id]! / lane.length;
+    for (const { lane, s } of this.seeds[d]!) {
+      if (s >= exit[lane]! && cost[lane]! < Infinity) continue;
+      exit[lane] = s;
+      cost[lane] = s * pace[lane]!;
+      this.heap.push(lane, cost[lane]!);
+    }
+    while (this.heap.size) {
+      const key = this.heap.firstKey;
+      const lane = this.heap.popId();
+      if (key !== cost[lane]) continue;
+      for (const p of this.network.lanes[lane]!.prev) {
+        // A turn change must save three game minutes to displace the established route.
+        const switchCost = this.oldNext[p]! >= 0 && this.oldNext[p] !== lane ? 3 : 0;
+        const candidate = key + seconds[p]! + switchCost;
+        if (candidate < cost[p]!) {
+          next[p] = lane;
+          cost[p] = candidate;
+          this.heap.push(p, candidate);
+        } else if (candidate === cost[p] && lane < next[p]!) next[p] = lane;
       }
-      while (heap.size > 0) {
-        const lane = heap.popId();
-        const c = cost[lane]!;
-        for (const p of network.lanes[lane]!.prev) {
-          const cand = c + laneCost[p]!;
-          if (cand < cost[p]! || (cand === cost[p]! && lane < next[p]!)) {
-            cost[p] = cand;
-            next[p] = lane;
-            heap.push(p, cand);
-          }
-        }
-      }
-      this.nextHops.push(next);
-      this.costs.push(cost);
-      this.exits.push(exit);
     }
   }
 
@@ -91,7 +109,7 @@ export class Routing {
   /** Free-flow time from `s` on `lane` to `dest`, s. Infinity if unreachable or the exit is behind. */
   timeFrom(dest: number, lane: number, s: number): number {
     if (this.exits[dest]![lane]! <= s) return Infinity;
-    return this.costs[dest]![lane]! - s / this.speed[lane]!;
+    return this.costs[dest]![lane]! - s * this.inverseSpeed[dest]![lane]!;
   }
 
   /** The access point with the fastest route to `dest` (ties: lower lane id), or -1. */
@@ -112,17 +130,19 @@ export class Routing {
 
 /** Binary min-heap keyed by cost, ties broken by id for determinism. Allows stale entries. */
 class MinHeap {
-  private ids: number[] = [];
-  private keys: number[] = [];
-
-  get size(): number {
-    return this.ids.length;
+  private readonly ids: Int32Array;
+  private readonly keys: Float64Array;
+  size = 0;
+  constructor(capacity: number) {
+    this.ids = new Int32Array(capacity);
+    this.keys = new Float64Array(capacity);
   }
+  get firstKey() { return this.keys[0]!; }
 
   push(id: number, key: number): void {
-    this.ids.push(id);
-    this.keys.push(key);
-    let i = this.ids.length - 1;
+    let i = this.size++;
+    this.ids[i] = id;
+    this.keys[i] = key;
     while (i > 0) {
       const parent = (i - 1) >> 1;
       if (!this.less(i, parent)) break;
@@ -133,9 +153,9 @@ class MinHeap {
 
   popId(): number {
     const top = this.ids[0]!;
-    const lastId = this.ids.pop()!;
-    const lastKey = this.keys.pop()!;
-    if (this.ids.length > 0) {
+    const lastId = this.ids[--this.size]!;
+    const lastKey = this.keys[this.size]!;
+    if (this.size > 0) {
       this.ids[0] = lastId;
       this.keys[0] = lastKey;
       let i = 0;
@@ -143,8 +163,8 @@ class MinHeap {
         const l = i * 2 + 1;
         const r = l + 1;
         let m = i;
-        if (l < this.ids.length && this.less(l, m)) m = l;
-        if (r < this.ids.length && this.less(r, m)) m = r;
+        if (l < this.size && this.less(l, m)) m = l;
+        if (r < this.size && this.less(r, m)) m = r;
         if (m === i) break;
         this.swap(i, m);
         i = m;
@@ -160,7 +180,7 @@ class MinHeap {
   }
 
   private swap(a: number, b: number): void {
-    [this.ids[a], this.ids[b]] = [this.ids[b]!, this.ids[a]!];
-    [this.keys[a], this.keys[b]] = [this.keys[b]!, this.keys[a]!];
+    const id = this.ids[a]!; this.ids[a] = this.ids[b]!; this.ids[b] = id;
+    const key = this.keys[a]!; this.keys[a] = this.keys[b]!; this.keys[b] = key;
   }
 }

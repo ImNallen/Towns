@@ -564,3 +564,30 @@ test('lights control a live junction', async ({page}) => {
   });
   await page.screenshot({path:'artifacts/screens/junction-lights.png'});
 });
+
+test('Mill Street queues divert drivers to North Road during the morning rush', async ({ page }) => {
+  await page.goto('/?scenario=mill&seed=7&speed=0&x=0&y=-10&mpp=0.24');
+  await page.getByText('Traffic details', { exact: true }).click();
+  await expect(page.getByText('Trips / min', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Views', exact: true }).click();
+  await page.getByRole('group', { name: 'Map overlays' }).getByLabel('Traffic view').check();
+  await page.getByRole('button', { name: 'Views', exact: true }).click();
+  await expect(page.getByText('Trips / min', { exact: true })).toBeVisible();
+  await page.evaluate(() => window.__towns!.setSpeed(48));
+  await page.waitForFunction(() => {
+    const view = window.__towns!.traffic();
+    if (!view || view.jam < 0 || view.worst < 0) return false;
+    window.__towns!.setSpeed(0);
+    return true;
+  });
+  await expect(page.locator('.traffic-key')).toContainText('queuing');
+  await page.screenshot({path: 'artifacts/screens/traffic-rush.png'});
+  await page.evaluate(() => window.__towns!.setSpeed(48));
+  await page.waitForFunction(() => {
+    const v = window.__towns!.traffic();
+    if (!v || v.ratio[4]! <= 1.04) return false;
+    window.__towns!.setSpeed(0);
+    return true;
+  });
+  await page.screenshot({path: 'artifacts/screens/traffic-diversion.png'});
+});
