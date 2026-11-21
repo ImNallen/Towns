@@ -6,6 +6,8 @@ import type { Network } from './types';
 import type { Bay } from '../town/parking';
 
 export const WALK_TRIP_LIMIT = 600;
+/** Maximum displacement in metres when an edit moves a walking surface. */
+export const WALK_EDIT_SNAP_METRES = 3.5;
 interface Edge {
   to: number;
   length: number;
@@ -125,6 +127,9 @@ export class Walkers {
   readonly node: Int32Array;
   readonly along: Float64Array;
   readonly speed: Float64Array;
+  /** First hop from a mid-edge snap, until the walker reaches a routing node. */
+  readonly firstHop: Int32Array;
+  cleared = 0;
   readonly crowd: Uint16Array;
   count = 0;
   peak = 0;
@@ -136,12 +141,14 @@ export class Walkers {
     this.node = new Int32Array(capacity);
     this.along = new Float64Array(capacity);
     this.speed = new Float64Array(capacity);
+    this.firstHop = new Int32Array(capacity).fill(-1);
     this.crowd = new Uint16Array(graph.edgeCount);
   }
   start(p: number, from: number, to: number, age: number): boolean {
     if (!Number.isFinite(this.graph.distance(from, to))) return false;
     this.node[p] = this.graph.places[from]!;
     this.goal[p] = to;
+    this.firstHop[p] = -1;
     this.along[p] = 0;
     this.speed[p] = (1.2 + ((p * 17) % 31) / 100) * (age < 12 || age > 65 ? 0.85 : 1);
     this.peak = Math.max(this.peak, ++this.count);
@@ -149,9 +156,61 @@ export class Walkers {
   }
   private edge(p: number): Edge | undefined {
     const n = this.node[p]!;
-    const to = this.graph.next[this.goal[p]!]![n];
+    const to = this.firstHop[p]! >= 0 ? this.firstHop[p] : this.graph.next[this.goal[p]!]![n];
     for (const edge of this.graph.edges[n]!) if (edge.to === to) return edge;
     return undefined;
+  }
+  /** Project the current position onto the nearest reachable segment during an edit. */
+  restore(p: number, old: Walkers, dest: number): boolean {
+    const graph = this.graph;
+    const costs = graph.costs[dest];
+    if (!costs) return false;
+    const edge = old.edge(p);
+    const from = old.graph.points[old.node[p]!]!;
+    const to = edge ? old.graph.points[edge.to]! : from;
+    const fraction = edge ? old.along[p]! / edge.length : 0;
+    const x = from.x + fraction * (to.x - from.x);
+    const y = from.y + fraction * (to.y - from.y);
+    let distance = WALK_EDIT_SNAP_METRES ** 2;
+    let remaining = Infinity;
+    let node = -1, hop = -1, along = 0;
+    const consider = (d: number, cost: number, start: number, end: number, s: number) => {
+      if (d > distance || (d === distance && cost >= remaining)) return;
+      distance = d;
+      remaining = cost;
+      node = start;
+      hop = end;
+      along = s;
+    };
+    for (let a = 0; a < graph.points.length; a++) {
+      if (!Number.isFinite(costs[a])) continue;
+      const point = graph.points[a]!;
+      const dx = x - point.x, dy = y - point.y;
+      consider(dx * dx + dy * dy, costs[a]!, a, -1, 0);
+      for (const segment of graph.edges[a]!) {
+        const b = segment.to;
+        if (b <= a) continue;
+        const end = graph.points[b]!;
+        const vx = end.x - point.x, vy = end.y - point.y;
+        const t = (dx * vx + dy * vy) / (vx * vx + vy * vy);
+        if (t <= 0 || t >= 1) continue;
+        const d = (dx - t * vx) ** 2 + (dy - t * vy) ** 2;
+        // A new crossing must be entered from the kerb after observing traffic.
+        if (segment.crossing && !(edge?.crossing && d < 1e-12)) continue;
+        const s = t * segment.length;
+        const back = s + costs[a]!, forward = segment.length - s + costs[b]!;
+        if (back < forward) consider(d, back, b, a, segment.length - s);
+        else consider(d, forward, a, b, s);
+      }
+    }
+    if (node < 0) return false;
+    this.node[p] = node;
+    this.firstHop[p] = hop === graph.next[dest]![node] ? -1 : hop;
+    this.along[p] = along;
+    this.goal[p] = dest;
+    this.speed[p] = old.speed[p]!;
+    this.peak = Math.max(this.peak, ++this.count);
+    return true;
   }
   step(dt: number, vehicles?: Vehicles): void {
     if (vehicles) observeCrossings(this.graph.crossings,vehicles);
@@ -176,6 +235,7 @@ export class Walkers {
         this.along[i] -= edge.length;
         if (edge.crossing) edge.crossing.served++;
         this.node[i] = edge.to;
+        this.firstHop[i] = -1;
         edge = this.edge(i);
         if (edge?.crossing) { this.along[i]=0; break; }
       }

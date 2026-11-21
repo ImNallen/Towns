@@ -35,10 +35,16 @@ it('charges for a park, benefits connected homes, and clears visiting families s
   for (let t = 0; t < 2 * 28800; t++) {
     w.step();
     if (t % 20 || !w.townView()!.parkVisitors) continue;
+    const entrance = w.walkers!.graph.places.at(-1)!;
+    const headingHome = w.townView()!.households.flatMap(h =>
+      h.members.filter(p => p.errand === 'leisure' && w.walkers!.goal[p.id] === h.home && w.walkers!.node[p.id] !== entrance)
+        .map(p => ({ person: p.id, dest: h.home })));
+    if (!headingHome.length) continue;
     expect(w.townView()!.parkVisits).toBeGreaterThan(0);
     expect(w.pedestrianPositions().length).toBeGreaterThan(w.walkers!.count * 3);
     w.setZoning(new Map());
     expect(w.townView()!.parkVisitors).toBe(0);
+    for (const {person, dest} of headingHome) expect(w.walkers!.goal[person]).toBe(dest);
     for (let i = 0; i < 28800; i++) w.step();
     expect(w.stats().lost).toBe(0);
     return;

@@ -450,8 +450,7 @@ export class Town {
   }
 
   /** Preserve resident IDs and the random stream when edits resize the home and person arrays. */
-  copyFrom(source: Town, routing: Routing, minute: number): boolean {
-    let walkersPreserved = true;
+  copyFrom(source: Town, routing: Routing, minute: number): void {
     if (source.spec.homes.length > this.spec.homes.length || source.spec.regions.length !== this.spec.regions.length) {
       throw new Error('Town copy requires enough home slots and the same regions');
     }
@@ -460,6 +459,7 @@ export class Town {
     this.leisureDay.set(source.leisureDay);
     this.walkedTrips = source.walkedTrips;
     this.walkers.peak = source.walkers.peak;
+    this.walkers.cleared = source.walkers.cleared;
     this.trips = source.trips;
     this.parked = source.parked;
     this.turnedAway = source.turnedAway;
@@ -540,47 +540,30 @@ export class Town {
       const oldPark=source.parks[source.visitPark[p]!];
       if (oldPark && this.activity[p]! >= TO_PARK) {
         this.visitPark[p]=this.parks.findIndex(park=>park.key===oldPark.key);
-        if (this.visitPark[p]! < 0) this.activity[p]=HOME;
+        if (this.visitPark[p]! < 0 && this.activity[p] !== FROM_PARK) this.activity[p]=HOME;
       }
-      if (source.walkers.goal[p]! < 0 || this.role[p] === VACANT || this.activity[p] === HOME) continue;
-      const old = source.walkers;
-      const goal = old.goal[p]!;
-      const parkGoal=goal>=source.parkPlace(0);
-      const bay = goal < source.door.length || parkGoal ? -1 : remap(goal - source.door.length);
-      const dest = parkGoal ? this.parkPlace(this.visitPark[p]!) : goal < source.door.length ? goal : bay < 0 ? -1 : this.door.length + bay;
-      const n = old.node[p]!;
-      const a = old.graph.points[n]!;
-      const b = old.graph.points[old.graph.next[goal]![n]!] ?? a;
-      const t = old.along[p]! / (Math.hypot(b.x-a.x,b.y-a.y) || 1);
-      const x = a.x + t*(b.x-a.x), y = a.y + t*(b.y-a.y);
-      const graph = this.walkers.graph;
-      let nearest = -1, along = 0, distance = 0.05;
-      for (let i = 0; i < graph.points.length; i++) {
-        if (!Number.isFinite(graph.costs[dest]?.[i])) continue;
-        const point = graph.points[i]!;
-        const next = graph.points[graph.next[dest]![i]!] ?? point;
-        const dx = next.x-point.x, dy = next.y-point.y;
-        const length = Math.hypot(dx,dy);
-        const s = Math.min(length, Math.max(0, ((x-point.x)*dx+(y-point.y)*dy)/(length || 1)));
-        const ratio = s/(length || 1);
-        const d = Math.hypot(x-point.x-ratio*dx,y-point.y-ratio*dy);
-        if (d < distance) { distance = d; nearest = i; along = s; }
-      }
-      if (nearest < 0) {
-        walkersPreserved = false;
-        this.lost(p);
+      const goal = source.walkers.goal[p]!;
+      if (goal < 0) continue;
+      if (this.role[p] === VACANT || this.activity[p] === HOME) {
+        this.walkers.cleared++;
         continue;
       }
-      this.walkers.start(p, dest, dest, this.age[p]!);
-      this.walkers.node[p] = nearest;
-      this.walkers.along[p] = along;
+      let dest = goal;
+      if (goal >= source.parkPlace(0)) dest = this.parkPlace(this.visitPark[p]!);
+      else if (goal >= source.door.length) {
+        const bay = remap(goal - source.door.length);
+        dest = bay >= 0 ? this.door.length + bay : -1;
+      }
+      if (!this.walkers.restore(p, source.walkers, dest)) {
+        this.walkers.cleared++;
+        this.abandonTrip(p);
+      }
     }
     if (closed) this.jobMarket(routing, minute);
     else {
       this.filled.fill(0);
       for (let p = 0; p < this.people; p++) if (this.job[p]! >= 0) this.filled[this.job[p]!]++;
     }
-    return walkersPreserved;
   }
 
   /** Advance one game minute. `minute` counts from midnight before day 1. */
@@ -841,7 +824,7 @@ export class Town {
   }
 
   private walkLeg(p: number, from: number, to: number): void {
-    if (!this.walkers.start(p, from, to, this.age[p]!)) this.lost(p);
+    if (!this.walkers.start(p, from, to, this.age[p]!)) this.abandonTrip(p);
   }
 
   private assign(car: number, bay: number): void {
@@ -875,8 +858,8 @@ export class Town {
     return this.activity[p] === HOMEBOUND ? this.homeDest + this.household[p]! : this.destination(this.at[p]!);
   }
 
-  /** A resident's car was removed without arriving: the trip is abandoned at home. */
-  lost(p: number): void {
+  /** Return the resident and any car committed to the abandoned trip to their home. */
+  abandonTrip(p: number): void {
     if (this.driverCar[p]! >= 0) this.parkAtHome(this.driverCar[p]!);
     this.driverCar[p] = -1;
     this.activity[p] = HOME;
@@ -1371,8 +1354,14 @@ export class Town {
     this.circled.forEach(mix);
     this.frustration.forEach(mix);
     this.denied.forEach(mix);
+    if (this.walkers.cleared) mix(this.walkers.cleared);
     this.walkers.goal.forEach(mix);
-    for (let p=0; p<this.people; p++) if (this.walkers.goal[p]! >= 0) { mix(this.walkers.node[p]!); mix(Math.round(this.walkers.along[p]!*1000)); }
+    for (let p = 0; p < this.people; p++) {
+      if (this.walkers.goal[p]! < 0) continue;
+      if (this.walkers.firstHop[p]! >= 0) mix(this.walkers.firstHop[p]!);
+      mix(this.walkers.node[p]!);
+      mix(Math.round(this.walkers.along[p]! * 1000));
+    }
     if (this.parks.length) { this.visitPark.forEach(mix); this.leisureDay.forEach(mix); mix(this.parkVisits); }
     mix(this.walkedTrips);
     mix(this.trips);
@@ -1411,7 +1400,7 @@ export class Town {
           activity: ACTIVITIES[this.activity[p]!]!,
           leg: this.driving(p) ? 'drive' : ACTIVITIES[this.activity[p]!] === 'walking' ? 'walk' : ACTIVITIES[this.activity[p]!] === 'searching' ? 'park' : null,
           errand: home ? null : ERRANDS[this.errand[p]!]!,
-          place: home ? null : this.activity[p]! >= TO_PARK ? this.parks[this.visitPark[p]!]!.name : regionName(this.at[p]!),
+          place: home ? null : this.activity[p]! >= TO_PARK ? this.parks[this.visitPark[p]!]?.name ?? null : regionName(this.at[p]!),
         });
         if (adult) adults++;
         if (job >= 0) {
