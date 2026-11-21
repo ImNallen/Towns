@@ -6,21 +6,25 @@
  *   pnpm sim --json                            # machine-readable summary only
  *   pnpm sim --scenario meadow --connect --ticks 288000 --every 28800   # ten town days, one road built
  */
+import { decodeCellKey, type CellKey } from '../src/sim/zoning/cells';
+import type { ZoneKind } from '../src/sim/zoning/paint';
 import { parseArgs } from 'node:util';
 import { buildScenario, isScenarioName, SCENARIOS, type Scenario } from '../src/sim/scenarios';
 import { meadowScenario, meadowTips, planMeadowRoad } from '../src/sim/scenarios/meadow';
 import type { TownView } from '../src/sim/town/town';
 import { DT, World, type SimStats } from '../src/sim/world';
 
+// Bare --paint retains the original residential run. An optional preset can follow it.
+const args = process.argv.slice(2).filter(a => a !== '--');
 const { values } = parseArgs({
-  args: process.argv.slice(2).filter((a) => a !== '--'),
+  args: args.map((a, i) => a === '--paint' && (!args[i + 1] || args[i + 1]!.startsWith('--')) ? '--paint=homes' : a),
   options: {
     scenario: { type: 'string', default: 'roundabout' },
     ticks: { type: 'string', default: String(10 * 60 * 20) },
     seed: { type: 'string', default: '1' },
     every: { type: 'string', default: '0' },
     json: { type: 'boolean', default: false },
-    paint: { type: 'boolean', default: false },
+    paint: { type: 'string' },
     connect: { type: 'boolean', default: false },
   },
 });
@@ -54,6 +58,9 @@ const town = (view: TownView): string => {
     `homes=${view.households.length}`,
     `people=${t.population}`,
     `employed=${t.employed}/${t.adults}`,
+    `local=${t.localWorkers}`,
+    `shops=${view.businesses.filter(b => b.zone === 'shops').length}`,
+    `workplaces=${view.businesses.filter(b => b.zone === 'workplaces').length}`,
     `cross=${t.crossCommuters}`,
     `cars=${t.cars}`,
     `upgrades=${t.houseUpgrades + t.carUpgrades}`,
@@ -79,10 +86,18 @@ if (values.connect && scenarioName !== 'meadow') {
   process.exit(1);
 }
 const world = new World(values.connect ? connectedMeadow() : buildScenario(scenarioName), seed);
-if (values.paint) {
+if (values.paint !== undefined) {
+  if (values.paint !== 'homes' && values.paint !== 'mixed') throw new Error('--paint expects homes or mixed');
   const cells = world.scenario.zones;
   if (!cells) throw new Error('--paint requires --scenario meadow');
-  world.setZoning(new Map(Array.from(cells.keys, key => [key as import('../src/sim/zoning/cells').CellKey, 'residential'])));
+  const zoning = new Map<CellKey, ZoneKind>();
+  for (const raw of cells.keys) {
+    const key = raw as CellKey;
+    const { column, side } = decodeCellKey(key);
+    const band = (column + side * 2) % 6;
+    zoning.set(key, values.paint === 'homes' || band < 3 ? 'residential' : band === 3 ? 'shops' : 'workplaces');
+  }
+  world.setZoning(zoning);
 }
 const started = performance.now();
 for (let t = 0; t < ticks; t++) {

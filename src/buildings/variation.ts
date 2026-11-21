@@ -28,10 +28,10 @@ export function catalogueVariants({ walls, roofs }: Blueprint): Variant[] {
  * Sizes are positive whole cells, rows <= 4. Prefer the largest fitting design; fall back
  * to smaller footprints when neighbours exhaust that size. Never resize authored geometry.
  */
-export function pickBuilding(key: string, tier: Tier, lot: LotSize, neighbours: readonly BuildingPick[] = []): BuildingPick {
+export function pickBuilding(key: string, tier: Tier, lot: LotSize, neighbours: readonly BuildingPick[] = [], zone: Blueprint['zone'] = 'residential'): BuildingPick {
   if (!Number.isInteger(lot.columns) || !Number.isInteger(lot.rows) || lot.columns < 1 || lot.rows < 1 || lot.rows > 4) throw new Error('Invalid residential lot size');
   if (neighbours.length > 2) throw new Error('A street lot supports at most two assigned neighbours');
-  const eligible = BLUEPRINTS.filter((b) => b.tier === tier && b.lot.columns <= lot.columns && b.lot.rows <= lot.rows && !neighbours.some(n => n.blueprint.id === b.id));
+  const eligible = BLUEPRINTS.filter((b) => b.zone === zone && b.tier === tier && b.lot.columns <= lot.columns && b.lot.rows <= lot.rows && !neighbours.some(n => n.blueprint.id === b.id));
   const area = Math.max(...eligible.map((b) => b.lot.columns * b.lot.rows));
   const fitting = eligible.filter((b) => b.lot.columns * b.lot.rows === area);
   const blueprint = fitting[hash(key) % fitting.length];

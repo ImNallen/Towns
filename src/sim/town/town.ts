@@ -1,3 +1,4 @@
+import { ZONE_KINDS, type ZoneKind } from '../zoning/paint';
 import type { Lot } from '../zoning/lots';
 import { Rng } from '../rng';
 import type { TownSpec } from '../scenarios/types';
@@ -56,7 +57,15 @@ const WEALTH_MARGIN = 800;
 const COMMUTE_VALUE = 0.5;
 /** A better job has to beat the current one by this much per day to be worth switching. */
 const SWITCH_MARGIN = 10;
-export const GROWTH_INTERVAL_MINUTES = 360;
+type Demand = Record<ZoneKind, number>;
+const GROWTH_THRESHOLD = 360;
+const lotZone = (lot: Lot) => lot.designs[0]!.blueprint.zone;
+const lotJobs = (lot: Lot) => (lotZone(lot) === 'shops' ? 2 : 4) * lot.columns;
+function visibleLot(parcel: Lot, level = 1) {
+  const { designs, ...geometry } = parcel;
+  const pick = designs[level - 1]!;
+  return { ...geometry, design: pick.blueprint.id, variant: pick.variant };
+}
 const VACANT = 255;
 const MAX_MEMBERS = 5;
 const EVENT_CAPACITY = 64;
@@ -100,7 +109,7 @@ export interface PersonView {
 }
 
 export interface HouseholdView {
-  lot?: Omit<Lot, 'designs'> & { design: string; variant: import('../../buildings/types').Variant };
+  lot?: ReturnType<typeof visibleLot>;
   id: number;
   /** Index into `scenario.decor.houses`. */
   home: number;
@@ -130,7 +139,18 @@ export type TownEventView = { day: number; minute: number; household: number } &
   | { kind: 'newJob' | 'changedJob' | 'lostJob'; region: string; person: number }
 );
 
+export interface BusinessView {
+  home: number;
+  name: string;
+  zone: Exclude<ZoneKind, 'residential'>;
+  lot: ReturnType<typeof visibleLot>;
+  jobs: number;
+  filled: number;
+  customers: number;
+}
 export interface TownView {
+  businesses: BusinessView[];
+  demand: Demand;
   day: number;
   minuteOfDay: number;
   totals: {
@@ -144,6 +164,7 @@ export interface TownView {
     meanFunds: number;
     /** Employed adults working in a region other than their neighbourhood's own. */
     crossCommuters: number;
+    localWorkers: number;
   };
   households: HouseholdView[];
   /** Oldest first. */
@@ -182,12 +203,12 @@ export class Town {
   private readonly role: Uint8Array;
   private readonly age: Uint8Array;
   private readonly firstName: Uint16Array;
-  /** Region index, or -1 when unemployed. */
-  private readonly job: Int8Array;
+  /** Place index: off-map region, or region count + local driveway slot. -1 when unemployed. */
+  private readonly job: Int32Array;
   private readonly activity: Uint8Array;
   private readonly errand: Uint8Array;
-  /** Region of the current trip. */
-  private readonly at: Int8Array;
+  /** Place visited on the current trip, using the same indexing as job. */
+  private readonly at: Int32Array;
   /** Absolute minute they arrived in the region. */
   private readonly arrivedAt: Int32Array;
   /** Absolute minute they want to head home. */
@@ -197,6 +218,10 @@ export class Town {
   private readonly early: Uint8Array;
 
   private readonly filled: Int32Array;
+  private readonly open: Uint8Array;
+  private readonly customers: Uint32Array;
+  private readonly growth: Demand = { residential: 0, shops: 0, workplaces: 0 };
+  private readonly eventPlace = new Array<string>(EVENT_CAPACITY);
   private carsBought = 0;
   private houseUpgrades = 0;
   private carUpgrades = 0;
@@ -230,15 +255,17 @@ export class Town {
     this.role = new Uint8Array(P).fill(VACANT);
     this.age = new Uint8Array(P);
     this.firstName = new Uint16Array(P);
-    this.job = new Int8Array(P).fill(-1);
+    this.job = new Int32Array(P).fill(-1);
     this.activity = new Uint8Array(P);
     this.errand = new Uint8Array(P);
-    this.at = new Int8Array(P).fill(-1);
+    this.at = new Int32Array(P).fill(-1);
     this.arrivedAt = new Int32Array(P);
     this.until = new Int32Array(P);
     this.workedDay = new Int32Array(P);
     this.early = new Uint8Array(P);
-    this.filled = new Int32Array(spec.regions.length);
+    this.filled = new Int32Array(spec.regions.length + H);
+    this.open = new Uint8Array(H);
+    this.customers = new Uint32Array(H);
     this.eventDay = new Int32Array(EVENT_CAPACITY);
     this.eventMinute = new Int16Array(EVENT_CAPACITY);
     this.eventHousehold = new Int16Array(EVENT_CAPACITY);
@@ -279,10 +306,10 @@ export class Town {
   }
 
   occupiedLots(): Lot[] {
-    return this.spec.homes.flatMap((home, h) => this.level[h] && home.lot ? [home.lot] : []);
+    return this.spec.homes.flatMap((home, h) => (this.level[h] || this.open[h]) && home.lot ? [home.lot] : []);
   }
 
-  departed(p: number): boolean {
+  private departed(p: number): boolean {
     return p >= 0 && this.role[p] === VACANT;
   }
 
@@ -298,46 +325,54 @@ export class Town {
   }
 
   /** Preserve resident IDs and the random stream when edits resize the home and person arrays. */
-  copyFrom(source: Town): void {
-    if (source.spec.homes.length > this.spec.homes.length || source.filled.length !== this.filled.length) {
+  copyFrom(source: Town, routing: Routing, minute: number): void {
+    if (source.spec.homes.length > this.spec.homes.length || source.spec.regions.length !== this.spec.regions.length) {
       throw new Error('Town copy requires enough home slots and the same regions');
     }
     this.rng.copyFrom(source.rng);
     for (const key of [
       'surname', 'funds', 'wages', 'level', 'cars', 'carModel', 'pantry', 'firstMember', 'memberCount', 'adults',
       'household', 'role', 'age', 'firstName', 'job', 'activity', 'errand', 'at', 'arrivedAt', 'until', 'workedDay',
-      'early', 'eventDay', 'eventMinute', 'eventHousehold', 'eventKind', 'eventDetail', 'eventPerson',
+      'open', 'customers', 'early', 'eventDay', 'eventMinute', 'eventHousehold', 'eventKind', 'eventDetail', 'eventPerson',
     ] as const) this[key].set(source[key]);
+    Object.assign(this.growth, source.growth);
+    Object.assign(this.eventPlace, source.eventPlace);
+    this.eventHead = source.eventHead;
+    this.eventCount = source.eventCount;
+    let closed = false;
     for (let h = 0; h < source.spec.homes.length; h++) {
       const old = source.spec.homes[h]!.lot;
-      if (old && this.spec.homes[h]!.lot !== old) this.moveOut(h);
+      if (!old || this.spec.homes[h]!.lot === old) continue;
+      if (this.level[h]) this.moveOut(h);
+      if (!this.open[h]) continue;
+      closed = true;
+      this.open[h] = this.customers[h] = 0;
+      const place = h + this.spec.regions.length;
+      for (let p = 0; p < source.people; p++) {
+        if (this.job[p] === place) {
+          this.job[p] = -1;
+          this.record(minute, this.household[p]!, LOST_JOB, place, p, source.placeName(place));
+        }
+        if (this.at[p] === place) {
+          this.activity[p] = HOME;
+          this.at[p] = -1;
+        }
+      }
     }
     this.people = source.people;
     this.carsBought = source.carsBought;
     this.houseUpgrades = source.houseUpgrades;
     this.carUpgrades = source.carUpgrades;
-    this.eventHead = source.eventHead;
-    this.eventCount = source.eventCount;
+    if (closed) this.jobMarket(routing, minute);
+    else {
+      this.filled.fill(0);
+      for (let p = 0; p < this.people; p++) if (this.job[p]! >= 0) this.filled[this.job[p]!]++;
+    }
   }
 
   /** Advance one game minute. `minute` counts from midnight before day 1. */
   update(minute: number, roads: TownRoads): void {
-    if (minute % GROWTH_INTERVAL_MINUTES === 0) {
-      let next = -1;
-      let key = Infinity;
-      for (let h = 0; h < this.spec.homes.length; h++) {
-        const lot = this.spec.homes[h]!.lot;
-        if (lot && !this.level[h] && lot.key < key) {
-          key = lot.key;
-          next = h;
-        }
-      }
-      if (next >= 0) {
-        this.moveIn(next, next * MAX_MEMBERS);
-        this.jobMarket(roads.routing, minute);
-        this.record(minute, next, MOVED_IN, 0);
-      }
-    }
+    if (minute % 60 === 0) this.grow(minute, roads.routing);
     const clock = minute % MINUTES_PER_DAY;
     if (clock === 0) this.midnight(minute, roads.routing);
     const day = dayOf(minute);
@@ -348,10 +383,67 @@ export class Town {
     }
   }
 
+  private demandFor(zone: ZoneKind): number {
+    let jobs = 0, workers = 0, adults = 0, people = 0, shops = 0;
+    for (let r = 0; r < this.spec.regions.length; r++) jobs += this.spec.regions[r]!.jobs;
+    for (let h = 0; h < this.spec.homes.length; h++) {
+      adults += this.level[h] ? this.adults[h]! : 0;
+      people += this.memberCount[h]!;
+      if (!this.open[h]) continue;
+      const lot = this.spec.homes[h]!.lot!;
+      jobs += lotJobs(lot);
+      if (lotZone(lot) === 'shops') shops++;
+    }
+    for (let r = 0; r < this.filled.length; r++) workers += this.filled[r]!;
+    if (zone === 'shops') return Math.min(100, Math.max(0, (people - 12 * shops) * 5));
+    if (zone === 'workplaces') return Math.min(100, (adults - workers) * 12);
+    return Math.min(100, 25 + 8 * (jobs - workers));
+  }
+
+  private grow(minute: number, routing: Routing): void {
+    for (const zone of ZONE_KINDS) {
+      let next = -1, key = Infinity;
+      for (let h = 0; h < this.spec.homes.length; h++) {
+        const lot = this.spec.homes[h]!.lot;
+        if (lot && lotZone(lot) === zone && !this.level[h] && !this.open[h] && lot.key < key) {
+          next = h;
+          key = lot.key;
+        }
+      }
+      if (next < 0) { this.growth[zone] = 0; continue; }
+      this.growth[zone] += this.demandFor(zone);
+      if (this.growth[zone] < GROWTH_THRESHOLD) continue;
+      this.growth[zone] -= GROWTH_THRESHOLD;
+      if (zone === 'residential') {
+        this.moveIn(next, next * MAX_MEMBERS);
+        this.record(minute, next, MOVED_IN, 0);
+      } else this.open[next] = 1;
+      this.jobMarket(routing, minute);
+    }
+  }
+
+  driving(p: number): boolean {
+    return p < 0 || (!this.departed(p) && (this.activity[p] === OUTBOUND || this.activity[p] === HOMEBOUND));
+  }
+
+  private placeName(r: number): string {
+    return this.spec.regions[r]?.name ?? this.spec.homes[r - this.spec.regions.length]!.lot!.designs[0]!.blueprint.name;
+  }
+
+  private destination(r: number): number {
+    return this.spec.regions[r]?.sink ?? this.homeDest + r - this.spec.regions.length;
+  }
+
+  private wage(r: number): number {
+    return this.spec.regions[r]?.wage ?? 32;
+  }
+
   /** A resident's car reached its destination. */
   arrived(p: number, minute: number): void {
     if (this.activity[p] === OUTBOUND) {
       this.activity[p] = AWAY;
+      const slot = this.at[p]! - this.spec.regions.length;
+      if (slot >= 0 && this.errand[p] === SHOP) this.customers[slot]++;
       this.arrivedAt[p] = minute;
       this.until[p] = this.errand[p] === WORK
         ? (this.workedDay[p]! - 1) * MINUTES_PER_DAY + SHIFT_END
@@ -387,7 +479,7 @@ export class Town {
 
   private depart(p: number, errand: number, region: number, roads: TownRoads): boolean {
     const access = this.spec.homes[this.household[p]!]!.access;
-    const dest = this.spec.regions[region]!.sink;
+    const dest = this.destination(region);
     const k = roads.routing.bestAccess(access, dest);
     if (k < 0 || !roads.trySpawnAt(access[k]!.lane, access[k]!.s, dest, p)) return false;
     this.activity[p] = OUTBOUND;
@@ -398,18 +490,28 @@ export class Town {
 
   private leaveRegion(p: number, roads: TownRoads): void {
     const h = this.household[p]!;
-    const region = this.spec.regions[this.at[p]!]!;
-    if (!roads.trySpawnAt(region.source, 0, this.homeDest + h, p)) return;
+    const place = this.at[p]!;
+    const region = this.spec.regions[place];
+    const dest = this.homeDest + h;
+    let lane = region?.source ?? -1, s = 0;
+    if (!region) {
+      const access = this.spec.homes[place - this.spec.regions.length]!.access;
+      const k = roads.routing.bestAccess(access, dest);
+      if (k < 0) return;
+      lane = access[k]!.lane;
+      s = access[k]!.s;
+    }
+    if (!roads.trySpawnAt(lane, s, dest, p)) return;
     this.activity[p] = HOMEBOUND;
     if (this.errand[p] !== WORK) return;
     const start = this.until[p]! - (SHIFT_END - SHIFT_START);
     const hours = Math.max(0, this.until[p]! - Math.max(this.arrivedAt[p]!, start)) / 60;
-    this.funds[h] += hours * region.wage;
-    this.wages[h] += hours * region.wage;
+    this.funds[h] += hours * this.wage(place);
+    this.wages[h] += hours * this.wage(place);
   }
 
   private buyGroceries(h: number, region: number): void {
-    const price = this.spec.regions[region]!.groceryPrice * this.memberCount[h]!;
+    const price = (this.spec.regions[region]?.groceryPrice ?? 4) * this.memberCount[h]!;
     const days = Math.min(PANTRY_FULL - this.pantry[h]!, Math.max(0, this.funds[h]!) / price);
     this.pantry[h] += days;
     this.funds[h] -= days * price;
@@ -433,18 +535,30 @@ export class Town {
   /** Free-flow minutes from home `h` to region `r` (Infinity when unreachable). */
   private outTime(h: number, r: number, routing: Routing): number {
     const access = this.spec.homes[h]!.access;
-    const dest = this.spec.regions[r]!.sink;
+    const dest = this.destination(r);
     const k = routing.bestAccess(access, dest);
     return k < 0 ? Infinity : routing.timeFrom(dest, access[k]!.lane, access[k]!.s);
   }
 
   private roundTrip(h: number, r: number, routing: Routing): number {
-    return this.outTime(h, r, routing) + routing.timeFrom(this.homeDest + h, this.spec.regions[r]!.source, 0);
+    const region = this.spec.regions[r];
+    const dest = this.homeDest + h;
+    if (region) return this.outTime(h, r, routing) + routing.timeFrom(dest, region.source, 0);
+    const access = this.spec.homes[r - this.spec.regions.length]!.access;
+    const k = routing.bestAccess(access, dest);
+    return k < 0 ? Infinity : this.outTime(h, r, routing) + routing.timeFrom(dest, access[k]!.lane, access[k]!.s);
   }
 
   private nearestShop(h: number, routing: Routing): number {
     let best = -1;
     let bestTime = Infinity;
+    for (let b = 0; b < this.open.length; b++) {
+      if (!this.open[b] || lotZone(this.spec.homes[b]!.lot!) !== 'shops') continue;
+      const r = this.spec.regions.length + b;
+      const time = this.roundTrip(h, r, routing);
+      if (time < bestTime) { best = r; bestTime = time; }
+    }
+    if (best >= 0) return best;
     for (let r = 0; r < this.spec.regions.length; r++) {
       const t = this.roundTrip(h, r, routing);
       if (t < bestTime) {
@@ -458,6 +572,7 @@ export class Town {
   // --- Days ---------------------------------------------------------------------
 
   private midnight(minute: number, routing: Routing): void {
+    this.customers.fill(0);
     for (let h = 0; h < this.spec.homes.length; h++) {
       if (!this.level[h]) continue;
       this.funds[h] -= this.dailyCost(h);
@@ -476,8 +591,7 @@ export class Town {
 
   /** Daily value of working in region `r` for household `h`: pay minus the time spent commuting. */
   private jobValue(h: number, r: number, routing: Routing): number {
-    const region = this.spec.regions[r]!;
-    return region.wage * (SHIFT_END - SHIFT_START) / 60 - COMMUTE_VALUE * this.roundTrip(h, r, routing);
+    return this.wage(r) * (SHIFT_END - SHIFT_START) / 60 - COMMUTE_VALUE * this.roundTrip(h, r, routing);
   }
 
   private jobMarket(routing: Routing, minute: number): void {
@@ -506,8 +620,10 @@ export class Town {
         const current = this.job[p]!;
         if (current < 0 && this.employed(h) >= this.cars[h]!) continue;
         const base = current >= 0 ? this.jobValue(h, current, routing) + SWITCH_MARGIN : 0;
-        for (let r = 0; r < regions.length; r++) {
-          if (r === current || this.filled[r]! >= regions[r]!.jobs) continue;
+        for (let r = 0; r < this.filled.length; r++) {
+          const slot = r - regions.length;
+          const jobs = regions[r]?.jobs ?? (this.open[slot] ? lotJobs(this.spec.homes[slot]!.lot!) : 0);
+          if (r === current || this.filled[r]! >= jobs) continue;
           const gain = this.jobValue(h, r, routing) - base;
           if (gain > bestGain) {
             person = p;
@@ -574,7 +690,7 @@ export class Town {
     this.record(minute, h, UPGRADED_HOUSE, this.level[h]!);
   }
 
-  private record(minute: number, h: number, kind: number, detail: number, person = -1): void {
+  private record(minute: number, h: number, kind: number, detail: number, person = -1, place?: string): void {
     const i = (this.eventHead + this.eventCount) % EVENT_CAPACITY;
     this.eventDay[i] = dayOf(minute);
     this.eventMinute[i] = minute % MINUTES_PER_DAY;
@@ -582,6 +698,7 @@ export class Town {
     this.eventKind[i] = kind;
     this.eventDetail[i] = detail;
     this.eventPerson[i] = person;
+    if (person >= 0) this.eventPlace[i] = place ?? this.placeName(detail);
     if (this.eventCount < EVENT_CAPACITY) this.eventCount++;
     else this.eventHead = (this.eventHead + 1) % EVENT_CAPACITY;
   }
@@ -627,6 +744,14 @@ export class Town {
       mix(this.workedDay[p]!);
       mix(this.early[p]!);
     }
+    for (const zone of ZONE_KINDS) if (this.growth[zone]) mix(this.growth[zone]);
+    for (let h = 0; h < this.open.length; h++) {
+      const lot = this.spec.homes[h]!.lot;
+      if (!lot || lotZone(lot) === 'residential') continue;
+      mix(lotZone(lot) === 'shops' ? 1 : 2);
+      mix(this.open[h]!);
+      mix(this.customers[h]!);
+    }
     mix(this.carsBought);
     mix(this.houseUpgrades);
     mix(this.carUpgrades);
@@ -635,12 +760,13 @@ export class Town {
   /** A readable copy of the town at absolute `minute`. Allocates; not for the tick loop. */
   view(minute: number): TownView {
     const { regions, homes } = this.spec;
-    const regionName = (r: number): string | null => (r >= 0 ? regions[r]!.name : null);
+    const regionName = (r: number): string | null => (r >= 0 ? this.placeName(r) : null);
     const households: HouseholdView[] = [];
     let adults = 0;
     let employed = 0;
     let cars = 0;
     let crossCommuters = 0;
+    let localWorkers = 0;
     let funds = 0;
     for (let h = 0; h < homes.length; h++) {
       if (!this.level[h]) continue;
@@ -660,21 +786,22 @@ export class Town {
           place: home ? null : regionName(this.at[p]!),
         });
         if (adult) adults++;
-        if (job >= 0) employed++;
-        if (job >= 0 && job !== homes[h]!.region) crossCommuters++;
+        if (job >= 0) {
+          employed++;
+          const local = job >= regions.length;
+          if (local) localWorkers++;
+          const region = local ? homes[job - regions.length]!.region : job;
+          if (region !== homes[h]!.region) crossCommuters++;
+        }
       }
       const needs: Needs = { food: this.food(h), comfort: this.comfort(h), mobility: this.mobility(h), security: this.security(h) };
       cars += this.cars[h]!;
       funds += this.funds[h]!;
       const parcel = homes[h]!.lot;
-      const pick = parcel?.designs[this.level[h]! - 1];
       households.push({
         id: h,
         home: h,
-        ...(parcel && pick ? { lot: {
-          key: parcel.key, x: parcel.x, y: parcel.y, angle: parcel.angle, streetX: parcel.streetX, streetY: parcel.streetY,
-          columns: parcel.columns, rows: parcel.rows, corners: parcel.corners, design: pick.blueprint.id, variant: pick.variant,
-        } } : {}),
+        ...(parcel ? { lot: visibleLot(parcel, this.level[h]!) } : {}),
         region: regions[homes[h]!.region]!.name,
         surname: SURNAMES[this.surname[h]!]!,
         level: this.level[h]!,
@@ -700,12 +827,24 @@ export class Town {
         case BOUGHT_CAR: events.push({ ...at, kind: 'boughtCar', cars: detail }); break;
         case NEWER_CAR: events.push({ ...at, kind: 'newerCar', model: detail }); break;
         case UPGRADED_HOUSE: events.push({ ...at, kind: 'upgradedHouse', level: detail }); break;
-        case NEW_JOB: events.push({ ...at, kind: 'newJob', region: regions[detail]!.name, person }); break;
-        case CHANGED_JOB: events.push({ ...at, kind: 'changedJob', region: regions[detail]!.name, person }); break;
-        case LOST_JOB: events.push({ ...at, kind: 'lostJob', region: regions[detail]!.name, person }); break;
+        case NEW_JOB: events.push({ ...at, kind: 'newJob', region: this.eventPlace[i]!, person }); break;
+        case CHANGED_JOB: events.push({ ...at, kind: 'changedJob', region: this.eventPlace[i]!, person }); break;
+        case LOST_JOB: events.push({ ...at, kind: 'lostJob', region: this.eventPlace[i]!, person }); break;
       }
     }
+    const businesses: BusinessView[] = [];
+    for (let h = 0; h < homes.length; h++) {
+      if (!this.open[h]) continue;
+      const lot = homes[h]!.lot!;
+      const r = h + regions.length;
+      const zone = lotZone(lot);
+      if (zone === 'residential') throw new Error('A residence cannot be an open business');
+      businesses.push({ home: h, lot: visibleLot(lot), name: this.placeName(r), zone,
+        jobs: lotJobs(lot), filled: this.filled[r]!, customers: this.customers[h]! });
+    }
     return {
+      businesses,
+      demand: { residential: this.demandFor('residential'), shops: this.demandFor('shops'), workplaces: this.demandFor('workplaces') },
       day: dayOf(minute),
       minuteOfDay: minute % MINUTES_PER_DAY,
       totals: {
@@ -718,6 +857,7 @@ export class Town {
         carUpgrades: this.carUpgrades,
         meanFunds: households.length > 0 ? funds / households.length : 0,
         crossCommuters,
+        localWorkers,
       },
       households,
       events,

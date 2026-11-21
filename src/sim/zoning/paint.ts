@@ -1,6 +1,6 @@
 import { decodeCellKey, findCell, ZONE_ROWS, type CellKey, type ZoneCells } from './cells';
 
-export const ZONE_KINDS = ['residential'] as const;
+export const ZONE_KINDS = ['residential', 'shops', 'workplaces'] as const;
 export type ZoneKind = (typeof ZONE_KINDS)[number];
 
 /**

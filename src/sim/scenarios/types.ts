@@ -45,9 +45,9 @@ export interface Bounds {
   maxY: number;
 }
 
-/** A house residents live in. `homes[i]` is `decor.houses[i]`. */
+/** A driveway slot. The initial slots match decor.houses, followed by reusable zoned parcels. */
 export interface HomeSpec {
-  /** A painted parcel awaiting or housing a family. */
+  /** A painted parcel which may develop into housing or a business. */
   lot?: import('../zoning/lots').Lot;
   /** Where the driveway meets its street, one per direction. Empty when the street is gone. */
   access: AccessPoint[];

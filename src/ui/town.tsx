@@ -1,3 +1,4 @@
+import { ZONE_KINDS } from '../sim/zoning/paint';
 import { PALETTE } from '../render/palette';
 import type { HouseholdView, PersonView, TownEventView, TownView } from '../sim/town/town';
 
@@ -36,8 +37,8 @@ function describe(event: TownEventView, town: TownView): string {
     case 'upgradedHouse': return event.level >= 3
       ? `${family(household)} built a second storey`
       : `${family(household)} moved up to a larger home`;
-    case 'newJob': return `${memberName(town, event.household, event.person)} started a job in ${event.region}`;
-    case 'changedJob': return `${memberName(town, event.household, event.person)} took a better job in ${event.region}`;
+    case 'newJob': return `${memberName(town, event.household, event.person)} started a job ${town.households.some(h => h.region === event.region) ? 'in' : 'at'} ${event.region}`;
+    case 'changedJob': return `${memberName(town, event.household, event.person)} took a better job ${town.households.some(h => h.region === event.region) ? 'in' : 'at'} ${event.region}`;
     case 'lostJob': return `${memberName(town, event.household, event.person)} can no longer get to work in ${event.region}`;
   }
 }
@@ -58,11 +59,22 @@ export function TownPanel({ town }: { town: TownView }) {
       <dl className="town-stats">
         <div><dt>people</dt><dd>{totals.population}</dd></div>
         <div><dt>adults employed</dt><dd>{totals.employed}/{totals.adults}</dd></div>
+        {town.businesses.length > 0 && <div><dt>local workers</dt><dd>{totals.localWorkers}</dd></div>}
         <div><dt>cross-commuting</dt><dd>{totals.crossCommuters}</dd></div>
         <div><dt>cars</dt><dd>{totals.cars}</dd></div>
         <div><dt>homes upgraded</dt><dd>{upgraded}</dd></div>
         <div><dt>avg. funds</dt><dd>{money(totals.meanFunds)}</dd></div>
       </dl>
+      <section className="town-demand" aria-label="Zone demand">
+        <h2 className="panel-heading">Demand</h2>
+        {ZONE_KINDS.map(zone => <div className="need" key={zone}>
+          <span>{zone === 'residential' ? 'Homes' : zone === 'shops' ? 'Shops' : 'Workplaces'}</span>
+          <div className="need-bar" role="meter" aria-label={zone + ' demand'} aria-valuemin={0}
+            aria-valuemax={100} aria-valuenow={town.demand[zone]}>
+            <i style={{ width: town.demand[zone] + '%', background: PALETTE.zonePaint[zone] }} />
+          </div>
+        </div>)}
+      </section>
       {recent.length > 0 && <ol className="town-feed" aria-label="Recent events">
         {recent.map((event) => (
           <li key={`${event.day}-${event.minute}-${event.household}-${event.kind}-${'person' in event ? `${event.person}-${event.region}` : ''}`}>
