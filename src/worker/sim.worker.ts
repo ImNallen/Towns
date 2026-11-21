@@ -178,7 +178,7 @@ setInterval(() => {
   }
   if (steps === MAX_STEPS_PER_PUMP) accumulator = 0; // falling behind: drop time rather than spiral
   if (steps > 0) {
-    if (waiting && (world.vehicles.count === 0 || Math.floor(world.tick / 20) !== Math.floor((world.tick - steps) / 20)) && applyEdit(waiting)) return;
+    if (waiting && ((world.vehicles.count === 0 && !world.walkers?.count) || Math.floor(world.tick / 20) !== Math.floor((world.tick - steps) / 20)) && applyEdit(waiting)) return;
     postFrame(world);
     if (now - lastTown >= TOWN_INTERVAL) postTown(world);
   }

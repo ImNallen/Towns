@@ -77,3 +77,33 @@ it('weighs route length, grocery loads, children, accessible cars and car owners
     expect(walkChance(200,600,false,shop,child,car)).toBeLessThan(chance(200));
   }
 });
+
+it('defers a moved pavement until walkers clear the edited road', () => {
+  const scenario=meadowScenario();
+  const world=new World(scenario,1);
+  const zoning=new Map(Array.from(scenario.zones!.keys,raw=>{
+    const key=raw as CellKey,{column,side}=decodeCellKey(key);
+    const band=(column+2*side)%6;
+    return [key,band<3?'residential':band===3?'shops':'workplaces'] as const;
+  }));
+  world.setZoning(zoning);
+  const upgraded=meadowScenario([{upgrade:1,roadType:'parking'}]);
+  for (let t=0;t<100000;t++) {
+    world.step();
+    if(t%100 || !world.walkers!.count) continue;
+    const result=world.editNetwork(upgraded);
+    if(result.ok || !result.reason.includes('walking')) continue;
+    const before=world.walkers!.count;
+    expect(before).toBeGreaterThan(0);
+    world.setAdmissions(false);
+    for(let wait=0;wait<28800;wait++) {
+      world.step();
+      if(wait%20 || world.walkers!.count || world.vehicles.count) continue;
+      expect(world.editNetwork(upgraded).ok).toBe(true);
+      expect(world.stats().lost).toBe(0);
+      return;
+    }
+    throw new Error('Active trips failed to drain');
+  }
+  throw new Error('Expected an active pavement to defer the edit');
+});
