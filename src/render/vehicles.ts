@@ -8,6 +8,7 @@ interface Frame {
   slots: number;
   positions: Float32Array;
   ids: Int32Array;
+  models: Uint8Array;
 }
 
 /**
@@ -80,7 +81,11 @@ export class VehicleLayer {
       mesh.setMatrixAt(i, this.matrix);
       if (this.colouredId[i] !== id) {
         this.colouredId[i] = id;
-        mesh.setColorAt(i, this.color.set(PALETTE.vehicles[hashId(id) % PALETTE.vehicles.length]!));
+        // A car keeps the colour it left with, even if the household trades up mid-trip.
+        const model = cur.models[i]!;
+        mesh.setColorAt(i, this.color.set(model > 0
+          ? PALETTE.carModels[model - 1]!
+          : PALETTE.vehicles[hashId(id) % PALETTE.vehicles.length]!));
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       }
     }

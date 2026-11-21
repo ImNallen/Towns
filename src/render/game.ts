@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Network } from '../sim/network/types';
 import type { ScenarioName } from '../sim/scenarios';
+import type { TownView } from '../sim/town/town';
 import type { SimStats } from '../sim/world';
 import type { FromWorker, ToWorker } from '../worker/protocol';
 import { MapCamera } from './camera';
@@ -8,6 +9,7 @@ import { buildLaneOverlay } from './debug';
 import { disposeLayer } from './dispose';
 import { RoadEditor, type EditorState, type MapTool } from './roadEditor';
 import { buildDecor } from './decor';
+import { HouseLayer } from './houses';
 import { PALETTE } from './palette';
 import { buildRoads } from './roads';
 import { VehicleLayer } from './vehicles';
@@ -28,6 +30,11 @@ export interface Game {
   undoRoad(): void;
   cancelRoadEdit(): void;
   stats(): SimStats | null;
+  /** Residents and the town clock; null on maps without a town. */
+  town(): TownView | null;
+  /** Index into `scenario.decor.houses` (= `HouseholdView.home`) of the inspected house. */
+  selectedHouse(): number | null;
+  selectHouse(house: number | null): void;
   fps(): number;
   speed(): number;
   setSpeed(speed: number): void;
@@ -76,16 +83,26 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   const mapCamera = new MapCamera(canvas, (event) => editor?.canPan(event) ?? true);
   let roadLayer: THREE.Group | null = null;
   let vehicles: VehicleLayer | null = null;
+  let houses: HouseLayer | null = null;
   let laneOverlay: THREE.Group | null = null;
   let showLanes = options.showLanes;
   let speed = options.speed;
   let latestStats: SimStats | null = null;
+  let latestTown: TownView | null = null;
+  let selectedHouse: number | null = null;
+  const selectHouse = (house: number | null): void => {
+    selectedHouse = house;
+    houses?.select(house);
+  };
 
   const worker = new Worker(new URL('../worker/sim.worker.ts', import.meta.url), { type: 'module' });
   const send = (msg: ToWorker): void => worker.postMessage(msg);
 
   if (options.scenario === 'meadow') editor = new RoadEditor(canvas, mapCamera, scene, send, (visible) => {
     if (roadLayer) roadLayer.visible = visible;
+  }, {
+    houseAt: (p) => (latestTown ? houses?.houseAt(p) ?? null : null),
+    select: selectHouse,
   });
 
   const drawNetwork = (network: Network): void => {
@@ -102,6 +119,8 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     if (msg.type === 'ready') {
       const { scenario } = msg;
       scene.add(buildDecor(scenario.decor));
+      houses = new HouseLayer(scenario.decor.houses);
+      scene.add(houses.group);
       drawNetwork(scenario.network);
       if (editor) editor.accept([]);
       vehicles = new VehicleLayer(msg.capacity);
@@ -121,6 +140,9 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
       editor?.waitForTraffic();
     } else if (msg.type === 'editRejected') {
       editor?.reject(msg.reason);
+    } else if (msg.type === 'town') {
+      latestTown = msg.view;
+      for (const household of msg.view.households) houses?.setLevel(household.home, household.level);
     } else if (msg.type === 'frame') {
       vehicles?.push(msg, performance.now());
       latestStats = msg.stats;
@@ -165,6 +187,9 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     undoRoad: () => editor?.undo(),
     cancelRoadEdit: () => editor?.cancel(),
     stats: () => (ready ? latestStats : null),
+    town: () => latestTown,
+    selectedHouse: () => selectedHouse,
+    selectHouse,
     fps: () => fps,
     speed: () => speed,
     setSpeed(next) {

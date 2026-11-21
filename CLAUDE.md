@@ -68,6 +68,7 @@ The editor previews a placement with the same planner the worker uses to accept 
 - **Lanes** are polylines with a speed limit and `next` lanes. Junctions are connector lanes.
   `NetworkBuilder.build()` throws if connected lanes do not touch or give-way rules are inconsistent.
 - **Car following**: IDM (`traffic/idm.ts`), looking ahead up to 90 m along the vehicle's route, through lane ends.
+  A car heading for a building slows to a turning speed (4 m/s) for its driveway; sinks are left at road speed.
 - **Give way**: a lane with `yieldTo` stops at its end unless no priority vehicle arrives within a time window
   (`World.mergeBlocked`). Drivers within 1.5 m are committed, and cars on the priority road treat them as leaders.
 - **Routing**: per-destination next-hop tables (reverse Dijkstra on free-flow time). Vehicles store only a

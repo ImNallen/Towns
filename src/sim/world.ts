@@ -23,6 +23,8 @@ const PRIORITY_SCAN = 60;
 /** Priority vehicles arriving within [tMe - BEFORE, tMe + AFTER] of us block the merge (s). */
 const CONFLICT_BEFORE = 1.5;
 const CONFLICT_AFTER = 2.5;
+/** Speed for turning off the road into a driveway (m/s). */
+const TURN_SPEED = 4;
 /** A new car needs the car ahead this far beyond its own front bumper (m). */
 const SPAWN_SPACING = VEHICLE_LENGTH + IDM.minGap + 3;
 
@@ -340,6 +342,13 @@ export class World {
         cur = nxt;
         nxt = this.routing.nextHop(d, cur);
       }
+      // The route ends on `cur`. A building's driveway part-way along it is a turn to slow for;
+      // a sink at the lane end is not.
+      const exit = nxt < 0 ? this.routing.exit(d, cur) : Infinity;
+      if (exit < this.laneLen[cur]! && vi > TURN_SPEED) {
+        const toExit = dist - this.laneLen[cur]! + exit;
+        a = Math.min(a, (TURN_SPEED * TURN_SPEED - vi * vi) / (2 * Math.max(toExit, 2)));
+      }
       acc[i] = Math.max(a, -IDM.maxDecel);
     }
   }
@@ -588,10 +597,10 @@ export class World {
   }
 
   /**
-   * Write per-slot render data: positions as [x, y, heading] triples and ids (-1 = empty slot).
-   * Returns the number of slots written.
+   * Write per-slot render data: positions as [x, y, heading] triples, ids (-1 = empty slot) and
+   * the driver's household car model (0 = through traffic). Returns the number of slots written.
    */
-  writeSnapshot(positions: Float32Array, ids: Int32Array): number {
+  writeSnapshot(positions: Float32Array, ids: Int32Array, models: Uint8Array): number {
     const V = this.vehicles;
     const sample: PathSample = { x: 0, y: 0, hx: 0, hy: 0 };
     for (let i = 0; i < V.highWater; i++) {
@@ -604,6 +613,8 @@ export class World {
       positions[i * 3 + 1] = sample.y;
       positions[i * 3 + 2] = Math.atan2(sample.hy, sample.hx);
       ids[i] = V.id[i]!;
+      const owner = V.owner[i]!;
+      models[i] = owner >= 0 && this.town ? this.town.carModelOf(owner) : 0;
     }
     return V.highWater;
   }

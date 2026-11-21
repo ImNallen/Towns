@@ -5,6 +5,7 @@
   --ink: #293b32;
   --muted: #667269;
   --accent: #365e46;
+  --low: #a8573d;
   font-family: 'Avenir Next', Avenir, ui-sans-serif, system-ui, sans-serif;
   color: var(--ink);
   font-synthesis: none;
@@ -16,10 +17,14 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ground
 #map { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
 #map:active { cursor: grabbing; }
 #map:is([data-tool='road'], [data-tool='curve'], [data-tool='bulldoze']), #map:is([data-tool='road'], [data-tool='curve'], [data-tool='bulldoze']):active { cursor: crosshair; }
+#map[data-house], #map[data-house]:active { cursor: pointer; }
 #ui { position: fixed; inset: 0; pointer-events: none; }
 .hud { position: absolute; inset: 0; pointer-events: none; font-size: 12px; }
 .panel { pointer-events: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 3px 14px #263b2b0c; }
-.map-info { position: absolute; top: 24px; left: 24px; width: 300px; padding: 17px 18px 0; }
+.hud-column { position: absolute; top: 24px; bottom: 24px; display: flex; flex-direction: column; justify-content: space-between; gap: 10px; }
+.hud-column.left { left: 24px; width: 300px; }
+.hud-column.right { right: 24px; width: 300px; align-items: flex-end; }
+.map-info { padding: 17px 18px 0; flex: none; }
 .map-heading { display: flex; justify-content: space-between; align-items: center; }
 .wordmark { font-size: 11px; font-weight: 750; letter-spacing: .15em; text-transform: uppercase; }
 h1 { margin: 9px 0 18px; font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif; font-size: 29px; font-weight: 500; letter-spacing: -.035em; line-height: 1.1; }
@@ -34,7 +39,34 @@ h2 { margin: 2px 0 5px; font-size: 12px; line-height: 1.35; font-weight: 650; }
 .traffic-status { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
 .traffic-status i { width: 5px; height: 5px; background: #9a9f91; border-radius: 50%; }
 .traffic-status i.running { background: #568258; }
-.simulation { position: absolute; top: 24px; right: 24px; width: 220px; padding: 13px; }
+.panel-heading { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 10px; font-weight: 650; letter-spacing: .12em; text-transform: uppercase; }
+.town { padding: 12px 18px 11px; overflow: auto; min-height: 0; }
+.town-stats { grid-template-columns: repeat(3, 1fr); gap: 9px 12px; margin: 10px 0 11px; }
+.town-stats div { display: flex; flex-direction: column-reverse; }
+.town-stats dt { font-size: 10px; }
+.town-stats dd { text-align: left; font-size: 16px; font-weight: 550; line-height: 1.25; }
+.town-feed { list-style: none; margin: 0 -18px; padding: 10px 18px 0; border-top: 1px solid var(--line); display: grid; gap: 6px; }
+.town-feed li { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 11px; line-height: 1.4; }
+.town-feed time { flex: none; color: var(--muted); font-size: 10px; }
+.town-feed li:not(:first-child) span { color: var(--muted); }
+.simulation { width: 220px; padding: 13px; flex: none; }
+.household { width: 100%; padding: 12px 18px 12px; overflow: auto; min-height: 0; }
+.household .close { width: 24px; height: 24px; margin: -5px -8px -5px 0; font-size: 16px; line-height: 1; color: var(--muted); letter-spacing: 0; }
+.household-name { margin: 4px 0 2px; font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif; font-size: 22px; font-weight: 500; letter-spacing: -.02em; line-height: 1.2; }
+.household-meta { display: flex; justify-content: space-between; margin: 0 0 10px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.household-meta span { display: inline-flex; align-items: center; gap: 6px; }
+.car-swatch { width: 9px; height: 9px; border-radius: 3px; box-shadow: inset 0 0 0 1px #0000001a; }
+.needs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; margin: 0 -18px; padding: 10px 18px; border-top: 1px solid var(--line); }
+.need { display: grid; grid-template-columns: 58px 1fr; align-items: center; gap: 6px; font-size: 10px; color: var(--muted); }
+.need-bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.need-bar i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+.need-bar.low i { background: var(--low); }
+.members { list-style: none; margin: 0 -18px; padding: 10px 18px 0; border-top: 1px solid var(--line); display: grid; gap: 6px; }
+.members li { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.members li > div { display: flex; flex-direction: column; line-height: 1.25; }
+.members strong { font-size: 11px; font-weight: 650; }
+.members li > div span, .member-activity { color: var(--muted); font-size: 10px; }
+.member-activity { text-align: right; color: var(--ink); font-size: 11px; }
 .simulation-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-size: 10px; color: var(--muted); }
 .clock { font-variant-numeric: tabular-nums; letter-spacing: .03em; }
 .controls { display: flex; gap: 3px; }
@@ -69,11 +101,16 @@ button.bulldoze.active, button.bulldoze.active:hover { background: #904731; }
 .tool-divider { height: 24px; width: 1px; background: var(--line); margin: 0 3px; }
 
 @media (max-width: 640px) {
-  .map-info { top: 12px; left: 12px; width: min(280px, calc(100% - 24px)); padding: 13px 14px 0; }
+  .hud-column.left { top: 12px; bottom: auto; justify-content: flex-start; left: 12px; width: min(280px, calc(100% - 24px)); }
+  .map-info { padding: 13px 14px 0; }
+  .town { padding: 9px 14px 6px; }
+  .town-stats { margin: 8px 0 4px; }
+  .town-stats div:nth-child(n + 4), .town-feed { display: none; }
   h1 { font-size: 25px; margin-bottom: 13px; }
   .objective { margin-bottom: 13px; }
   .trip-summary { margin: 0 -14px; padding: 10px 14px; }
-  .simulation { top: auto; bottom: max(160px, calc(env(safe-area-inset-bottom) + 148px)); right: 12px; width: 190px; padding: 10px; }
+  .hud-column.right { top: auto; bottom: max(160px, calc(env(safe-area-inset-bottom) + 148px)); right: 12px; width: calc(100% - 24px); max-height: calc(100% - 172px); flex-direction: column-reverse; justify-content: flex-start; }
+  .simulation { width: 190px; padding: 10px; }
   .simulation-heading { margin-bottom: 6px; }
   .traffic-details { margin-top: 7px; padding-top: 6px; }
   .editor { bottom: max(12px, env(safe-area-inset-bottom)); max-width: calc(100% - 24px); gap: 7px; }
@@ -83,10 +120,18 @@ button.bulldoze.active, button.bulldoze.active:hover { background: #904731; }
   .tool kbd { display: none; }
 }
 
+@media (min-width: 641px) and (max-width: 1213px) {
+  /* The bottom panels would meet the centred toolbar, so they stop above it, and residents shrink to a summary. */
+  .hud-column { bottom: 170px; }
+  .hud-column.left { justify-content: flex-start; }
+  .town-stats div:nth-child(n + 4), .town-feed { display: none; }
+  .town-stats { margin-bottom: 2px; }
+}
+
 @media (max-height: 560px) and (min-width: 641px) {
-  .map-info, .simulation { top: 12px; }
-  .map-info { left: 12px; }
-  .simulation { right: 12px; }
+  .hud-column { top: 12px; bottom: 12px; }
+  .hud-column.left { left: 12px; }
+  .hud-column.right { right: 12px; }
   .editor { bottom: 12px; }
 }
 

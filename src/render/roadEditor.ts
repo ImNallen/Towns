@@ -25,11 +25,22 @@ export interface EditorState {
 }
 
 const CHAIN_HINT = 'Click to place the next point. Click the last point or press Esc to finish.';
+const HOUSE_HINT = 'Click to see who lives here.';
+/** A press that moves further than this (px) is a drag, not a click. */
+const CLICK_SLOP = 6;
+
+/** Houses the player can click to inspect. */
+export interface HousePicker {
+  houseAt(p: Vec2): number | null;
+  select(house: number | null): void;
+}
 
 type EditPhase =
   | { kind: 'idle' }
   | { kind: 'drawing'; id: number; host: StreetPoint | undefined; start: Vec2; press: Vec2; pointer: PointerEvent }
   | { kind: 'removing'; id: number; segment: number; press: Vec2 }
+  /** A press on a house (or, with the pan tool, on open ground) that selects it if released in place. */
+  | { kind: 'selecting'; id: number; house: number | null; press: Vec2 }
   | { kind: 'bending'; start: Vec2; end: Vec2; id: number | null }
   | { kind: 'chaining'; host: StreetPoint | undefined; start: Vec2; id: number | null }
   | { kind: 'pending'; chain?: { from: Vec2; to: Vec2 } }
@@ -91,6 +102,7 @@ export class RoadEditor {
     private readonly scene: THREE.Scene,
     private readonly send: (msg: ToWorker) => void,
     private readonly setRoadVisibility: (visible: boolean) => void,
+    private readonly houses: HousePicker,
   ) {
     const { signal } = this.abort;
     canvas.dataset.tool = this.tool;
@@ -283,7 +295,13 @@ export class RoadEditor {
   }
 
   private begin(e: PointerEvent): void {
-    if (e.button !== 0 || !e.isPrimary || this.tool === 'pan') return;
+    if (e.button !== 0 || !e.isPrimary) return;
+    const press = { x: e.clientX, y: e.clientY };
+    if (this.tool === 'pan') {
+      // The camera pans on the same press; a drag cancels the selection.
+      if (this.phase.kind === 'idle') this.phase = { kind: 'selecting', id: e.pointerId, house: this.houses.houseAt(this.world(e)), press };
+      return;
+    }
     this.move = null;
     if (this.phase.kind === 'bending' || this.phase.kind === 'chaining') {
       this.phase.id = e.pointerId;
@@ -293,6 +311,13 @@ export class RoadEditor {
     }
     if (this.phase.kind !== 'idle') return;
     const cursor = this.world(e);
+    const house = this.clickableHouse(cursor);
+    if (house !== null) {
+      this.mark();
+      this.phase = { kind: 'selecting', id: e.pointerId, house, press };
+      this.canvas.setPointerCapture(e.pointerId);
+      return;
+    }
     if (this.tool === 'bulldoze') {
       const segment = this.segmentAt(cursor);
       this.highlight(segment);
@@ -314,14 +339,36 @@ export class RoadEditor {
     this.canvas.setPointerCapture(e.pointerId);
   }
 
+  /** A house under the cursor that a click selects rather than starting a road from a nearby street. */
+  private clickableHouse(cursor: Vec2): number | null {
+    if (this.tool === 'bulldoze') return null;
+    const house = this.houses.houseAt(cursor);
+    return house !== null && (this.tool === 'pan' || !this.snap(cursor)) ? house : null;
+  }
+
   private point(e: PointerEvent, release: boolean): void {
-    if (!e.isPrimary || this.tool === 'pan') return;
+    if (!e.isPrimary) return;
     if (release) this.move = null;
     const phase = this.phase;
+    if (phase.kind === 'selecting') {
+      if (phase.id !== e.pointerId) return;
+      // Leave pointer capture alone: with the pan tool it belongs to the camera, and it ends on release anyway.
+      const moved = Math.hypot(e.clientX - phase.press.x, e.clientY - phase.press.y) > CLICK_SLOP;
+      if (moved || release) this.phase = { kind: 'idle' };
+      if (!moved && release) this.houses.select(phase.house);
+      return;
+    }
     const cursor = this.world(e);
+    if (phase.kind === 'idle') {
+      const overHouse = this.clickableHouse(cursor) !== null;
+      this.canvas.toggleAttribute('data-house', overHouse);
+      if (overHouse) this.hint = HOUSE_HINT;
+      else if (this.hint === HOUSE_HINT) this.hint = '';
+    }
+    if (this.tool === 'pan') return;
     if (phase.kind === 'removing') {
       if (phase.id !== e.pointerId) return;
-      if (Math.hypot(e.clientX - phase.press.x, e.clientY - phase.press.y) > 6 || this.segmentAt(cursor) !== phase.segment) {
+      if (Math.hypot(e.clientX - phase.press.x, e.clientY - phase.press.y) > CLICK_SLOP || this.segmentAt(cursor) !== phase.segment) {
         this.finish();
       } else if (release) {
         this.phase = { kind: 'pending' };

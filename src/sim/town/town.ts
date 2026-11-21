@@ -120,7 +120,8 @@ export type TownEventView = { day: number; minute: number; household: number } &
   | { kind: 'boughtCar'; cars: number }
   | { kind: 'newerCar'; model: number }
   | { kind: 'upgradedHouse'; level: number }
-  | { kind: 'newJob' | 'changedJob' | 'lostJob'; region: string }
+  /** `person` is the member's `PersonView.id`. */
+  | { kind: 'newJob' | 'changedJob' | 'lostJob'; region: string; person: number }
 );
 
 export interface TownView {
@@ -199,6 +200,7 @@ export class Town {
   private readonly eventHousehold: Int16Array;
   private readonly eventKind: Uint8Array;
   private readonly eventDetail: Int16Array;
+  private readonly eventPerson: Int16Array;
   private eventHead = 0;
   private eventCount = 0;
 
@@ -236,6 +238,7 @@ export class Town {
     this.eventHousehold = new Int16Array(EVENT_CAPACITY);
     this.eventKind = new Uint8Array(EVENT_CAPACITY);
     this.eventDetail = new Int16Array(EVENT_CAPACITY);
+    this.eventPerson = new Int16Array(EVENT_CAPACITY);
 
     const rng = this.rng;
     for (let h = 0; h < H; h++) {
@@ -271,7 +274,7 @@ export class Town {
     for (const key of [
       'surname', 'funds', 'wages', 'level', 'cars', 'carModel', 'pantry', 'firstMember', 'memberCount', 'adults',
       'household', 'role', 'age', 'firstName', 'job', 'activity', 'errand', 'at', 'arrivedAt', 'until', 'workedDay',
-      'early', 'eventDay', 'eventMinute', 'eventHousehold', 'eventKind', 'eventDetail',
+      'early', 'eventDay', 'eventMinute', 'eventHousehold', 'eventKind', 'eventDetail', 'eventPerson',
     ] as const) this[key].set(source[key]);
     this.people = source.people;
     this.carsBought = source.carsBought;
@@ -435,7 +438,7 @@ export class Town {
         continue;
       }
       this.job[p] = -1;
-      this.record(minute, this.household[p]!, LOST_JOB, job);
+      this.record(minute, this.household[p]!, LOST_JOB, job, p);
     }
     // Make the single most valuable hire or switch until none is left, so a job goes to
     // whoever gains most from it (locals before long-distance commuters). Every move raises
@@ -465,7 +468,7 @@ export class Town {
       if (current >= 0) this.filled[current]--;
       this.filled[region]++;
       this.job[person] = region;
-      this.record(minute, this.household[person]!, current < 0 ? NEW_JOB : CHANGED_JOB, region);
+      this.record(minute, this.household[person]!, current < 0 ? NEW_JOB : CHANGED_JOB, region, person);
     }
   }
 
@@ -518,13 +521,14 @@ export class Town {
     this.record(minute, h, UPGRADED_HOUSE, this.level[h]!);
   }
 
-  private record(minute: number, h: number, kind: number, detail: number): void {
+  private record(minute: number, h: number, kind: number, detail: number, person = -1): void {
     const i = (this.eventHead + this.eventCount) % EVENT_CAPACITY;
     this.eventDay[i] = dayOf(minute);
     this.eventMinute[i] = minute % MINUTES_PER_DAY;
     this.eventHousehold[i] = h;
     this.eventKind[i] = kind;
     this.eventDetail[i] = detail;
+    this.eventPerson[i] = person;
     if (this.eventCount < EVENT_CAPACITY) this.eventCount++;
     else this.eventHead = (this.eventHead + 1) % EVENT_CAPACITY;
   }
@@ -548,6 +552,11 @@ export class Town {
   }
 
   // --- Output -------------------------------------------------------------------
+
+  /** Model of the cars in person `p`'s household (1 = oldest). */
+  carModelOf(p: number): number {
+    return this.carModel[this.household[p]!]!;
+  }
 
   hash(mix: (x: number) => void): void {
     for (let h = 0; h < this.spec.homes.length; h++) {
@@ -620,13 +629,14 @@ export class Town {
       const i = (this.eventHead + k) % EVENT_CAPACITY;
       const at = { day: this.eventDay[i]!, minute: this.eventMinute[i]!, household: this.eventHousehold[i]! };
       const detail = this.eventDetail[i]!;
+      const person = this.eventPerson[i]!;
       switch (this.eventKind[i]) {
         case BOUGHT_CAR: events.push({ ...at, kind: 'boughtCar', cars: detail }); break;
         case NEWER_CAR: events.push({ ...at, kind: 'newerCar', model: detail }); break;
         case UPGRADED_HOUSE: events.push({ ...at, kind: 'upgradedHouse', level: detail }); break;
-        case NEW_JOB: events.push({ ...at, kind: 'newJob', region: regions[detail]!.name }); break;
-        case CHANGED_JOB: events.push({ ...at, kind: 'changedJob', region: regions[detail]!.name }); break;
-        case LOST_JOB: events.push({ ...at, kind: 'lostJob', region: regions[detail]!.name }); break;
+        case NEW_JOB: events.push({ ...at, kind: 'newJob', region: regions[detail]!.name, person }); break;
+        case CHANGED_JOB: events.push({ ...at, kind: 'changedJob', region: regions[detail]!.name, person }); break;
+        case LOST_JOB: events.push({ ...at, kind: 'lostJob', region: regions[detail]!.name, person }); break;
       }
     }
     return {
