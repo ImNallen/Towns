@@ -1,3 +1,4 @@
+import { AvenueLanes } from './traffic/avenueLanes';
 import { TrafficConditions } from './traffic/conditions';
 import { nextActuatedClock, signalAspect } from './network/signals';
 import { parksOn } from './town/parks';
@@ -82,6 +83,7 @@ export class World {
   readonly vehicles: Vehicles;
 
   private readonly lanes: Lane[];
+  private readonly avenueLanes?: AvenueLanes;
   private readonly yieldingMovements: number[][];
   private readonly rng: Rng;
   private town: Town | null;
@@ -129,6 +131,7 @@ export class World {
     this.network = scenario.network;
     this.traffic = new TrafficConditions(this.network);
     this.lanes = scenario.network.lanes;
+    if (this.network.avenuePairs?.length) this.avenueLanes = new AvenueLanes(this.network);
     this.yieldingMovements = this.lanes.map(() => []);
     for (const lane of this.lanes) {
       for (const priority of lane.crossingYieldTo) this.yieldingMovements[priority]!.push(lane.id);
@@ -204,6 +207,7 @@ export class World {
     this.walkers?.step(DT,this.vehicles,this.tick);
     if (this.town && this._tick % TICKS_PER_MINUTE === 0) this.town.update(this.minute(), this, this.admissionsOpen);
     this.buildBuckets();
+    this.avenueLanes?.update(this.vehicles, this.routing, this.bucketCount, this.bucketStart, this.order);
     this.computeAccelerations();
     this.integrate();
     for (const index of this.actuatedJunctions) {
@@ -343,6 +347,39 @@ export class World {
     // A split can put two cars on opposite sides of a lane boundary. Check spacing
     // along each driver's new route, rather than only inside individual lanes.
     edited.buildBuckets();
+    const adjusted = allowLaneShift && this.avenueLanes ? new Uint8Array(V.highWater) : undefined;
+    // Allow one tick to react, then brake comfortably to the leader's speed.
+    const brakingRoom = (slot: number, leaderSpeed: number) => {
+      const speed = edited.vehicles.v[slot]!;
+      return IDM.minGap + DT * speed + Math.max(0, speed * speed - leaderSpeed * leaderSpeed) / (2 * V.brake[slot]!);
+    };
+    if (adjusted) {
+      // Narrowing can project two parallel queues onto the same carriageway.
+      // Preserve their front-to-back order and leave each follower braking room.
+      const next = edited.vehicles;
+      for (const road of edited.lanes) {
+        if (road.kind !== 'road') continue;
+        const first = edited.bucketStart[road.id]!, end = first + edited.bucketCount[road.id]!;
+        for (let k = first + 1; k < end; k++) {
+          const lead = edited.order[k-1]!, car = edited.order[k]!;
+          if (V.lane[lead] === V.lane[car] && !adjusted[lead]) continue;
+          const rear = next.s[lead]! - next.length[lead]!;
+          const gap = rear - next.s[car]!;
+          if (gap < IDM.minGap) {
+            const front = rear - IDM.minGap;
+            if (front < 0 || edited.walkers?.graph.stops[road.id]?.some(stop =>
+              front - next.length[car]! <= stop.to && next.s[car]! >= stop.from)) return fail(car);
+            next.s[car] = front;
+            edited.laneMinRear[road.id] = Math.min(edited.laneMinRear[road.id]!, front - next.length[car]!);
+            adjusted[car] = 1;
+          }
+          if (next.v[car]! > next.v[lead]! && gap < brakingRoom(car, next.v[lead]!)) {
+            next.v[car] = next.v[lead]!;
+            adjusted[car] = 1;
+          }
+        }
+      }
+    }
     for (let slot = 0; slot < V.highWater; slot++) {
       if (!edited.vehicles.alive[slot]) continue;
       const lane = edited.vehicles.lane[slot]!;
@@ -354,9 +391,15 @@ export class World {
       }
       let distance = edited.laneLen[lane]! - s;
       let next = edited.routing.nextHop(edited.vehicles.dest[slot]!, lane);
-      while (next >= 0 && distance < MAX_LENGTH) {
-        if (edited.bucketCount[next]! > 0
-          && distance + edited.vehicles.s[edited.tail(next)]! < V.length[edited.tail(next)]! - 1e-4) return fail(slot);
+      const scan = MAX_LENGTH + (adjusted ? brakingRoom(slot, 0) : 0);
+      while (next >= 0 && distance < scan) {
+        if (edited.bucketCount[next]! > 0) {
+          const leader = edited.tail(next);
+          const gap = distance + edited.vehicles.s[leader]! - V.length[leader]!;
+          if (gap < -1e-4) return fail(slot);
+          if (adjusted?.[leader] && edited.vehicles.v[slot]! > edited.vehicles.v[leader]!
+            && gap < brakingRoom(slot, edited.vehicles.v[leader]!)) return fail(slot);
+        }
         distance += edited.laneLen[next]!;
         next = edited.routing.nextHop(edited.vehicles.dest[slot]!, next);
       }
@@ -429,6 +472,11 @@ export class World {
 
   // --- Driving ----------------------------------------------------------------
 
+  private nextForVehicle(slot: number, lane: number): number {
+    const chosen = this.avenueLanes?.choice(lane, this.vehicles.id[slot]!) ?? -1;
+    return chosen >= 0 ? chosen : this.routing.nextHop(this.vehicles.dest[slot]!, lane);
+  }
+
   private computeAccelerations(): void {
     const V = this.vehicles;
     const { s, v, lane, dest, acc } = V;
@@ -464,10 +512,17 @@ export class World {
       if (this.lanes[L]!.yieldTo.length > 0) a = Math.min(a, this.yieldAccel(i, L, dist, vi, v0));
 
       let cur = L;
-      let nxt = this.routing.nextHop(d, cur);
+      let nxt = this.nextForVehicle(i, cur);
       while (nxt >= 0 && dist < LOOKAHEAD) {
         if (this.reserveEntry[nxt]) {
-          if (this.entryBlocked(nxt)) a = Math.min(a, idmAccel(vi, v0, Math.max(0, dist - 4), vi, V.maxAccel[i]!, V.brake[i]!));
+          const alternate = this.avenueLanes?.alternative[nxt] ?? -1;
+          const clearance = alternate >= 0 ? this.clearanceTime(alternate) : 0;
+          if (this.entryBlocked(nxt, alternate) || clearance === Infinity) {
+            a = Math.min(a, idmAccel(vi, v0, Math.max(0, dist - 4), vi, V.maxAccel[i]!, V.brake[i]!));
+          } else if (clearance > 0) {
+            // Pace the approach to reach the fork just after the leading car clears.
+            a = Math.min(a, 2 * (dist - IDM.minGap - vi * clearance) / (clearance * clearance));
+          }
         }
         if (this.signalGroups[nxt]! < 0 && (this.lanes[nxt]!.crossingYieldTo.length || this.yieldingMovements[nxt]!.length) && dist < YIELD_ZONE
           && dist >= COMMIT_DISTANCE && this.junctionBlocked(nxt, dist, vi)) {
@@ -545,7 +600,7 @@ export class World {
       const v = this.vehicles;
       if (v.alive[driver] && v.lane[driver] === arm.incoming
         && this.laneLen[arm.incoming]! - v.s[driver]! < distance
-        && this.routing.nextHop(v.dest[driver]!, arm.incoming) >= 0) return true;
+        && this.nextForVehicle(driver, arm.incoming) >= 0) return true;
     }
     return false;
   }
@@ -558,25 +613,40 @@ export class World {
     return false;
   }
 
-  private entryBlocked(movement: number): boolean {
+  private entryBlocked(movement: number, pacedFork = -1): boolean {
     const signal = this.movementSignal[movement]!;
     const clock = signal < 0 ? this.tick : this.signalClocks[signal]!;
     if (this.signalGroups[movement]! >= 0 && signalAspect(this.signalGroups[movement]!, clock) !== 'green') return true;
     if (this.reserveEntry[movement] === 2) for (const sibling of this.lanes[this.lanes[movement]!.prev[0]!]!.next) {
-      if (sibling !== movement && (this.bucketCount[sibling]! || this.enteredAt[sibling] === this.tick)) return true;
+      if (sibling === movement || sibling === pacedFork) continue;
+      if (this.avenueLanes?.alternative[movement] === sibling) {
+        if (this.clearanceTime(sibling) > 0) return true;
+      } else if (this.bucketCount[sibling] || this.enteredAt[sibling] === this.tick) return true;
     }
-    for (const other of this.lanes[movement]!.crossingYieldTo) if (this.movementOccupied(other)) return true;
-    for (const other of this.yieldingMovements[movement]!) if (this.movementOccupied(other)) return true;
+    for (const other of this.lanes[movement]!.crossingYieldTo) if (this.clearanceTime(other) > 0) return true;
+    for (const other of this.yieldingMovements[movement]!) if (this.clearanceTime(other) > 0) return true;
     return false;
   }
 
-  private movementOccupied(other: number): boolean {
-    if (this.bucketCount[other]! > 0 || this.enteredAt[other] === this.tick) return true;
-    const outgoing = this.lanes[other]!.next[0]!;
-    if (this.laneMinRear[outgoing]! >= 0) return false;
-    if (this.movementSignal[other]! < 0 || !this.bucketCount[outgoing]) return true;
-    const slot = this.tail(outgoing);
-    return this.previousVehicle[slot] !== this.vehicles.id[slot] || this.previousMovement[slot] === other;
+  /** Seconds for the rear bumper to clear at current speed. Unknown or stopped
+   * traffic holds the reservation. Integration always checks actual clearance. */
+  private clearanceTime(movement: number): number {
+    if (this.enteredAt[movement] === this.tick) return Infinity;
+    const v = this.vehicles;
+    let slot: number, remaining: number;
+    if (this.bucketCount[movement]) {
+      slot = this.tail(movement);
+      remaining = this.laneLen[movement]! - v.s[slot]! + v.length[slot]!;
+    } else {
+      const outgoing = this.lanes[movement]!.next[0]!;
+      remaining = -this.laneMinRear[outgoing]!;
+      if (remaining <= 0) return 0;
+      if ((this.movementSignal[movement]! < 0 && this.reserveEntry[movement] !== 2) || !this.bucketCount[outgoing]) return Infinity;
+      slot = this.tail(outgoing);
+      if (this.previousVehicle[slot] !== v.id[slot]) return Infinity;
+      if (this.previousMovement[slot] !== movement) return 0;
+    }
+    return v.v[slot]! > 0 ? remaining / v.v[slot]! : Infinity;
   }
 
   private junctionBlocked(movement: number, distance: number, speed: number): boolean {
@@ -604,7 +674,7 @@ export class World {
       }
       const first = this.order[this.bucketStart[upstream]!]!;
       const dest = V.dest[first]!;
-      if (this.routing.nextHop(dest, upstream) !== lane) continue;
+      if (this.nextForVehicle(first, upstream) !== lane) continue;
       let next = lane;
       for (let step = 0; step < depth && next !== movement; step++) next = this.routing.nextHop(dest, next);
       if (next !== movement) continue;
@@ -628,7 +698,7 @@ export class World {
 
   /** Does a priority vehicle on `lane` (or upstream of it) reach the merge around time `tMe`? */
   private priorityArrives(lane: number, towards: number, offset: number, tMe: number, depth: number): boolean {
-    const { s, v, dest } = this.vehicles;
+    const { s, v } = this.vehicles;
     const len = this.laneLen[lane]!;
     const start = this.bucketStart[lane]!;
     const count = this.bucketCount[lane]!;
@@ -636,7 +706,7 @@ export class World {
       const j = this.order[start + q]!;
       const toMerge = offset + len - s[j]!;
       if (toMerge > PRIORITY_SCAN) continue;
-      if (this.routing.nextHop(dest[j]!, lane) !== towards) continue;
+      if (this.nextForVehicle(j, lane) !== towards) continue;
       const t = toMerge / Math.max(v[j]!, 1);
       if (t > tMe - CONFLICT_BEFORE && t < tMe + CONFLICT_AFTER) return true;
     }
@@ -694,7 +764,7 @@ export class World {
           break;
         }
         if (si < this.laneLen[L]!) break;
-        const nh = this.routing.nextHop(d, L);
+        const nh = this.nextForVehicle(i, L);
         if (nh < 0) {
           this.lost++;
           if (owner[i]! >= 0) this.town?.abandonTrip(owner[i]!);
@@ -709,7 +779,7 @@ export class World {
         }
         si -= this.laneLen[L]!;
         V.laneDelay[i] = 0;
-        if (this.movementSignal[L]! >= 0) {
+        if (this.movementSignal[L]! >= 0 || this.reserveEntry[L] === 2) {
           this.previousVehicle[i] = V.id[i]!;
           this.previousMovement[i] = L;
         }
@@ -899,7 +969,9 @@ export class World {
     mix(this.completed);
     for (let i = 0; i < V.highWater; i++) {
       if (!V.alive[i]) continue;
-      if (this.actuatedJunctions.length && this.previousVehicle[i] === V.id[i]) mix(this.previousMovement[i]!);
+      if (this.previousVehicle[i] === V.id[i]) mix(this.previousMovement[i]!);
+      const chosen = this.avenueLanes?.choice(V.lane[i]!, V.id[i]!) ?? -1;
+      if (chosen >= 0) mix(chosen);
       mix(V.id[i]!);
       mix(V.lane[i]!);
       mix(Math.round(V.s[i]! * 1e4));

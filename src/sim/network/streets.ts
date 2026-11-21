@@ -43,7 +43,7 @@ function turn(builder: NetworkBuilder, from: number, to: number): number {
 /** Portals have one regional source and sink. Fork each incoming trip onto its
  * routed lane and merge departing lanes before the regional boundary. */
 function avenueDirection(builder: NetworkBuilder, center: Polyline, speed: number,
-  width: number, startsAtPortal: boolean, endsAtPortal: boolean, reservations: number[]) {
+  width: number, startsAtPortal: boolean, endsAtPortal: boolean, reservations: number[], pairs: [number, number][]) {
   const lead = Math.min(6, center.length / 8);
   const start = startsAtPortal ? lead * 3 : 0;
   const end = center.length - (endsAtPortal ? lead * 3 : 0);
@@ -52,6 +52,7 @@ function avenueDirection(builder: NetworkBuilder, center: Polyline, speed: numbe
   const entry = startsAtPortal ? lane(0, lead, -width / 2) : undefined;
   const inner = lane(start, end, -width / 2);
   const outer = lane(start, end, -1.5 * width);
+  pairs.push([inner, outer]);
   const exit = endsAtPortal ? lane(center.length - lead, center.length, -width / 2) : undefined;
   if (entry !== undefined) reservations.push(turn(builder, entry, inner), turn(builder, entry, outer));
   if (exit !== undefined) {
@@ -98,6 +99,7 @@ export function buildStreetNetwork(
     if (widths.get(node)!.size > 1 || arms.length >= 3 || (arms.length === 2 && dot(arms[0]!, arms[1]!) > -0.999999)) mouthNodes.add(node);
   }
   const reservedMovements: number[] = [];
+  const avenuePairs: [number, number][] = [];
   const portalKeys = new Set(portals.map(key));
   const corners = new Map<string, { heading: number; left?: Vec2; right?: Vec2 }[]>();
   const pedestrianLinks: NonNullable<Network['pedestrianLinks']> = [];
@@ -122,8 +124,8 @@ export function buildStreetNetwork(
     let forward, backward;
     if (spec.lanesPerDirection === 2) {
       const firstPortal = portalKeys.has(key(first)), lastPortal = portalKeys.has(key(last));
-      forward = avenueDirection(builder, center, spec.speedLimit, spec.laneWidth, firstPortal, lastPortal, reservedMovements);
-      backward = avenueDirection(builder, reversePolyline(center), spec.speedLimit, spec.laneWidth, lastPortal, firstPortal, reservedMovements);
+      forward = avenueDirection(builder, center, spec.speedLimit, spec.laneWidth, firstPortal, lastPortal, reservedMovements, avenuePairs);
+      backward = avenueDirection(builder, reversePolyline(center), spec.speedLimit, spec.laneWidth, lastPortal, firstPortal, reservedMovements, avenuePairs);
       builder.addSurface('twoWay', center, half * 2, type);
     } else {
       const lanes = builder.addTwoWayRoad(center, {width: half * 2, laneWidth: spec.laneWidth, speedLimit: spec.speedLimit, roadType: type});
@@ -224,7 +226,7 @@ export function buildStreetNetwork(
   }
   const built = builder.build();
   const portalArms = portals.flatMap((p) => nodes.get(key(p)) ?? []);
-  const network: Network = { ...built, reservedMovements, junctions, pedestrianLinks, sinks: portalArms.map((arm) => arm.incoming) };
+  const network: Network = { ...built, avenuePairs, reservedMovements, junctions, pedestrianLinks, sinks: portalArms.map((arm) => arm.incoming) };
   const routing = new Routing(network);
   const connected = portals.length === 2 && portalArms.length === 2
     && portalArms.every((arm, i) => routing.canReach(1 - i, arm.outgoing));
