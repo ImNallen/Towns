@@ -150,6 +150,7 @@ export class HouseLayer {
     const gardens = new FlatMesh(0.042);
     // Paving covers the driveway ribbon inside the parcel, leaving the kerb entrance visible.
     const yards = new FlatMesh(0.054);
+    const gravel = new FlatMesh(0.055);
     const driveways = new FlatMesh(0.048);
     const hedges = new FlatMesh(0.08);
     const timber = new FlatMesh(0.35);
@@ -163,8 +164,7 @@ export class HouseLayer {
       const surface = blueprint.zone === 'workplaces' ? yards : gardens;
       surface.polygon(lot.corners);
       if (this.land) {
-        const ground = blueprint.zone === 'residential' ? gardens : yards;
-        const corners = extendYard(lot, blueprint, this.land, this.houses, { ground, hedge: hedges, marking: markings, trees, sheds, timber, straps });
+        const corners = extendYard(lot, blueprint, this.land, this.houses, { ground: gardens, paving: yards, gravel, hedge: hedges, marking: markings, trees, sheds, timber, straps });
         grown.set(id, { ...lot, corners });
       }
       driveways.ribbon(polyline([{ x: lot.streetX, y: lot.streetY }, lot]), 2.4);
@@ -186,7 +186,7 @@ export class HouseLayer {
     }
     const industrial = PALETTE.building.industrial;
     const surfaces = [
-      [hedges, PALETTE.building.hedge], [markings, industrial.marking], [timber, industrial.timber],
+      [gravel, PALETTE.yardGravel], [hedges, PALETTE.building.hedge], [markings, industrial.marking], [timber, industrial.timber],
       [straps, industrial.strap], [gardens, PALETTE.gardens[0]], [yards, industrial.apron], [driveways, PALETTE.roadSurface],
     ] as const;
     for (const [mesh, colour] of surfaces) {
