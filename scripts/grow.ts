@@ -4,7 +4,7 @@ import { plantValley, growTo } from './valley-layout';
 import { frameMessage } from '../src/worker/frame';
 
 const town = plantValley();
-const { world } = town;
+const { world } = town.session;
 for (const target of [150, 500, 1000]) {
   const count = growTo(town, target);
   const times = [];

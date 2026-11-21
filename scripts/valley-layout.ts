@@ -1,34 +1,22 @@
-import { valley, meadowZoning, type MeadowEdit } from '../src/sim/scenarios/meadow';
-import { World } from '../src/sim/world';
-import { editCost } from '../src/sim/town/budget';
+import { createSession } from '../src/worker/session';
+import type { EditCommand } from '../src/worker/save';
 import { decodeCellKey, type CellKey } from '../src/sim/zoning/cells';
-import { planZoneStroke, type LandUse } from '../src/sim/zoning/paint';
+import type { LandUse } from '../src/sim/zoning/paint';
 import type { RoadType } from '../src/sim/network/roadTypes';
 
 export function plantValley() {
-  const edits: MeadowEdit[] = [];
-  let world = new World(valley.meadowScenario(), 1);
+  const session = createSession({ scenario: 'valley', seed: 1 }, (message) => {
+    if (message.type === 'editRejected') throw new Error(message.reason);
+  });
   // Capital grant for the benchmark subdivision. The playable map starts with the normal treasury.
-  world.treasury!.balance += 150000;
-  function apply(edit: MeadowEdit) {
-    const cost = editCost(edits, edit, valley);
-    edits.push(edit);
-    if ('zone' in edit) {
-      world.setZoning(meadowZoning(edits, world.scenario.zones!));
-    } else {
-      const scenario = valley.meadowScenario(edits);
-      const result = world.editNetwork(scenario, meadowZoning(edits, scenario.zones!));
-      if (!result.ok) throw new Error(result.reason);
-      world = result.world;
-    }
-    const shortage = world.treasury!.book(cost);
-    if (shortage) throw new Error(shortage);
-    world.step();
+  session.world.treasury!.balance += 150000;
+  function apply(command: EditCommand) {
+    session.command(command);
+    if (session.pending) throw new Error('Benchmark edit is waiting for traffic');
+    session.world.step();
   }
-  function road(x: number, y: number, ex: number, ey: number, type: RoadType) {
-    const plan = valley.planMeadowRoad(edits, { x, y }, { x: ex, y: ey }, undefined, type);
-    if (!plan.ok) throw new Error(type + ' at ' + x + ',' + y + ': ' + plan.reason);
-    apply(plan.road);
+  function road(x: number, y: number, ex: number, ey: number, roadType: RoadType) {
+    apply({ type: 'buildRoad', start: { x, y }, end: { x: ex, y: ey }, roadType });
   }
   road(-870, 0, 180, 0, 'town');
   road(-800, 0, -800, -670, 'avenue');
@@ -36,18 +24,16 @@ export function plantValley() {
   road(-320, -630, -320, 0, 'town');
   road(80, -630, 80, 0, 'town');
   road(160, -300, 230, -300, 'parking');
-  for (const [i, j] of world.network.junctions!.entries()) {
+  for (const [i, j] of session.world.network.junctions!.entries()) {
     if (i >= 3) break;
-    apply({ lights: j.point, actuated: i % 2 === 0 });
+    apply({ type: 'buildLights', point: j.point, actuated: i % 2 === 0 });
   }
   for (const y of [-100, -300, -500]) {
     const p = { x: -420, y };
-    const plan = valley.planWalk(world.network, 'zebra', p, p);
-    if (typeof plan === 'string') throw new Error(plan);
-    apply(plan);
+    apply({ type: 'buildWalk', walk: 'zebra', start: p, end: p });
   }
 
-  const cells = world.scenario.zones!;
+  const cells = session.world.scenario.zones!;
   const released = new Set<CellKey>();
   function releaseDistrict(target: number) {
     const byUse = new Map<LandUse, CellKey[]>();
@@ -72,22 +58,18 @@ export function plantValley() {
     }
     const residential = byUse.get('residential')!;
     const park = (residential.shift()! - 1) as CellKey;
-    const paint = (use: LandUse, keys: CellKey[]) => {
-      const plan = planZoneStroke(cells, meadowZoning(edits, cells), use, keys);
-      if (!plan.ok) throw new Error(plan.reason);
-      apply(plan.stroke);
-    };
+    const paint = (zone: LandUse, cells: CellKey[]) => apply({ type: 'paintZone', zone, cells });
     paint('park', [park]);
     for (const use of ['parking', 'shops', 'workplaces', 'residential'] as const) {
       const keys = byUse.get(use);
       if (keys?.length) paint(use, keys);
     }
   }
-  return { world, edits, releaseDistrict };
+  return { session, releaseDistrict };
 }
 
 export function growTo(town: ReturnType<typeof plantValley>, target: number) {
-  const { world } = town;
+  const { world } = town.session;
   town.releaseDistrict(target);
   let count = 0;
   while (count < target) {

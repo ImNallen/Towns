@@ -141,12 +141,13 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   let scenarioName: string = options.scenario;
   const makeEditor = (name: string) => {
     const map = editableScenario(name);
-    return map ? new RoadEditor(canvas, mapCamera, scene, send, (visible) => {
-    if (roadLayer) roadLayer.visible = visible;
-  }, {
-    houseAt: (p) => (latestTown ? houses?.houseAt(p) ?? null : null),
-    select: selectHouse,
-  }, map) : null;
+    if (!map) return null;
+    return new RoadEditor(canvas, mapCamera, scene, send, (visible) => {
+      if (roadLayer) roadLayer.visible = visible;
+    }, {
+      houseAt: (p) => (latestTown ? houses?.houseAt(p) ?? null : null),
+      select: selectHouse,
+    }, map);
   };
 
   editor = makeEditor(scenarioName);
