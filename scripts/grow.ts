@@ -57,7 +57,7 @@ for (const target of [150, 500, 1000]) {
         before,
         after,
         snapshot,
-        edits: town.edits.length,
+        edits: town.session.edits.length,
         frameBytes: serialize(frame).length,
         hash: world.hash(),
       }),
