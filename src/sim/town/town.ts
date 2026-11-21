@@ -428,7 +428,8 @@ export class Town {
   }
 
   /** Preserve resident IDs and the random stream when edits resize the home and person arrays. */
-  copyFrom(source: Town, routing: Routing, minute: number): void {
+  copyFrom(source: Town, routing: Routing, minute: number): boolean {
+    let walkersPreserved = true;
     if (source.spec.homes.length > this.spec.homes.length || source.spec.regions.length !== this.spec.regions.length) {
       throw new Error('Town copy requires enough home slots and the same regions');
     }
@@ -535,7 +536,11 @@ export class Town {
         const d = Math.hypot(x-point.x-ratio*dx,y-point.y-ratio*dy);
         if (d < distance) { distance = d; nearest = i; along = s; }
       }
-      if (nearest < 0) { this.lost(p); continue; }
+      if (nearest < 0) {
+        walkersPreserved = false;
+        this.lost(p);
+        continue;
+      }
       this.walkers.start(p, dest, dest, this.age[p]!);
       this.walkers.node[p] = nearest;
       this.walkers.along[p] = along;
@@ -545,10 +550,11 @@ export class Town {
       this.filled.fill(0);
       for (let p = 0; p < this.people; p++) if (this.job[p]! >= 0) this.filled[this.job[p]!]++;
     }
+    return walkersPreserved;
   }
 
   /** Advance one game minute. `minute` counts from midnight before day 1. */
-  update(minute: number, roads: TownRoads): void {
+  update(minute: number, roads: TownRoads, allowDepartures: boolean): void {
     if (minute % 60 === 0) this.grow(minute, roads.routing);
     const clock = minute % MINUTES_PER_DAY;
     if (clock === 0) this.midnight(minute, roads.routing);
@@ -561,7 +567,7 @@ export class Town {
       if (phase === WALK_TO_CAR || phase === SEARCH) this.startDrive(p, roads, minute);
       else if (phase === WALK_TO_DOOR || phase === WALK_HOME) this.enterDoor(p, minute);
       else if (phase === RETURN_FAILED || phase === WALK_BACK || phase === SEEK_HOME) this.leaveRegion(p, roads, minute);
-      else if (this.activity[p] === HOME) this.leaveHome(p, day, clock, roads);
+      else if (allowDepartures && this.activity[p] === HOME) this.leaveHome(p, day, clock, roads);
       else if (this.activity[p] === AWAY && minute >= this.until[p]!) {
         if (this.at[p]! < this.spec.regions.length) { this.leaveRegion(p, roads, minute); continue; }
         if (this.driverCar[p]! < 0) {
