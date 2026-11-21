@@ -23,6 +23,7 @@ export class Vehicles {
   readonly topSpeed: Float64Array;
   readonly acc: Float64Array;
   /** Seconds lost relative to free flow on the current lane. */
+  readonly tripDelay: Float64Array;
   readonly laneDelay: Float64Array;
   readonly departTime: Float64Array;
 
@@ -49,6 +50,7 @@ export class Vehicles {
     this.brake = new Float64Array(capacity);
     this.topSpeed = new Float64Array(capacity);
     this.acc = new Float64Array(capacity);
+    this.tripDelay = new Float64Array(capacity);
     this.laneDelay = new Float64Array(capacity);
     this.departTime = new Float64Array(capacity);
     this.freeSlots = new Int32Array(capacity);
@@ -72,6 +74,7 @@ export class Vehicles {
     this.brake.set(source.brake);
     this.topSpeed.set(source.topSpeed);
     this.acc.set(source.acc);
+    this.tripDelay.set(source.tripDelay);
     this.laneDelay.set(source.laneDelay);
     this.departTime.set(source.departTime);
     this.freeSlots.set(source.freeSlots);
@@ -99,6 +102,7 @@ export class Vehicles {
     this.brake[slot] = type.brake;
     this.topSpeed[slot] = type.speed;
     this.acc[slot] = 0;
+    this.tripDelay[slot] = 0;
     this.laneDelay[slot] = 0;
     this.departTime[slot] = time;
     if (slot >= this.highWater) this.highWater = slot + 1;

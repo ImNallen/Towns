@@ -510,6 +510,8 @@ test('a neighbourhood park welcomes visitors after work',async({page})=>{
     game.selectHouse(home.home);
   });
   await expect(page.getByRole('region',{name:'Household'})).toContainText(/Parks add [1-9][0-9]* happiness points/);
+  await expect(page.locator('.happiness-reasons')).toContainText('Park nearby +');
+  await page.screenshot({path:'artifacts/screens/household-reasons.png'});
   await page.screenshot({path:'artifacts/screens/park-happiness.png'});
 });
 

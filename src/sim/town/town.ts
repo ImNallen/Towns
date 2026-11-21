@@ -1,3 +1,5 @@
+import { QUALITY } from './qualityOfLife';
+import type { TrafficConditions } from '../traffic/conditions';
 import { parkBenefit, PARK_BENEFITS, type Park } from './parks';
 import type { WalkRouting } from '../network/walkRouting';
 import { walkChance, WALK_CHOICE } from './mode';
@@ -24,6 +26,7 @@ export const CLOCK_START = 6 * 60 + 30;
 /** What the town needs from the world it lives in. */
 export interface TownRoads {
   readonly routing: Routing;
+  readonly traffic: TrafficConditions;
   trySpawnAt(lane: number, s: number, dest: number, owner: number, model: Model): boolean;
 }
 
@@ -133,6 +136,7 @@ export interface HouseholdView {
   nearbyPark?: { name: string; metres: number; happinessPoints: number };
   walkIssue?: string;
   happiness: number;
+  reasons: string[];
   members: PersonView[];
 }
 
@@ -284,6 +288,13 @@ export class Town {
   private readonly circled: Uint8Array;
   private readonly due: Int32Array;
   private readonly denied: Uint16Array;
+  private readonly commuteStart: Int32Array;
+  private readonly commute: Float32Array;
+  private readonly delay: Float32Array;
+  private readonly noise: Float32Array;
+  private readonly accessibleShop: Uint8Array;
+  private readonly unhappy: Uint8Array;
+  private readonly vacantUntil: Int32Array;
   private readonly frustration: Uint8Array;
   private readonly lotUpkeep: number;
   private readonly door: Vec2[];
@@ -324,6 +335,13 @@ export class Town {
     this.circled = new Uint8Array(P);
     this.due = new Int32Array(P);
     this.denied = new Uint16Array(H);
+    this.commuteStart = new Int32Array(P);
+    this.commute = new Float32Array(H);
+    this.delay = new Float32Array(H);
+    this.noise = new Float32Array(H);
+    this.accessibleShop = new Uint8Array(H);
+    this.unhappy = new Uint8Array(H);
+    this.vacantUntil = new Int32Array(H);
     this.frustration = new Uint8Array(H);
     this.door = spec.homes.map((h, i) => h.lot ?? houses[i] ?? { x: 0, y: 0 });
     this.walkers = new Walkers(new WalkingNetwork(network, this.door, parking.bays, previous, parks), P);
@@ -401,6 +419,7 @@ export class Town {
 
   private moveIn(h: number, start: number): void {
     const rng = this.rng;
+    this.commute[h] = this.delay[h] = this.unhappy[h] = this.frustration[h] = 0;
     this.wages[h] = 0;
     this.surname[h] = rng.int(SURNAMES.length);
     const adults = rng.next() < 0.6 ? 2 : 1;
@@ -479,7 +498,7 @@ export class Town {
     for (let p = 0; p < source.people; p++) this.target[p] = remap(source.target[p]!);
     this.treasury.copyFrom(source.treasury);
     for (const key of [
-      'walkIssue', 'modeDay', 'modeRoll', 'origin', 'driverCar', 'failed', 'circled', 'due', 'denied', 'frustration',
+      'commuteStart', 'commute', 'delay', 'noise', 'unhappy', 'vacantUntil', 'walkIssue', 'modeDay', 'modeRoll', 'origin', 'driverCar', 'failed', 'circled', 'due', 'denied', 'frustration',
       'taxable', 'taxesPaid', 'payroll', 'lastDailyCost', 'surname', 'funds', 'wages', 'level', 'cars', 'carModel', 'pantry', 'firstMember', 'memberCount', 'adults',
       'household', 'role', 'age', 'firstName', 'job', 'activity', 'errand', 'at', 'arrivedAt', 'until', 'workedDay',
       'deliveries', 'freightState', 'freightDue', 'open', 'customers', 'early', 'eventDay', 'eventMinute', 'eventHousehold', 'eventKind', 'eventDetail', 'eventPerson',
@@ -563,6 +582,7 @@ export class Town {
         this.abandonTrip(p);
       }
     }
+    this.updateWalkAccess();
     if (closed) this.jobMarket(routing, minute);
     else {
       this.filled.fill(0);
@@ -572,7 +592,15 @@ export class Town {
 
   /** Advance one game minute. `minute` counts from midnight before day 1. */
   update(minute: number, roads: TownRoads, allowDepartures: boolean): void {
-    if (minute % 60 === 0) this.grow(minute, roads.routing);
+    for (let h = 0; h < this.spec.homes.length; h++) {
+      let density = 0;
+      for (const a of this.spec.homes[h]!.access) density += roads.traffic.noiseDensity[a.lane]!;
+      this.noise[h] = clamp01((density - QUALITY.peacefulDensity) / QUALITY.noisyDensity);
+    }
+    if (minute % 60 === 0) {
+      this.grow(minute, roads.routing);
+      this.updateWalkAccess();
+    }
     const clock = minute % MINUTES_PER_DAY;
     if (clock === 0) this.midnight(minute, roads.routing);
     this.dispatchFreight(minute, roads);
@@ -640,6 +668,7 @@ export class Town {
       const owner = -2 - h;
       const access = roads.routing.bestAccess(home.access, depot.sink);
       if (access < 0) continue;
+      if (model === Model.Lorry && this.freightState[h] === IDLE && this.loadingBusy(h, true)) continue;
       if (this.freightState[h] === WAIT_KERB && !this.loadingBusy(h)) {
         this.freightState[h] = UNLOADING;
         this.freightDue[h] = minute + 15;
@@ -654,9 +683,9 @@ export class Town {
     }
   }
 
-  private loadingBusy(h: number): boolean {
+  private loadingBusy(h: number, includeApproaching = false): boolean {
     for (let i = 0; i < this.freightState.length; i++) {
-      if (this.loadingGroup[i] === this.loadingGroup[h] && this.freightState[i] === UNLOADING) return true;
+      if (this.loadingGroup[i] === this.loadingGroup[h] && (this.freightState[i] === UNLOADING || (includeApproaching && (this.freightState[i] === INBOUND || this.freightState[i] === WAIT_KERB)))) return true;
     }
     return false;
   }
@@ -672,7 +701,7 @@ export class Town {
     }
     this.freightState[h] = IDLE;
     const jobs = lotJobs(this.spec.homes[h]!.lot!);
-    this.freightDue[h] = minute + Math.ceil(MINUTES_PER_DAY / (1 + jobs / 2));
+    this.freightDue[h] = minute + Math.ceil(MINUTES_PER_DAY / (1 + jobs / (lotZone(this.spec.homes[h]!.lot!) === 'workplaces' ? QUALITY.freightJobsPerLoad : 2)));
     return false;
   }
 
@@ -710,19 +739,43 @@ export class Town {
     return Math.round(100 * (jobs + vacancies) / totalPressure);
   }
 
+  private updateWalkAccess(): void {
+    this.accessibleShop.fill(0);
+    for (let h = 0; h < this.level.length; h++) {
+      if (!this.level[h]) continue;
+      for (let b = 0; b < this.open.length; b++) {
+        if (this.open[b] && lotZone(this.spec.homes[b]!.lot!) === 'shops'
+          && this.walkers.graph.distance(h, b) <= QUALITY.nearbyMetres) {
+          this.accessibleShop[h] = 1;
+          break;
+        }
+      }
+    }
+  }
+
   private grow(minute: number, routing: Routing): void {
     for (const zone of ZONE_KINDS) {
       let next = -1, key = Infinity;
       for (let h = 0; h < this.spec.homes.length; h++) {
         const lot = this.spec.homes[h]!.lot;
-        if (lot && lotZone(lot) === zone && !this.level[h] && !this.open[h] && lot.key < key) {
+        if (minute >= this.vacantUntil[h]! && lot && lotZone(lot) === zone && !this.level[h] && !this.open[h] && lot.key < key) {
           next = h;
           key = lot.key;
         }
       }
       if (next < 0) { this.growth[zone] = 0; continue; }
       const growthBoost = zone === 'residential' ? PARK_BENEFITS.residentialGrowth * this.parkBonus[next]! / PARK_BENEFITS.pocketHappiness : 0;
-      this.growth[zone] += this.demandFor(zone) * (1 + growthBoost);
+      let appeal = 1;
+      if (zone === 'residential') {
+        let total = 0, occupied = 0;
+        for (let h = 0; h < this.level.length; h++) {
+          if (!this.level[h]) continue;
+          total += this.satisfaction(h);
+          occupied++;
+        }
+        if (occupied) appeal = Math.max(0.45, total / occupied / QUALITY.baseline);
+      }
+      this.growth[zone] += this.demandFor(zone) * (1 + growthBoost) * appeal;
       if (this.growth[zone] < GROWTH_THRESHOLD) continue;
       this.growth[zone] -= GROWTH_THRESHOLD;
       if (zone === 'residential') {
@@ -751,10 +804,11 @@ export class Town {
   }
 
   /** A resident's car reached its destination. */
-  arrived(p: number, minute: number): void {
+  arrived(p: number, minute: number, roadDelay = 0): void {
     if (this.activity[p] !== HOMEBOUND && this.activity[p] !== OUTBOUND) return;
     const back = this.activity[p] === HOMEBOUND;
     const home = this.household[p]!;
+    if (!back && this.errand[p] === WORK) this.delay[home] += (roadDelay - this.delay[home]!) * 0.5;
     const place = back ? home : this.at[p]! - this.spec.regions.length;
     if (place < 0) {
       this.activity[p] = WALK_TO_DOOR;
@@ -794,6 +848,12 @@ export class Town {
       this.driverCar[p] = -1;
       if (this.failed[p] && this.errand[p] === SHOP) this.due[p] = minute + 180;
       return;
+    }
+    if (this.errand[p] === WORK) {
+      const h = this.household[p]!;
+      const elapsed = minute - this.commuteStart[p]!;
+      this.commute[h] = this.commute[h] ? (this.commute[h]! + elapsed) / 2 : elapsed;
+      if (this.driverCar[p]! < 0) this.delay[h] *= 0.5;
     }
     this.activity[p] = AWAY;
     const slot = this.at[p]! - this.spec.regions.length;
@@ -879,7 +939,10 @@ export class Town {
     if (job >= 0 && this.workedDay[p] !== day) {
       const travel = this.outTime(h, job, roads.routing);
       if (clock >= SHIFT_START - travel - this.early[p]! && clock + travel <= SHIFT_END - MIN_SHIFT) {
-        if (this.depart(p, WORK, job, day)) this.workedDay[p] = day;
+        if (this.depart(p, WORK, job, day)) {
+          this.workedDay[p] = day;
+          this.commuteStart[p] = (day - 1) * MINUTES_PER_DAY + clock;
+        }
         return;
       }
     }
@@ -927,7 +990,7 @@ export class Town {
       return true;
     }
     if (this.freeCars(h) <= 0) {
-      if (!this.cars[h]) this.frustration[h] = 2;
+
       return false;
     }
     let car = h * 2;
@@ -1153,6 +1216,22 @@ export class Town {
       this.funds[h] -= this.dailyCost(h) + tax;
       this.pantry[h] = Math.max(0, this.pantry[h]! - 1);
     }
+    // Established neighbourhoods anchor the town. At most one developed lot empties in a day.
+    let moved = false;
+    for (let h = 0; h < this.level.length; h++) {
+      if (!this.level[h] || !this.spec.homes[h]!.lot) continue;
+      this.unhappy[h] = this.satisfaction(h) < QUALITY.moveOutBelow ? Math.min(255, this.unhappy[h]! + 1) : 0;
+      if (moved || this.unhappy[h]! < QUALITY.unhappyDays) continue;
+      let home = true;
+      for (let p = this.firstMember[h]!; p < this.firstMember[h]! + this.memberCount[h]!; p++) {
+        if (this.activity[p] !== HOME) home = false;
+      }
+      if (home) {
+        this.moveOut(h);
+        this.vacantUntil[h] = minute + MINUTES_PER_DAY * QUALITY.vacancyDays;
+        moved = true;
+      }
+    }
     this.treasury.close(this.spec.roadMetres, this.dailyRoadUpkeep);
     this.jobMarket(routing, minute);
     for (let h = 0; h < this.spec.homes.length; h++) if (this.level[h]) this.purchase(h, minute);
@@ -1236,6 +1315,7 @@ export class Town {
       if (spare >= ECONOMY.carPrice[model]!) this.buyCar(h, minute, spare);
       return;
     }
+    if (this.satisfaction(h) < QUALITY.upgradeMinimum) return;
     if (comfort < 1) {
       if (level < MAX_LEVEL && spare >= ECONOMY.housePrice[level + 1]!) this.upgradeHouse(h, minute);
       return;
@@ -1292,6 +1372,28 @@ export class Town {
   }
 
   // --- Needs --------------------------------------------------------------------
+
+  private satisfaction(h: number, reasons?: { name: string; points: number }[]): number {
+    let value: number = QUALITY.baseline;
+    value += this.effect(reasons, 'Low pantry', QUALITY.basicNeeds * (this.food(h) - 1));
+    value += this.effect(reasons, 'Crowded home', QUALITY.basicNeeds * (this.comfort(h) - 1));
+    value += this.effect(reasons, 'Shared car', QUALITY.basicNeeds * (this.mobility(h) - 1));
+    value += this.effect(reasons, 'Low savings', QUALITY.basicNeeds * (this.security(h) - 1));
+    value += this.effect(reasons, 'Long commute', -QUALITY.commutePenalty * clamp01((this.commute[h]! - QUALITY.shortCommute) / QUALITY.longCommute));
+    value += this.effect(reasons, 'Traffic delays', -QUALITY.delayPenalty * clamp01(this.delay[h]! / QUALITY.tolerableDelay));
+    value += this.effect(reasons, 'No parking nearby', -QUALITY.parkingPenaltyPerDay * this.frustration[h]!);
+    value += this.effect(reasons, 'Traffic noise', -QUALITY.noisePenalty * this.noise[h]!);
+    value += this.effect(reasons, 'Shops within walking distance', QUALITY.walkBonus * this.accessibleShop[h]!);
+    value += this.effect(reasons, 'Missing walking route', this.walkIssue[h]! >= 0 ? -QUALITY.walkPenalty : 0);
+    value += this.effect(reasons, 'Park nearby', this.parkBonus[h]!);
+    return clamp01(value);
+  }
+
+  private effect(reasons: { name: string; points: number }[] | undefined, name: string, value: number): number {
+    const points = Math.round(100 * value);
+    if (reasons && points) reasons.push({ name, points });
+    return value;
+  }
 
   private food(h: number): number {
     return clamp01(this.pantry[h]! / 2);
@@ -1358,6 +1460,11 @@ export class Town {
     this.failed.forEach(mix);
     this.circled.forEach(mix);
     this.frustration.forEach(mix);
+    this.commuteStart.forEach(mix);
+    this.commute.forEach(n => mix(Math.round(n * 100)));
+    this.delay.forEach(n => mix(Math.round(n * 100)));
+    this.unhappy.forEach(mix);
+    this.vacantUntil.forEach(mix);
     this.denied.forEach(mix);
     if (this.walkers.cleared) mix(this.walkers.cleared);
     this.walkers.goal.forEach(mix);
@@ -1423,8 +1530,10 @@ export class Town {
       const parkIndex=this.nearestPark[h]!;
       const park=this.parks[parkIndex];
       const metres=park ? this.walkers.graph.distance(h,this.parkPlace(parkIndex)) : Infinity;
-      const baseHappiness = Math.max(0,(needs.food + needs.comfort + needs.mobility + needs.security) / 4 - this.frustration[h]! * 0.04);
-      const happiness = Math.min(1, baseHappiness + this.parkBonus[h]!);
+      const factors: { name: string; points: number }[] = [];
+      const happiness = this.satisfaction(h, factors);
+      factors.sort((a, b) => Math.abs(b.points) - Math.abs(a.points));
+      const reasons = factors.slice(0, 3).map(f => f.name + ' ' + (f.points > 0 ? '+' : '−') + Math.abs(f.points));
       households.push({
         id: h,
         home: h,
@@ -1444,8 +1553,8 @@ export class Town {
         pantry: this.pantry[h]!,
         needs,
         walkIssue: this.walkIssue[h]! >= 0 && this.spec.homes[this.walkIssue[h]! - this.spec.regions.length]?.lot ? this.placeName(this.walkIssue[h]!) : undefined,
-        nearbyPark: park ? { name:park.name,metres:Math.round(metres), happinessPoints:Math.round((happiness-baseHappiness)*100) } : undefined,
-        happiness,
+        nearbyPark: park ? { name:park.name,metres:Math.round(metres), happinessPoints:Math.round(this.parkBonus[h]!*100) } : undefined,
+        happiness, reasons,
         members,
       });
     }
