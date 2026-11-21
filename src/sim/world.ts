@@ -109,6 +109,7 @@ export class World {
   /** Movement a vehicle just left, for rear-bumper clearance on the receiving lane. */
   private readonly previousMovement: Int32Array;
   private readonly previousVehicle: Int32Array;
+  private readonly reserveEntry: Uint8Array;
   private readonly enteredAt: Int32Array;
 
   private readonly spawners: Spawner[];
@@ -142,6 +143,8 @@ export class World {
     const n = this.lanes.length;
     this.previousMovement = new Int32Array(capacity).fill(-1);
     this.previousVehicle = new Int32Array(capacity);
+    this.reserveEntry = new Uint8Array(n);
+    for (const movement of this.network.reservedMovements ?? []) this.reserveEntry[movement] = 2;
     this.signalGroups = new Int8Array(n).fill(-1);
     this.enteredAt = new Int32Array(n).fill(-1);
     const junctions = this.network.junctions ?? [];
@@ -154,6 +157,7 @@ export class World {
       for (const arm of j.arms) for (const movement of this.lanes[arm.incoming]!.next) {
         if (j.actuated) this.movementSignal[movement] = index;
         this.signalGroups[movement] = arm.group;
+        this.reserveEntry[movement] ||= 1;
       }
     }
     this.laneLen = Float64Array.from(this.lanes, (l) => l.length);
@@ -268,7 +272,7 @@ export class World {
    * A removal or changed curve that cannot represent a car's current pose is deferred;
    * close admissions, keep stepping this world, and retry when traffic has cleared.
    */
-  editNetwork(scenario: Scenario, zoning: Zoning = this.zoning): { ok: true; world: World } | { ok: false; reason: string } {
+  editNetwork(scenario: Scenario, zoning: Zoning = this.zoning, allowLaneShift = false): { ok: true; world: World } | { ok: false; reason: string } {
     const edited = new World(scenario, 0, this.vehicles.capacity, this.tick, this.walkLimit, this.walkers?.graph.routing);
     if (this.town && scenario.town?.homes.length !== this.scenario.town?.homes.length) {
       return { ok: false, reason: 'The edited map must keep every home.' };
@@ -279,6 +283,8 @@ export class World {
     }
     const V = this.vehicles;
     const sinkCount = this.routing.sinks.length;
+    const minimumHeading = allowLaneShift ? 0.94 : 1 - 1e-6;
+    const positionTolerance = allowLaneShift ? 3.75 : 1e-4;
     const destinations = Array.from({ length: this.routing.destinations }, (_, dest) => {
       if (dest >= sinkCount) {
         // Buildings keep their index across edits; only the lanes that reach them change.
@@ -315,14 +321,14 @@ export class World {
           const dx = pts[k * 2 + 2]! - pts[k * 2]!;
           const dy = pts[k * 2 + 3]! - pts[k * 2 + 1]!;
           const length = cum[k + 1]! - cum[k]!;
-          if (length <= 0 || (dx * pose.hx + dy * pose.hy) / length < 1 - 1e-6) continue;
+          if (length <= 0 || (dx * pose.hx + dy * pose.hy) / length < minimumHeading) continue;
           const t = Math.max(0, Math.min(1, ((pose.x - pts[k * 2]!) * dx + (pose.y - pts[k * 2 + 1]!) * dy) / (length * length)));
           const s = cum[k]! + t * length;
           // sampleAt resolves a vertex's heading to the following segment, just as rendering does.
           const projected = sampleAt(lane.path, s, { x: 0, y: 0, hx: 0, hy: 0 });
-          if (projected.hx * pose.hx + projected.hy * pose.hy < 1 - 1e-6) continue;
+          if (projected.hx * pose.hx + projected.hy * pose.hy < minimumHeading) continue;
           const error = Math.hypot(projected.x - pose.x, projected.y - pose.y);
-          if (error > 1e-4 || (best && best.error <= error)) continue;
+          if (error > positionTolerance || (best && best.error <= error)) continue;
           best = { lane: lane.id, s, error };
         }
       }
@@ -460,9 +466,10 @@ export class World {
       let cur = L;
       let nxt = this.routing.nextHop(d, cur);
       while (nxt >= 0 && dist < LOOKAHEAD) {
-        if (this.signalGroups[nxt]! >= 0) {
-          if (this.signalBlocked(nxt)) a = Math.min(a, idmAccel(vi, v0, Math.max(0, dist - 4), vi, V.maxAccel[i]!, V.brake[i]!));
-        } else if ((this.lanes[nxt]!.crossingYieldTo.length || this.yieldingMovements[nxt]!.length) && dist < YIELD_ZONE
+        if (this.reserveEntry[nxt]) {
+          if (this.entryBlocked(nxt)) a = Math.min(a, idmAccel(vi, v0, Math.max(0, dist - 4), vi, V.maxAccel[i]!, V.brake[i]!));
+        }
+        if (this.signalGroups[nxt]! < 0 && (this.lanes[nxt]!.crossingYieldTo.length || this.yieldingMovements[nxt]!.length) && dist < YIELD_ZONE
           && dist >= COMMIT_DISTANCE && this.junctionBlocked(nxt, dist, vi)) {
           a = Math.min(a, idmAccel(vi, v0, dist, vi, V.maxAccel[i]!, V.brake[i]!));
         }
@@ -551,10 +558,13 @@ export class World {
     return false;
   }
 
-  private signalBlocked(movement: number): boolean {
+  private entryBlocked(movement: number): boolean {
     const signal = this.movementSignal[movement]!;
     const clock = signal < 0 ? this.tick : this.signalClocks[signal]!;
-    if (signalAspect(this.signalGroups[movement]!, clock) !== 'green') return true;
+    if (this.signalGroups[movement]! >= 0 && signalAspect(this.signalGroups[movement]!, clock) !== 'green') return true;
+    if (this.reserveEntry[movement] === 2) for (const sibling of this.lanes[this.lanes[movement]!.prev[0]!]!.next) {
+      if (sibling !== movement && (this.bucketCount[sibling]! || this.enteredAt[sibling] === this.tick)) return true;
+    }
     for (const other of this.lanes[movement]!.crossingYieldTo) if (this.movementOccupied(other)) return true;
     for (const other of this.yieldingMovements[movement]!) if (this.movementOccupied(other)) return true;
     return false;
@@ -692,18 +702,18 @@ export class World {
           break;
         }
         const enterRoom=this.crossingGap(nh,0);
-        if ((this.signalGroups[nh]! >= 0 && this.signalBlocked(nh)) || si-this.laneLen[L]! >= enterRoom) {
+        if ((this.reserveEntry[nh] && this.entryBlocked(nh)) || si-this.laneLen[L]! >= enterRoom) {
           si=this.laneLen[L]! - 0.0001;
           v[i]=0;
           break;
         }
         si -= this.laneLen[L]!;
-        if (this.signalGroups[nh]! >= 0) this.enteredAt[nh] = this.tick;
         V.laneDelay[i] = 0;
         if (this.movementSignal[L]! >= 0) {
           this.previousVehicle[i] = V.id[i]!;
           this.previousMovement[i] = L;
         }
+        if (this.reserveEntry[nh]) this.enteredAt[nh] = this.tick;
         L = nh;
       }
       s[i] = si;
