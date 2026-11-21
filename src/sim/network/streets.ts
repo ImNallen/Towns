@@ -68,6 +68,8 @@ export function buildStreetNetwork(
   for (const [node, arms] of headings) {
     if (arms.length >= 3 || (arms.length === 2 && dot(arms[0]!, arms[1]!) > -0.999999)) mouthNodes.add(node);
   }
+  const corners = new Map<string, { heading: number; left?: Vec2; right?: Vec2 }[]>();
+  const pedestrianLinks: NonNullable<Network['pedestrianLinks']> = [];
   const nodes = new Map<string, Arm[]>();
   for (const [index, points] of streets.entries()) {
     const path = polyline(points);
@@ -87,12 +89,25 @@ export function buildStreetNetwork(
     const spec = ROAD_TYPES[type];
     const half = spec.laneWidth * spec.lanesPerDirection;
     const lanes = builder.addTwoWayRoad(center, { width: half * 2, laneWidth: spec.laneWidth, speedLimit: spec.speedLimit, roadType: type });
+    const ends = [first, last].map((point, i) => {
+      const inward = i ? points[points.length - 2]! : points[1]!;
+      const arm: { heading: number; left?: Vec2; right?: Vec2 } = { heading: Math.atan2(inward.y - point.y, inward.x - point.x) };
+      const list = corners.get(key(point)) ?? [];
+      list.push(arm);
+      corners.set(key(point), list);
+      return arm;
+    });
     for (const side of ['left', 'right'] as const) {
       let edge = half;
       for (const strip of spec.strips) {
         if (strip.side !== 'both' && strip.side !== side) continue;
         const offset = (edge + strip.width / 2) * (side === 'left' ? 1 : -1);
-        builder.addSurface(strip.kind, offsetPolyline(center, offset), strip.width);
+        const path = offsetPolyline(center, offset);
+        builder.addSurface(strip.kind, path, strip.width);
+        if (strip.kind === 'pavement') {
+          ends[0]![side] = startOf(path);
+          ends[1]![side === 'left' ? 'right' : 'left'] = endOf(path);
+        }
         edge += strip.width;
       }
     }
@@ -135,9 +150,18 @@ export function buildStreetNetwork(
       builder.giveWayAtEntry(movement.id, priority.map((p) => p.id));
     }
   }
+  for (const arms of corners.values()) {
+    arms.sort((a, b) => a.heading - b.heading);
+    for (let i = 0; i < arms.length; i++) {
+      const { left, right } = arms[i]!;
+      const neighbour = arms[(i + 1) % arms.length]!.right;
+      if (arms.length > 1 && left && neighbour) pedestrianLinks.push({ a: left, b: neighbour, crossing: false });
+      if (arms.length !== 2 && left && right) pedestrianLinks.push({ a: left, b: right, crossing: true });
+    }
+  }
   const built = builder.build();
   const portalArms = portals.flatMap((p) => nodes.get(key(p)) ?? []);
-  const network: Network = { ...built, sinks: portalArms.map((arm) => arm.incoming) };
+  const network: Network = { ...built, pedestrianLinks, sinks: portalArms.map((arm) => arm.incoming) };
   const routing = new Routing(network);
   const connected = portals.length === 2 && portalArms.length === 2
     && portalArms.every((arm, i) => routing.canReach(1 - i, arm.outgoing));

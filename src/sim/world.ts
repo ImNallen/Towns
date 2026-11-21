@@ -35,6 +35,7 @@ const TURN_SPEED = 4;
 const SPAWN_SPACING = IDM.minGap + 3;
 
 export interface SimStats {
+  walkers: number;
   tick: number;
   /** Simulated seconds. */
   time: number;
@@ -99,7 +100,7 @@ export class World {
   private readonly completedPerSecond = new Uint32Array(60);
   private lastSecond = 0;
 
-  constructor(scenario: Scenario, seed: number, capacity = 4096, initialTick = 0) {
+  constructor(scenario: Scenario, seed: number, capacity = 4096, initialTick = 0, private readonly walkLimit?: number) {
     this._tick = initialTick;
     this.lastSecond = Math.floor(this.time);
     this.scenario = scenario;
@@ -114,7 +115,7 @@ export class World {
     this.routing = new Routing(this.network, [...homes.map(h => h.access), ...bays.map(b => b.access)]);
     this.vehicles = new Vehicles(capacity);
     this.rng = new Rng(seed);
-    this.town = scenario.town ? new Town(scenario.town, this.routing.sinks.length, seed, this.routing, new Parking(bays, this.routing.sinks.length + homes.length), scenario.decor.houses) : null;
+    this.town = scenario.town ? new Town(scenario.town, this.routing.sinks.length, seed, this.routing, new Parking(bays, this.routing.sinks.length + homes.length), scenario.decor.houses, this.network, this.walkLimit) : null;
 
     const n = this.lanes.length;
     this.laneLen = Float64Array.from(this.lanes, (l) => l.length);
@@ -148,7 +149,10 @@ export class World {
     return this._tick * DT;
   }
 
+  get walkers() { return this.town?.walkers; }
+
   step(): void {
+    this.walkers?.step(DT);
     if (this.town && this._tick % TICKS_PER_MINUTE === 0) this.town.update(this.minute(), this);
     this.buildBuckets();
     this.computeAccelerations();
@@ -203,7 +207,7 @@ export class World {
     }
     const bays = parkingBays(this.scenario, homes, zoning);
     this.routing = new Routing(this.network, [...homes.map(home => home.access), ...bays.map(b => b.access)]);
-    this.town = new Town({ ...base, homes }, this.routing.sinks.length, 0, this.routing, new Parking(bays, this.routing.sinks.length + homes.length), this.scenario.decor.houses, base.homes.length);
+    this.town = new Town({ ...base, homes }, this.routing.sinks.length, 0, this.routing, new Parking(bays, this.routing.sinks.length + homes.length), this.scenario.decor.houses, this.network, this.walkLimit, base.homes.length);
     this.town.copyFrom(previous, this.routing, this.minute());
   }
 
@@ -213,7 +217,7 @@ export class World {
    * close admissions, keep stepping this world, and retry when traffic has cleared.
    */
   editNetwork(scenario: Scenario, zoning: Zoning = this.zoning): { ok: true; world: World } | { ok: false; reason: string } {
-    const edited = new World(scenario, 0, this.vehicles.capacity, this.tick);
+    const edited = new World(scenario, 0, this.vehicles.capacity, this.tick, this.walkLimit);
     if (this.town && scenario.town?.homes.length !== this.scenario.town?.homes.length) {
       return { ok: false, reason: 'The edited map must keep every home.' };
     }
@@ -651,6 +655,7 @@ export class World {
     return {
       tick: this._tick,
       time: this.time,
+      walkers: this.walkers?.count ?? 0,
       active: V.count,
       spawned: this.spawned,
       completed: this.completed,

@@ -55,7 +55,7 @@ describe('parking', () => {
   it('requires the whole frontage, quotes the invoice, and refunds the lot on undo', () => {
     const plan = planZoneStroke(cells, new Map(), 'parking', lotCells);
     if (!plan.ok) throw new Error(plan.reason);
-    const world = new World(scenario, 1);
+    const world = new World(scenario, 1, 4096, 0, 0);
     const before = world.townView()!.budget;
     expect(editCost([], plan.stroke)).toBe(240);
     expect(world.treasury!.book(editCost([], plan.stroke))).toBeUndefined();
@@ -71,7 +71,7 @@ describe('parking', () => {
   });
 
   it('occupies the bay on arrival and reaches the door after the measured walk', () => {
-    const world = new World(scenario, 1);
+    const world = new World(scenario, 1, 4096, 0, 0);
     const paint = new Map<CellKey, LandUse>();
     for (const raw of cells.keys) {
       const key = raw as CellKey;
@@ -91,12 +91,10 @@ describe('parking', () => {
       const shop = view.businesses[0];
       if (!shop || resident?.place !== shop.name || resident.leg !== 'walk' || !shop.occupied) continue;
       const bay = view.bays.find(b => b.kind === 'yard' && b.model)!;
-      const distance = Math.hypot(shop.lot.x-bay.x, shop.lot.y-bay.y);
-      const due = (Math.floor(t/20) + walkMinutes(distance)) * 20;
       const person = () => world.townView()!.households.flatMap(h => h.members).find(p => p.id === owner)!;
-      while (world.tick < due) world.step();
-      expect(person().leg).toBe('walk');
-      world.step();
+      expect(world.walkers!.goal[owner]).toBeGreaterThanOrEqual(0);
+      expect(world.walkers!.graph.points[world.walkers!.node[owner]!]).toMatchObject({ x: bay.x, y: bay.y });
+      for (let steps=0; steps<2000 && person().leg === 'walk'; steps++) world.step();
       expect(person().activity).toBe('away');
       return;
     }
@@ -104,7 +102,7 @@ describe('parking', () => {
   });
 
   it('waits at the kerb while another delivery unloads, then takes the shared bay', () => {
-    const world = new World(scenario, 1);
+    const world = new World(scenario, 1, 4096, 0, 0);
     world.setZoning(new Map(Array.from(cells.keys, key => [key as CellKey, 'shops'])));
     world.setAdmissions(false);
     for (let tick = 0; tick < 6 * 28800; tick++) world.step();
@@ -132,7 +130,7 @@ describe('parking', () => {
   it('turns shoppers away from a shop without bays, then serves them with two public spaces', () => {
     const paint = new Map<CellKey, LandUse>([[524392 as CellKey, 'shops']]);
     const run = () => {
-      const world = new World(scenario, 1);
+      const world = new World(scenario, 1, 4096, 0, 0);
       world.setZoning(paint);
       let visits = 0, refusedShopper = false;
       for (let tick = 0; tick < 5 * 28800; tick++) {
@@ -163,7 +161,7 @@ describe('parking', () => {
       mixed.set(key, band < 3 ? 'residential' : band === 3 ? 'shops' : 'workplaces');
     }
     const run = () => {
-      const world = new World(scenario, 1);
+      const world = new World(scenario, 1, 4096, 0, 0);
       world.setZoning(mixed);
       let searched = false,
         walked = false,

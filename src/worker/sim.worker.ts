@@ -33,7 +33,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       const scenario = buildScenario(msg.scenario);
       edits = [];
       waiting = null;
-      world = new World(scenario, msg.seed, CAPACITY);
+      world = new World(scenario, msg.seed, CAPACITY, 0, msg.walkLimit);
       speed = msg.speed;
       accumulator = 0;
       last = performance.now();
@@ -153,7 +153,8 @@ function postFrame(w: World): void {
   const models = new Uint8Array(w.vehicles.highWater);
   const paint = new Uint8Array(w.vehicles.highWater);
   const slots = w.writeSnapshot(positions, ids, models, paint);
-  post({ type: 'frame', tick: w.tick, slots, positions, ids, models, paint, stats: w.stats() }, [positions.buffer, ids.buffer, models.buffer, paint.buffer]);
+  const walkers = w.walkers?.positions() ?? new Float32Array(0);
+  post({ type: 'frame', walkers, tick: w.tick, slots, positions, ids, models, paint, stats: w.stats() }, [walkers.buffer, positions.buffer, ids.buffer, models.buffer, paint.buffer]);
 }
 
 function postTown(w: World): void {

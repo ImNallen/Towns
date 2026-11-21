@@ -26,6 +26,7 @@ export const PALETTE = {
   hills: ['#8f8e88', '#9c9b95', '#a9a8a2', '#b6b5af', '#c3c2bc'],
 
   roadSurface: '#ffffff',
+  walker: '#994f36',
   pavement: '#e2ded1',
   parking: '#d3d6ce',
   parkingFree: '#8ac8a2',

@@ -37,6 +37,7 @@ export interface Surface {
 }
 
 export interface Network {
+  readonly pedestrianLinks?: { a: { x: number; y: number }; b: { x: number; y: number }; crossing: boolean }[];
   readonly lanes: Lane[];
   readonly surfaces: Surface[];
   /** Lanes with no predecessor: where vehicles enter the map. */

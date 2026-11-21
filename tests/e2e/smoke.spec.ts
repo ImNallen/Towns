@@ -135,8 +135,8 @@ test('painted residential frontage grows into a lived-in street', async ({ page 
   expect(errors).toEqual([]);
 });
 
-async function connectedStreet(page: Page) {
-  await page.goto('/?scenario=meadow&seed=1&speed=0&x=20&y=8&mpp=0.15');
+async function connectedStreet(page: Page, query = '') {
+  await page.goto('/?scenario=meadow&seed=1&speed=0&x=20&y=8&mpp=0.15' + query);
   const editor = () => page.evaluate(() => window.__towns?.editor());
   await expect.poll(editor).toMatchObject({ tool: 'road', pending: false });
   const box = (await page.locator('#map').boundingBox())!;
@@ -326,7 +326,7 @@ test('road type preview, upgrades and residential growth', async ({ page }) => {
 
 test('parking occupancy and a new lot serving the shops', async ({ page }) => {
   test.setTimeout(150_000);
-  const { at, drag, editor } = await connectedStreet(page);
+  const { at, drag, editor } = await connectedStreet(page, '&walkLimit=0');
   await page.keyboard.press('s');
   await drag(-21, 24, 6);
   await expect.poll(editor).toMatchObject({ pending: false });
@@ -382,4 +382,20 @@ test('drivers park on a street with side bays', async ({ page }) => {
     return true;
   }, null, { timeout: 55_000 });
   await page.screenshot({ path: 'artifacts/screens/parking-street.png' });
+});
+
+test('residents walk along the shop frontage', async ({ page }) => {
+  const { drag, editor } = await connectedStreet(page);
+  await page.keyboard.press('s');
+  await drag(-21, 24, 6);
+  await expect.poll(editor).toMatchObject({ pending: false });
+  await page.keyboard.press('v');
+  await page.evaluate(() => window.__towns!.setSpeed(160));
+  await page.waitForFunction(() => {
+    const town = window.__towns!.town();
+    if (!town?.parking.walkedTrips || !window.__towns!.stats()?.walkers) return false;
+    window.__towns!.setSpeed(0);
+    return true;
+  });
+  await page.screenshot({ path: 'artifacts/screens/pavement-walkers.png' });
 });
