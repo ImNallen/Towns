@@ -151,3 +151,5 @@ button.bulldoze.active, button.bulldoze.active:hover { background: #904731; }
 @media (max-width: 420px) {
   .tool { flex-direction: column; gap: 2px; padding: 3px 8px; font-size: 11px; }
 }
+
+.town-demand { display: grid; gap: 4px; border-top: 1px solid var(--line); padding: 7px 0 9px; }

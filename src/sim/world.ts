@@ -1,7 +1,7 @@
 import { endOf, sampleAt, startOf, type PathSample } from './math/polyline';
 import type { Lane, Network } from './network/types';
 import { Rng } from './rng';
-import { residentialLots } from './zoning/lots';
+import { zonedLots } from './zoning/lots';
 import type { Zoning } from './zoning/paint';
 import { accessPoints } from './scenarios/meadow';
 import type { Scenario } from './scenarios/types';
@@ -165,7 +165,7 @@ export class World {
     this.installLots(zoning, this.town);
     const v = this.vehicles;
     for (let i = 0; i < v.highWater; i++) {
-      if (v.alive[i] && this.town.departed(v.owner[i]!)) v.despawn(i);
+      if (v.alive[i] && !this.town.driving(v.owner[i]!)) v.despawn(i);
     }
   }
 
@@ -173,7 +173,7 @@ export class World {
     const base = this.scenario.town!;
     this.zoning = zoning;
     const occupied = previous.occupiedLots();
-    const lots = residentialLots(this.scenario, zoning, occupied);
+    const lots = zonedLots(this.scenario, zoning, occupied);
     const surviving = new Set(lots);
     const homes = [...base.homes];
     const free: number[] = [];
@@ -192,7 +192,7 @@ export class World {
     }
     this.routing = new Routing(this.network, homes.map(home => home.access));
     this.town = new Town({ ...base, homes }, this.routing.sinks.length, 0, this.routing, base.homes.length);
-    this.town.copyFrom(previous);
+    this.town.copyFrom(previous, this.routing, this.minute());
   }
 
   /**
@@ -208,7 +208,7 @@ export class World {
     if (this.town && (zoning.size || this.town.spec.homes.length > scenario.town!.homes.length)) {
       edited.installLots(zoning, this.town);
     } else if (this.town) {
-      edited.town!.copyFrom(this.town);
+      edited.town!.copyFrom(this.town, edited.routing, this.minute());
     }
     const V = this.vehicles;
     const sinkCount = this.routing.sinks.length;
@@ -232,7 +232,7 @@ export class World {
     edited.vehicles.copyFrom(V);
     for (let slot = 0; slot < V.highWater; slot++) {
       if (!V.alive[slot]) continue;
-      if (edited.town?.departed(V.owner[slot]!)) {
+      if (edited.town && !edited.town.driving(V.owner[slot]!)) {
         edited.vehicles.despawn(slot);
         continue;
       }

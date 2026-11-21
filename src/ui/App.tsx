@@ -76,6 +76,8 @@ export function App({ game }: { game: Game }) {
       if (e.key === 'Escape') {
         // Esc finishes a road in progress first; the next one closes the household card.
         if (selected !== null && !editor?.chaining && !editor?.canCancel) selectHouse(null);
+      } else if (editor?.tool === 'zone' && ['h', 's', 'w', 'e'].includes(e.key.toLowerCase())) {
+        changeBrush(ZONE_KINDS['hswe'.indexOf(e.key.toLowerCase())] ?? null);
       } else if (editor && e.key.toLowerCase() === 'r') {
         changeTool('road');
       } else if (editor && e.key.toLowerCase() === 'c') {
@@ -112,6 +114,7 @@ export function App({ game }: { game: Game }) {
     : editor?.connected ? 'Drag across a street for a crossing or from its side for a branch, or click points one by one.'
     : 'Drag between marked ends to connect them, or click points one by one.');
   const household = selected === null ? undefined : town?.households.find((h) => h.home === selected);
+  const business = town?.businesses.find(b => b.home === selected);
   const tripStatus = editor?.pending ? 'Updating roads' : speed === 0 ? 'Paused' : editor && !editor.connected ? 'Waiting for a connection' : 'Traffic running';
 
   return (
@@ -158,6 +161,14 @@ export function App({ game }: { game: Game }) {
             <div className="performance">{fps.toFixed(0)} fps</div>
           </details>
         </section>
+        {business && <section className="household panel" aria-label="Business">
+          <div className="panel-heading">{business.zone === 'shops' ? 'Shop' : 'Workplace'}
+            <button className="close" onClick={() => selectHouse(null)} aria-label="Close business card">×</button>
+          </div>
+          <h2 className="household-name">{business.name}</h2>
+          <dl><dt>Jobs filled</dt><dd>{business.filled} / {business.jobs}</dd>
+            <dt>Customers today</dt><dd>{business.customers}</dd></dl>
+        </section>}
         {household && <HouseholdCard household={household} onClose={() => selectHouse(null)} />}
       </div>
 
@@ -177,8 +188,8 @@ export function App({ game }: { game: Game }) {
             }} /> Angle snap
           </label>}
           {editor.tool === 'zone' && <span className="zone-brush" role="radiogroup" aria-label="Zone brush">
-            {[...ZONE_KINDS, null].map((kind) => (
-              <button key={kind ?? 'erase'} role="radio" aria-checked={editor.brush === kind} className={editor.brush === kind ? 'active' : ''} onClick={() => changeBrush(kind)}>
+            {[...ZONE_KINDS, null].map((kind, index) => (
+              <button key={kind ?? 'erase'} role="radio" title={'Brush (' + 'HSWE'[index] + ')'} aria-keyshortcuts={'HSWE'[index]} aria-checked={editor.brush === kind} className={editor.brush === kind ? 'active' : ''} onClick={() => changeBrush(kind)}>
                 {kind ? kind[0]!.toUpperCase() + kind.slice(1) : 'Erase'}
               </button>
             ))}

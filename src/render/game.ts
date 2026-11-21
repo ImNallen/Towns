@@ -166,8 +166,9 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
       editor?.reject(msg.reason);
     } else if (msg.type === 'town') {
       latestTown = msg.view;
-      houses?.update(msg.view.households);
-      if (selectedHouse !== null && !msg.view.households.some(h => h.home === selectedHouse)) selectHouse(null);
+      houses?.update(msg.view.households, msg.view.businesses);
+      if (selectedHouse !== null && !msg.view.households.some(h => h.home === selectedHouse)
+        && !msg.view.businesses.some(b => b.home === selectedHouse)) selectHouse(null);
     } else if (msg.type === 'frame') {
       vehicles?.push(msg, performance.now());
       latestStats = msg.stats;

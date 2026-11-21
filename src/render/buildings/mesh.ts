@@ -50,6 +50,16 @@ export function buildingGeometry(blueprint: Blueprint, variant: Variant): THREE.
         add(roof, PALETTE.building.roofs[variant.roof], p.x, p.height, p.y);
         break;
       }
+      case 'awning': {
+        const stripe = p.width / 7;
+        for (let i = 0; i < 7; i++) {
+          const cloth = box(stripe, 0.18, p.depth);
+          cloth.rotateX(0.12);
+          add(cloth, i % 2 ? PALETTE.building.trim : PALETTE.building.awning,
+            p.x - p.width / 2 + (i + 0.5) * stripe, p.height, p.y);
+        }
+        break;
+      }
       case 'pool':
         add(box(p.width + 0.6, 0.15, p.depth + 0.6), PALETTE.building.trim, p.x, 0.075, p.y);
         add(box(p.width, 0.17, p.depth), PALETTE.building.pool, p.x, 0.085, p.y);

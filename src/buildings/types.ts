@@ -7,7 +7,7 @@ export interface LotSize { columns: number; rows: number }
 export type Roof = { kind: 'gable' | 'hip'; rise: number; ridge: 'x' | 'y' } | { kind: 'flat' };
 export type Part =
   | (Footprint & { kind: 'block' | 'wing' | 'garage'; height: number; roof: Roof })
-  | (Footprint & { kind: 'porch' | 'chimney' | 'hedge' | 'fence'; height: number })
+  | (Footprint & { kind: 'awning' | 'porch' | 'chimney' | 'hedge' | 'fence'; height: number })
   | (Footprint & { kind: 'pool' })
   | { kind: 'tree'; x: number; y: number; radius: number; height: number };
 export type WallSwatch = keyof typeof PALETTE.building.walls;
@@ -15,7 +15,7 @@ export type RoofSwatch = keyof typeof PALETTE.building.roofs;
 export interface Blueprint {
   id: string;
   name: string;
-  zone: 'residential';
+  zone: import('../sim/zoning/paint').ZoneKind;
   tier: Tier;
   density: 'low';
   lot: LotSize;

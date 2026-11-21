@@ -12,7 +12,8 @@ pnpm check          # typecheck + unit tests. Run before saying anything is done
 pnpm test           # vitest: sim tests + architecture guard (fast, headless)
 pnpm sim            # headless sim run, prints stats + state hash
 pnpm sim --scenario straight --ticks 2400 --seed 7 --every 600
-pnpm sim --scenario meadow --paint --ticks 288000 --every 28800  # paint all live cells, report daily
+pnpm sim --scenario meadow --paint --ticks 288000 --every 28800  # paint all live cells residential, report daily
+pnpm sim --scenario meadow --paint mixed --ticks 288000 --every 28800  # homes, shops and workplaces
 pnpm e2e            # Playwright: boots the app, saves screenshots to artifacts/screens/
 ```
 
@@ -27,9 +28,9 @@ src/sim/        Pure, deterministic simulation. No DOM, no Three.js, no React, n
   network/      Lane graph (lanes, next/prev, give-way) + drawable surfaces; NetworkBuilder validates it
   traffic/      IDM car-following, SoA vehicle storage, next-hop routing tables
   scenarios/    Map definitions (network + demand + scenery)
-  zoning/       Zone cells beside every built road, paint strokes, and residential lots beside the street (Meadow Vale only)
+  zoning/       Zone cells beside every built road, paint strokes, and residential, shop and workplace lots beside the street (Meadow Vale only)
   world.ts      World: fixed 20 Hz tick (DT = 1/20), stats, snapshot, hash
-src/buildings/  Shared residential blueprint catalogue and deterministic design/finish picker
+src/buildings/  Shared low-density blueprint catalogue and deterministic design/finish picker
 src/worker/     Runs World in a Web Worker; protocol.ts defines every message
 src/render/     Three.js: camera, road meshes, scenery, instanced vehicles, debug overlay, game loop
 src/ui/         React HUD over the canvas

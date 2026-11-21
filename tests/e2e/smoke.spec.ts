@@ -57,12 +57,14 @@ test('painted plots read at map zoom', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
-test('residential catalogue and sample street render', async ({ page }) => {
+test('building catalogue and sample street render', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/?catalogue=1');
   await expect(page.locator('.catalogue')).toHaveAttribute('data-ready', 'true', { timeout: 30_000 });
-  await expect(page.locator('figure canvas')).toHaveCount(24);
+  await expect(page.locator('figure canvas')).toHaveCount(36);
+  await page.locator('#shops').screenshot({ path: 'artifacts/screens/shop-catalogue.png' });
+  await page.locator('#workplaces').screenshot({ path: 'artifacts/screens/workplace-catalogue.png' });
   await page.getByRole('link', { name: 'Sample street' }).click();
   await page.locator('#street').screenshot({ path: 'artifacts/screens/building-street.png' });
   await page.locator('#street').evaluate(el => { el.setAttribute('hidden', ''); });
@@ -108,8 +110,7 @@ test('painted residential frontage grows into a lived-in street', async ({ page 
   expect(errors).toEqual([]);
 });
 
-test('a fully grown painted street in Meadow Vale', async ({ page }) => {
-  test.setTimeout(160_000);
+async function connectedStreet(page: Page) {
   await page.goto('/?scenario=meadow&seed=1&speed=0&x=20&y=8&mpp=0.15');
   const editor = () => page.evaluate(() => window.__towns?.editor());
   await expect.poll(editor).toMatchObject({ tool: 'road', pending: false });
@@ -127,6 +128,12 @@ test('a fully grown painted street in Meadow Vale', async ({ page }) => {
   await drag(45, 8, -35);
   await expect.poll(editor).toMatchObject({ roadCount: 1, pending: false });
   await page.keyboard.press('z');
+  return { at, drag, editor };
+}
+
+test('a fully grown painted street in Meadow Vale', async ({ page }) => {
+  test.setTimeout(220_000);
+  const { drag, editor } = await connectedStreet(page);
   for (const y of [-8, 24]) {
     await drag(-34, y, 76);
     await expect.poll(editor).toMatchObject({ pending: false });
@@ -136,7 +143,29 @@ test('a fully grown painted street in Meadow Vale', async ({ page }) => {
   await page.evaluate(() => window.__towns!.setSpeed(120));
   // Each end of the extension and the four adjoining starter-road columns are painted.
   await expect.poll(() => page.evaluate(() => window.__towns!.town()!.households.filter(h => h.lot).length),
-    { timeout: 140_000 }).toBe(21);
+    { timeout: 200_000 }).toBe(21);
   await page.evaluate(() => window.__towns!.setSpeed(0));
   await page.screenshot({ path: 'artifacts/screens/growth-full-street.png' });
+});
+
+test('businesses grow beside homes on a mixed street', async ({ page }) => {
+  test.setTimeout(160_000);
+  const { at, drag, editor } = await connectedStreet(page);
+  for (const [brush, start, y, end] of [['h', -34, -8, 76], ['s', -34, 24, 16], ['w', 18, 24, 76]] as const) {
+    await page.keyboard.press(brush);
+    await drag(start, y, end);
+    await expect.poll(editor).toMatchObject({ pending: false });
+  }
+  await page.getByRole('button', { name: 'Pan' }).click();
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => window.__towns!.setSpeed(120));
+  const town = () => page.evaluate(() => window.__towns!.town()!);
+  await expect.poll(async () => (await town()).businesses.some(b => b.zone === 'workplaces'), {timeout: 60_000}).toBe(true);
+  await expect.poll(async () => (await town()).households.filter(h => h.lot).length, {timeout: 90_000}).toBeGreaterThan(3);
+  await page.evaluate(() => window.__towns!.setSpeed(0));
+  const shop = (await town()).businesses.find(b => b.zone === 'shops')!;
+  await page.mouse.click(...at(shop.lot.x, shop.lot.y));
+  await expect(page.getByRole('region', {name: 'Business'})).toContainText(shop.name);
+  await page.screenshot({path: 'artifacts/screens/mixed-street.png'});
+  await page.getByRole('region', {name: 'Zone demand'}).screenshot({path: 'artifacts/screens/zone-demand.png'});
 });

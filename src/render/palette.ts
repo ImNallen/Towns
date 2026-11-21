@@ -10,7 +10,7 @@ export const PALETTE = {
     roofs: {
       slate: '#82949e', terracotta: '#b9816c', charcoal: '#969591', moss: '#919b7d', tan: '#bdab8e',
     },
-    chimney: '#c79f86',
+    awning: '#568c81', chimney: '#c79f86',
     trim: '#f5f0df', hedge: '#819774', trunk: '#9b8467', pool: '#94becb',
   },
   light: '#ffffff',
@@ -39,7 +39,7 @@ export const PALETTE = {
   editorInvalid: '#bb5941',
   buildBoundary: '#aaa99b',
   zoneGrid: '#d9d8cf',
-  zonePaint: { residential: '#d4e3ad' } satisfies Record<ZoneKind, string>,
+  zonePaint: { residential: '#d4e3ad', shops: '#9bcbd3', workplaces: '#e3be85' } satisfies Record<ZoneKind, string>,
   editorPaper: '#fffdf4',
   selection: '#21705d',
 

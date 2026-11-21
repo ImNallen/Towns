@@ -19,15 +19,15 @@ export function Catalogue() {
     }
   }, []);
   return <main ref={root} className="catalogue">
-    <header><span className="wordmark">Towns / Residential</span>
+    <header><span className="wordmark">Towns / Low density</span>
       <h1>Building catalogue</h1>
-      <nav aria-label="Catalogue sections">{['cheap', 'mid', 'expensive', 'street'].map(id =>
+      <nav aria-label="Catalogue sections">{['cheap', 'mid', 'expensive', 'shops', 'workplaces', 'street'].map(id =>
         <a key={id} href={'#' + id}>{id === 'street' ? 'Sample street' : id}</a>)}</nav>
     </header>
-    <p>Low-density homes · Selected wall and roof combinations · Lot sizes in zone cells</p>
-    {(['cheap', 'mid', 'expensive'] as const).map(tier => <section key={tier} id={tier}>
+    <p>Selected wall and roof combinations · Lot sizes in zone cells</p>
+    {(['cheap', 'mid', 'expensive', 'shops', 'workplaces'] as const).map(tier => <section key={tier} id={tier}>
       <h2>{tier}</h2>
-      <div className="design-grid">{BLUEPRINTS.filter(b => b.tier === tier).map(b =>
+      <div className="design-grid">{BLUEPRINTS.filter(b => b.zone === 'residential' ? b.tier === tier : b.zone === tier).map(b =>
         <figure key={b.id}><figcaption><strong>{b.name}</strong><span>{b.lot.columns} × {b.lot.rows}</span></figcaption>
           <canvas width={1024} data-design={b.id} aria-label={b.name + ' colour and mirrored variants'} />
         </figure>)}</div>

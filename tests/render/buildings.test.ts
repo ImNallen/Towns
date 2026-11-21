@@ -34,7 +34,7 @@ test('upgrades fit the same parcel and each preview stays inside the authored lo
   expect(new Set(BLUEPRINTS.map(b => b.id)).size).toBe(BLUEPRINTS.length);
   for (const blueprint of BLUEPRINTS) {
     const nextTier = tiers[tiers.indexOf(blueprint.tier) + 1];
-    const hasUpgrade = BLUEPRINTS.some(b => b.tier === nextTier
+    const hasUpgrade = BLUEPRINTS.some(b => b.zone === blueprint.zone && b.tier === nextTier
       && b.lot.columns === blueprint.lot.columns && b.lot.rows === blueprint.lot.rows);
     expect(Boolean(blueprint.upgradesTo)).toBe(hasUpgrade);
     if (blueprint.upgradesTo) {
@@ -70,7 +70,7 @@ test('each permitted wall pairs with every permitted roof on the same design', (
       finishes.add(`${variant.wall}/${variant.roof}`);
       combos.set(blueprint.id, finishes);
     }
-    for (const b of BLUEPRINTS.filter(b => b.tier === tier && b.lot.columns === 1 && b.lot.rows === 1)) {
+    for (const b of BLUEPRINTS.filter(b => b.zone === 'residential' && b.tier === tier && b.lot.columns === 1 && b.lot.rows === 1)) {
       expect(combos.get(b.id)).toEqual(new Set(b.walls.flatMap(w => b.roofs.map(r => `${w}/${r}`))));
     }
   }

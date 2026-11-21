@@ -4,7 +4,7 @@ import { polyline } from '../sim/math/polyline';
 import type { Vec2 } from '../sim/math/vec';
 import type { House } from '../sim/scenarios/types';
 import { BLUEPRINTS } from '../buildings/catalogue';
-import type { HouseholdView } from '../sim/town/town';
+import type { BusinessView, HouseholdView } from '../sim/town/town';
 import { buildBuildingLayer, type BuildingInstance } from './buildings/mesh';
 import { disposeLayer } from './dispose';
 import { FlatMesh, flatMaterial } from './flat';
@@ -124,12 +124,13 @@ export class HouseLayer {
     });
   }
 
-  update(households: HouseholdView[]): void {
+  update(households: HouseholdView[], businesses: BusinessView[]): void {
     const grown = new Map<number, NonNullable<HouseholdView['lot']>>();
     for (const h of households) {
       if (h.lot) grown.set(h.home, h.lot);
       else this.setLevel(h.home, h.level);
     }
+    for (const business of businesses) grown.set(business.home, business.lot);
     if (grown.size === this.grown.size && [...grown].every(([id, lot]) => {
       const old = this.grown.get(id);
       return old?.key === lot.key && old.design === lot.design && old.columns === lot.columns && old.rows === lot.rows;

@@ -3,11 +3,11 @@ import { accessPoints, meadowScenario, planMeadowRoad } from '../../src/sim/scen
 import { VEHICLE_LENGTH } from '../../src/sim/traffic/idm';
 import { DT, World } from '../../src/sim/world';
 import { decodeCellKey, ZONE_KERB, type CellKey } from '../../src/sim/zoning/cells';
-import { residentialLots } from '../../src/sim/zoning/lots';
+import { zonedLots } from '../../src/sim/zoning/lots';
 
 const scenario = meadowScenario();
 const paint = new Map(Array.from(scenario.zones!.keys, k => [k as CellKey, 'residential'] as const));
-const parcels = residentialLots(scenario, paint);
+const parcels = zonedLots(scenario, paint);
 const day = 28800;
 function paintedWorld() {
   const world = new World(scenario, 1);
@@ -19,7 +19,7 @@ function step(world: World, ticks: number) {
 }
 
 it('packs live street-front cells once, in key order, within blueprint dimensions', () => {
-  expect(parcels).toEqual(residentialLots(scenario, new Map([...paint].reverse())));
+  expect(parcels).toEqual(zonedLots(scenario, new Map([...paint].reverse())));
   const used = new Set<number>();
   for (const lot of parcels) {
     expect(decodeCellKey(lot.key).row).toBe(0);
@@ -38,14 +38,14 @@ it('packs live street-front cells once, in key order, within blueprint dimension
   expect(parcels.length).toBeGreaterThan(12); // Full starter frontage held 12 parcels under the old rule.
   const smaller = new Map(paint);
   smaller.delete(parcels[0]!.key);
-  const after = residentialLots(scenario, smaller);
+  const after = zonedLots(scenario, smaller);
   expect(after.filter(l => l.streetX > 0)).toEqual(parcels.filter(l => l.streetX > 0));
 });
 
-it('grows four homes per day, commutes and upgrades deterministically', () => {
+it('grows homes at the vacancy-driven rate, commutes and upgrades deterministically', () => {
   const world = paintedWorld();
   step(world, day);
-  expect(world.townView()!.households).toHaveLength(16);
+  expect(world.townView()!.households).toHaveLength(17);
   let minGap = Infinity;
   let sawDeparture = false;
   for (let t = day; t < 10 * day; t++) {
@@ -106,7 +106,7 @@ it('clears a demolished family and its moving car while preserving its neighbour
 
 it('a road over a parcel removes the home and undo leaves room to grow again', () => {
   const world = paintedWorld();
-  step(world, Math.ceil(parcels.length / 4) * day);
+  step(world, 15 * day);
   const plan = planMeadowRoad([], {x: -65,y: 62}, {x: -65,y: -8});
   if (!plan.ok) throw new Error(plan.reason);
   const result = world.editNetwork(meadowScenario([plan.road]));
