@@ -20,6 +20,7 @@ test('shape a winding route and build a bypass under live traffic', async ({ pag
     await page.mouse.up();
   };
 
+  await page.getByRole('button', { name: 'Roads', exact: true }).click();
   await page.getByRole('button', { name: 'Build curved road' }).click();
   await drag(-65, -8, 65, 8);
   await expect(page.getByRole('status')).toContainText('place', { ignoreCase: true });
@@ -32,6 +33,7 @@ test('shape a winding route and build a bypass under live traffic', async ({ pag
   await expect.poll(async () => (await stats())?.active ?? 0).toBeGreaterThan(1);
   const before = await stats();
 
+  await page.getByRole('button', { name: 'Roads', exact: true }).click();
   await page.getByRole('button', { name: 'Build road', exact: true }).click();
   await drag(-47.27, 27.85, 52.30, 27.74);
   await expect.poll(editor, { timeout: 20_000 }).toMatchObject({ roadCount: 2, connected: true });

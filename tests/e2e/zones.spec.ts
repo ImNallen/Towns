@@ -45,6 +45,7 @@ test('a T-junction carves its mouth out of the zone cells', async ({ page }) => 
 
 test('zone cells fan out around a curved road', async ({ page }) => {
   const { editor, move, drag, errors } = await open(page, { x: 0, y: 35, mpp: 0.18 });
+  await page.getByRole('button', { name: 'Roads', exact: true }).click();
   await page.getByRole('button', { name: 'Build curved road' }).click();
   await drag(-65, -8, 65, 8);
   await move(0, 85);
