@@ -64,6 +64,7 @@ const town = (view: TownView): string => {
     `people=${t.population}`,
     `employed=${t.employed}/${t.adults}`,
     `local=${t.localWorkers}`,
+    `demand=${view.demand.residential}/${view.demand.shops}/${view.demand.workplaces}`,
     `shops=${view.businesses.filter(b => b.zone === 'shops').length}`,
     `workplaces=${view.businesses.filter(b => b.zone === 'workplaces').length}`,
     `cross=${t.crossCommuters}`,

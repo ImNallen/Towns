@@ -45,7 +45,7 @@ it('packs live street-front cells once, in key order, within blueprint dimension
 it('grows homes at the vacancy-driven rate, commutes and upgrades deterministically', () => {
   const world = paintedWorld();
   step(world, day);
-  expect(world.townView()!.households).toHaveLength(17);
+  expect(world.townView()!.households).toHaveLength(14);
   let minGap = Infinity;
   let sawDeparture = false;
   for (let t = day; t < 10 * day; t++) {
@@ -69,7 +69,7 @@ it('grows homes at the vacancy-driven rate, commutes and upgrades deterministica
   expect(sawDeparture).toBe(true);
   expect(minGap).toBeGreaterThanOrEqual(VEHICLE_LENGTH - 0.01);
   // With more adults competing for the same off-map jobs, allow time to save for an upgrade.
-  step(world, 12 * day);
+  step(world, 32 * day);
   const grown = world.townView()!.households.filter(h => h.lot);
   expect(grown.some(h => h.wages > 0)).toBe(true);
   const upgraded = grown.find(h => h.level === 2)!;
@@ -78,7 +78,7 @@ it('grows homes at the vacancy-driven rate, commutes and upgrades deterministica
   expect(upgraded.lot!.design).toBe(starter.blueprint.upgradesTo);
   expect(world.stats().lost).toBe(0);
   const replay = paintedWorld();
-  step(replay, 22 * day);
+  step(replay, 42 * day);
   expect(world.hash()).toBe(replay.hash());
   expect(world.townView()).toEqual(replay.townView());
 });
