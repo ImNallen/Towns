@@ -1,3 +1,4 @@
+import { WalkerLayer } from './walkers';
 import type { RoadType } from '../sim/network/roadTypes';
 import { SUN_DIRECTION, SUN_INTENSITY, AMBIENT_INTENSITY } from './lighting';
 import * as THREE from 'three';
@@ -32,6 +33,7 @@ export interface GameOptions {
 }
 
 export interface Game {
+  walkerPositions(): Float32Array;
   editor(): EditorState | null;
   setAngleSnapping(enabled: boolean): void;
   setRoadType(type: RoadType): void;
@@ -85,10 +87,9 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   let editor: RoadEditor | null = null;
   const mapCamera = new MapCamera(canvas, (event) => editor?.canPan(event) ?? true);
   let roadLayer: THREE.Group | null = null;
-  let walkers: THREE.InstancedMesh | undefined;
-  const walkerGeometry = new THREE.SphereGeometry(0.7, 10, 8);
-  const walkerMaterial = new THREE.MeshStandardMaterial({ color: PALETTE.walker });
-  const walkerPose = new THREE.Matrix4();
+  let walkerPositions: Float32Array = new Float32Array();
+  const walkerLayer = new WalkerLayer();
+  scene.add(walkerLayer.group);
   let vehicles: VehicleLayer | null = null;
   let houses: HouseLayer | null = null;
   let laneOverlay: THREE.Group | null = null;
@@ -195,18 +196,8 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
       if (selectedHouse !== null && !msg.view.households.some(h => h.home === selectedHouse)
         && !msg.view.businesses.some(b => b.home === selectedHouse)) selectHouse(null);
     } else if (msg.type === 'frame') {
-      const count = msg.walkers.length / 2;
-      if (count && (!walkers || walkers.instanceMatrix.count < count)) {
-        if (walkers) { scene.remove(walkers); walkers.dispose(); }
-        walkers = new THREE.InstancedMesh(walkerGeometry, walkerMaterial, Math.max(count, 64));
-        walkers.frustumCulled = false;
-        scene.add(walkers);
-      }
-      if (walkers) {
-        walkers.count = count;
-        for (let i=0; i<count; i++) walkers.setMatrixAt(i, walkerPose.makeTranslation(msg.walkers[2*i]!, 0.85, -msg.walkers[2*i+1]!));
-        walkers.instanceMatrix.needsUpdate = true;
-      }
+      walkerPositions = msg.walkers;
+      walkerLayer.update(walkerPositions);
       vehicles?.push(msg, performance.now());
       latestStats = msg.stats;
     }
@@ -256,6 +247,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     undo: () => editor?.undo(),
     cancelRoadEdit: () => editor?.cancel(),
     stats: () => (ready ? latestStats : null),
+    walkerPositions: () => walkerPositions,
     town: () => latestTown,
     selectedHouse: () => selectedHouse,
     selectHouse,

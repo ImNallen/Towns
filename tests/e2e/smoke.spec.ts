@@ -385,17 +385,28 @@ test('drivers park on a street with side bays', async ({ page }) => {
 });
 
 test('residents walk along the shop frontage', async ({ page }) => {
+  test.setTimeout(120_000);
   const { drag, editor } = await connectedStreet(page);
-  await page.keyboard.press('s');
-  await drag(-21, 24, 6);
-  await expect.poll(editor).toMatchObject({ pending: false });
+  for (const [brush,start,y,end] of [['h',-34,-8,76],['s',-34,24,16],['w',18,24,76]] as const) {
+    await page.keyboard.press(brush);
+    await drag(start,y,end);
+    await expect.poll(editor).toMatchObject({ pending: false });
+  }
   await page.keyboard.press('v');
+  await page.mouse.move(0,0);
   await page.evaluate(() => window.__towns!.setSpeed(160));
   await page.waitForFunction(() => {
-    const town = window.__towns!.town();
-    if (!town?.parking.walkedTrips || !window.__towns!.stats()?.walkers) return false;
-    window.__towns!.setSpeed(0);
+    const game = window.__towns!;
+    const positions = game.walkerPositions();
+    const visible: number[] = [];
+    for (let i=0; i<positions.length; i+=3) {
+      const x = positions[i]!, y = positions[i+1]!;
+      if (x < -30 || x > 115 || Math.abs(y-8) > 7 || visible.some(v => Math.abs(v-x)<4)) continue;
+      visible.push(x);
+    }
+    if (visible.length < 4) return false;
+    game.setSpeed(0);
     return true;
-  });
+  }, null, { timeout: 100_000 });
   await page.screenshot({ path: 'artifacts/screens/pavement-walkers.png' });
 });

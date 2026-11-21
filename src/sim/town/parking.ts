@@ -140,6 +140,7 @@ export class Parking {
     open: Uint8Array,
     access: AccessPoint[],
     routing: Routing,
+    walkLimit = WALK_LIMIT,
   ): number {
     let best = -1,
       distance = Infinity,
@@ -154,7 +155,7 @@ export class Parking {
       const length = this.walking?.distance(this.firstDest - routing.sinks.length + i, home);
       const d = length === undefined ? dx * dx + dy * dy : length * length;
       const preferred = b.home === home;
-      if (d > WALK_LIMIT * WALK_LIMIT || (!preferred && own) || (preferred === own && d >= distance)) continue;
+      if (d > walkLimit * walkLimit || (!preferred && own) || (preferred === own && d >= distance)) continue;
       if (!sameEntrance(access, b.access) && routing.bestAccess(access, this.firstDest + i) < 0) continue;
       best = i;
       distance = d;

@@ -176,7 +176,7 @@ export class Walkers {
     }
   }
   positions(): Float32Array {
-    const out = new Float32Array(this.count * 2);
+    const out = new Float32Array(this.count * 3);
     let slot = 0;
     for (let i = 0; i < this.goal.length; i++) {
       if (this.goal[i]! < 0) continue;
@@ -186,6 +186,7 @@ export class Walkers {
       const t = edge ? this.along[i]! / edge.length : 0;
       out[slot++] = a.x + (b.x - a.x) * t;
       out[slot++] = a.y + (b.y - a.y) * t;
+      out[slot++] = i;
     }
     return out;
   }

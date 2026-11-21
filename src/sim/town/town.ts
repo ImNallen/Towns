@@ -1,3 +1,4 @@
+import { walkChance, WALK_CHOICE } from './mode';
 import { Walkers, WalkingNetwork, WALK_TRIP_LIMIT } from '../network/walking';
 import type { Network } from '../network/types';
 import { decodeCellKey } from '../zoning/cells';
@@ -280,6 +281,8 @@ export class Town {
   private readonly door: Vec2[];
   private readonly outside: AccessPoint[][];
   readonly walkers: Walkers;
+  private readonly modeDay: Int32Array;
+  private readonly modeRoll: Float64Array;
   private walkedTrips = 0;
   private trips = 0;
   private parked = 0;
@@ -293,6 +296,8 @@ export class Town {
     const H = spec.homes.length;
     const P = H * MAX_MEMBERS;
     this.carBay = new Int32Array(H * 2).fill(-1);
+    this.modeDay = new Int32Array(P).fill(-1);
+    this.modeRoll = new Float64Array(P);
     this.driverCar = new Int32Array(P).fill(-1);
     this.target = new Int32Array(P).fill(-1);
     this.origin = new Int32Array(P).fill(-1);
@@ -441,7 +446,7 @@ export class Town {
     for (let p = 0; p < source.people; p++) this.target[p] = remap(source.target[p]!);
     this.treasury.copyFrom(source.treasury);
     for (const key of [
-      'origin', 'driverCar', 'failed', 'circled', 'due', 'denied', 'frustration',
+      'modeDay', 'modeRoll', 'origin', 'driverCar', 'failed', 'circled', 'due', 'denied', 'frustration',
       'taxable', 'taxesPaid', 'payroll', 'lastDailyCost', 'surname', 'funds', 'wages', 'level', 'cars', 'carModel', 'pantry', 'firstMember', 'memberCount', 'adults',
       'household', 'role', 'age', 'firstName', 'job', 'activity', 'errand', 'at', 'arrivedAt', 'until', 'workedDay',
       'deliveries', 'freightState', 'freightDue', 'open', 'customers', 'early', 'eventDay', 'eventMinute', 'eventHousehold', 'eventKind', 'eventDetail', 'eventPerson',
@@ -795,19 +800,36 @@ export class Town {
     if (job >= 0 && this.workedDay[p] !== day) {
       const travel = this.outTime(h, job, roads.routing);
       if (clock >= SHIFT_START - travel - this.early[p]! && clock + travel <= SHIFT_END - MIN_SHIFT) {
-        if (this.depart(p, WORK, job)) this.workedDay[p] = day;
+        if (this.depart(p, WORK, job, day)) this.workedDay[p] = day;
         return;
       }
     }
     if (clock < SHOP_OPENS || clock >= SHOP_CLOSES || this.pantry[h]! >= PANTRY_LOW || this.shopping(h)) return;
     const shop = this.nearestShop(h, roads.routing);
-    if (shop >= 0) this.depart(p, SHOP, shop);
+    if (shop >= 0) this.depart(p, SHOP, shop, day);
   }
 
-  private depart(p: number, errand: number, region: number): boolean {
+  private depart(p: number, errand: number, region: number, day: number): boolean {
     const h = this.household[p]!;
     const local = region - this.spec.regions.length;
-    if (this.walkers.graph.distance(h, local) <= this.walkLimit) {
+    const graph = this.walkers.graph;
+    const distance = graph.distance(h, local);
+    let youngFamily = false, carNearDestination = false;
+    for (let i = this.firstMember[h]!; i < this.firstMember[h]! + this.memberCount[h]!; i++) {
+      if (this.age[i]! < 8) youngFamily = true;
+    }
+    for (let car = 2*h; car < 2*h + this.cars[h]!; car++) {
+      const bay = this.carBay[car]!;
+      if (bay < 0) continue;
+      const origin = this.door.length + bay;
+      if (graph.distance(origin,local) < graph.distance(origin,h)) carNearDestination = true;
+    }
+    const chance = walkChance(distance, this.walkLimit, !this.cars[h], errand === SHOP, youngFamily, carNearDestination);
+    if (chance > 0 && this.modeDay[p] !== 2*day + errand) {
+      this.modeDay[p] = 2*day + errand;
+      this.modeRoll[p] = this.rng.next();
+    }
+    if (this.modeRoll[p]! < chance) {
       this.errand[p] = errand;
       this.at[p] = region;
       this.failed[p] = 0;
@@ -881,7 +903,7 @@ export class Town {
     let dest = this.destination(place);
     this.target[p] = -1;
     if (local >= 0) {
-      const bay = this.parking.nearest(local, this.door[local]!, false, this.open, access, roads.routing);
+      const bay = this.parking.nearest(local, this.door[local]!, false, this.open, access, roads.routing, this.errand[p] === SHOP ? WALK_CHOICE.groceryParkingRange : WALK_LIMIT);
       if (bay >= 0) { this.target[p] = bay; dest = this.parking.firstDest + bay; }
       else if (this.activity[p] === SEARCH) {
         if (this.circleBlock(p, local, access, roads)) return;
@@ -967,23 +989,28 @@ export class Town {
 
   /** Free-flow minutes from home `h` to region `r` (Infinity when unreachable). */
   private outTime(h: number, r: number, routing: Routing): number {
+    const walking = this.walkTime(h, r);
+    if (!this.cars[h]) return walking;
     const access = this.spec.homes[h]!.access;
-    const walking = this.walkers.graph.distance(h,r-this.spec.regions.length);
-    if (walking <= this.walkLimit) return walking/1.35;
     const dest = this.destination(r);
     const k = routing.bestAccess(access, dest);
-    return k < 0 ? Infinity : routing.timeFrom(dest, access[k]!.lane, access[k]!.s);
+    return k < 0 ? walking : routing.timeFrom(dest, access[k]!.lane, access[k]!.s);
+  }
+
+  private walkTime(h: number, r: number): number {
+    const length = this.walkers.graph.distance(h, r - this.spec.regions.length);
+    return length <= this.walkLimit * (this.cars[h] ? 1 : WALK_CHOICE.carFreeRange) ? length / 1.35 : Infinity;
   }
 
   private roundTrip(h: number, r: number, routing: Routing): number {
-    const walking = this.walkers.graph.distance(h,r-this.spec.regions.length);
-    if (walking <= this.walkLimit) return 2*walking/1.35;
+    const walk = 2 * this.walkTime(h, r);
+    if (!this.cars[h]) return walk;
     const region = this.spec.regions[r];
     const dest = this.homeDest + h;
     if (region) return this.outTime(h, r, routing) + routing.timeFrom(dest, region.source, 0);
     const access = this.spec.homes[r - this.spec.regions.length]!.access;
     const k = routing.bestAccess(access, dest);
-    return k < 0 ? Infinity : this.outTime(h, r, routing) + routing.timeFrom(dest, access[k]!.lane, access[k]!.s);
+    return k < 0 ? walk : this.outTime(h, r, routing) + routing.timeFrom(dest, access[k]!.lane, access[k]!.s);
   }
 
   private nearestShop(h: number, routing: Routing): number {
@@ -1221,6 +1248,8 @@ export class Town {
       mix(this.until[p]!);
       mix(this.workedDay[p]!);
       mix(this.early[p]!);
+      mix(this.modeDay[p]!);
+      mix(Math.round(this.modeRoll[p]!*0xffffffff));
     }
     for (const zone of ZONE_KINDS) if (this.growth[zone]) mix(this.growth[zone]);
     for (let h = 0; h < this.open.length; h++) {

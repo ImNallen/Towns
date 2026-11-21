@@ -1,3 +1,4 @@
+import { walkChance } from '../../src/sim/town/mode';
 import { expect, it } from 'vitest';
 import { NetworkBuilder } from '../../src/sim/network/builder';
 import { buildStreetNetwork } from '../../src/sim/network/streets';
@@ -58,7 +59,21 @@ it('chooses walking by route length and replays a mixed town deterministically',
   const walk = run(600),
     drive = run(1);
   expect(walk).toEqual(run(600));
+  expect(walk.trips).toBeGreaterThan(0);
   expect(walk.walkedTrips).toBeGreaterThan(0);
   expect(drive.walkedTrips).toBe(0);
   expect(drive.trips).toBeGreaterThan(walk.trips);
+});
+
+it('weighs route length, grocery loads, children, accessible cars and car ownership', () => {
+  const chance = (metres: number) => walkChance(metres,600,false,false,false,false);
+  expect(chance(150)).toBeGreaterThan(0.9);
+  expect(chance(350)).toBeCloseTo(0.5);
+  expect(chance(510)).toBeLessThan(0.1);
+  expect(chance(601)).toBe(0);
+  expect(walkChance(700,600,true,true,true,false)).toBe(1);
+  expect(walkChance(Infinity,600,true,false,false,false)).toBe(0);
+  for (const [shop,child,car] of [[true,false,false],[false,true,false],[false,false,true]] as const) {
+    expect(walkChance(200,600,false,shop,child,car)).toBeLessThan(chance(200));
+  }
 });
