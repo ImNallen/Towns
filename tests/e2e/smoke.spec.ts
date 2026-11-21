@@ -341,6 +341,9 @@ test('parking occupancy and a new lot serving the shops', async ({ page }) => {
   await page.mouse.click(...at(shop.lot.x, shop.lot.y));
   await page.getByLabel('Parking occupancy').check();
   await expect(page.getByRole('region', { name: 'Business' })).toContainText('Parking');
+  const card = (await page.getByRole('region', { name: 'Business' }).boundingBox())!;
+  const tools = (await page.getByRole('group', { name: 'Map tools' }).boundingBox())!;
+  expect(card.y + card.height).toBeLessThan(tools.y);
   await page.screenshot({ path: 'artifacts/screens/parking-full-yard.png' });
   await page.getByRole('button', { name: 'Close business card' }).click();
   await page.getByRole('button', { name: 'Build parking lot' }).click();
