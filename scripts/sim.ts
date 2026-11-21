@@ -7,13 +7,13 @@
  *   pnpm sim --scenario meadow --connect --ticks 288000 --every 28800   # ten town days, one road built
  */
 import { decodeCellKey, type CellKey } from '../src/sim/zoning/cells';
-import type { ZoneKind } from '../src/sim/zoning/paint';
+import { planZoneStroke, type LandUse } from '../src/sim/zoning/paint';
 import { parseArgs } from 'node:util';
 import { buildScenario, isScenarioName, SCENARIOS } from '../src/sim/scenarios';
 import { meadowScenario, meadowTips, planMeadowRoad } from '../src/sim/scenarios/meadow';
 import { BUDGET } from '../src/sim/town/economy';
 import { editCost } from '../src/sim/town/budget';
-import type { TownView } from '../src/sim/town/town';
+import { CLOCK_START, MINUTES_PER_DAY, type TownView } from '../src/sim/town/town';
 import { DT, World, type SimStats } from '../src/sim/world';
 
 // Bare --paint retains the original residential run. An optional preset can follow it.
@@ -27,6 +27,7 @@ const { values } = parseArgs({
     every: { type: 'string', default: '0' },
     json: { type: 'boolean', default: false },
     paint: { type: 'string' },
+    'parking-lot': { type: 'string' },
     connect: { type: 'boolean', default: false },
   },
 });
@@ -53,11 +54,19 @@ const fmt = (st: SimStats): string =>
     `lost=${st.lost}`,
   ].join('  ');
 
+const happiness = (view: TownView) => view.households.reduce((n, h) => n + h.happiness, 0) / Math.max(1, view.households.length);
+
 const town = (view: TownView): string => {
   const { totals: t } = view;
   const clock = `${String(Math.floor(view.minuteOfDay / 60)).padStart(2, '0')}:${String(view.minuteOfDay % 60).padStart(2, '0')}`;
   return [
     `  town day ${view.day} ${clock}`,
+    `trips=${view.parking.trips}`,
+    `parked=${view.parking.parked}`,
+    `turned-away=${view.parking.turnedAway}`,
+    `mean-walk=${(view.parking.walkMetres / Math.max(1, view.parking.parked)).toFixed(1)}m`,
+    `shop-visits=${customers}`,
+    `happiness=${(100 * happiness(view)).toFixed(1)}%`,
     `homes=${view.households.length}`,
     `balance=${view.budget.balance}`,
     `taxes=${view.budget.yesterday.homes}/${view.budget.yesterday.shops}/${view.budget.yesterday.workplaces}`,
@@ -103,19 +112,30 @@ if (values.paint !== undefined) {
   if (values.paint !== 'homes' && values.paint !== 'mixed') throw new Error('--paint expects homes or mixed');
   const cells = world.scenario.zones;
   if (!cells) throw new Error('--paint requires --scenario meadow');
-  const zoning = new Map<CellKey, ZoneKind>();
+  const zoning = new Map<CellKey, LandUse>();
   for (const raw of cells.keys) {
     const key = raw as CellKey;
     const { column, side } = decodeCellKey(key);
     const band = (column + side * 2) % 6;
     zoning.set(key, values.paint === 'homes' || band < 3 ? 'residential' : band === 3 ? 'shops' : 'workplaces');
   }
-  pay(zoning.size * BUDGET.zonePerCell);
+  if (values['parking-lot']) {
+    // Reserve these consecutive frontage cells before applying the mixed paint preset.
+    const start = Number(values['parking-lot']);
+    const keys = [start, start + 8, start + 16] as CellKey[];
+    const plan = planZoneStroke(cells, new Map(), 'parking', keys);
+    if (!plan.ok) throw new Error(plan.reason);
+    pay(editCost([], plan.stroke));
+    for (const key of keys) zoning.set(key, 'parking');
+  }
+  pay([...zoning.values()].filter(use => use !== 'parking').length * BUDGET.zonePerCell);
   world.setZoning(zoning);
 }
+let customers = 0;
 const started = performance.now();
 for (let t = 0; t < ticks; t++) {
   world.step();
+  if (world.tick % (MINUTES_PER_DAY / DT) === (MINUTES_PER_DAY - CLOCK_START) / DT) customers += world.townView()?.businesses.reduce((n, b) => n + b.customers, 0) ?? 0;
   if (values.json || every <= 0 || world.tick % every !== 0) continue;
   console.log(fmt(world.stats()));
   const view = world.townView();
@@ -123,6 +143,7 @@ for (let t = 0; t < ticks; t++) {
 }
 const elapsedMs = performance.now() - started;
 
+const finalTown = world.townView();
 const summary = {
   scenario: scenarioName,
   seed,
@@ -131,6 +152,9 @@ const summary = {
   hash: world.hash(),
   msPerTick: Number((elapsedMs / ticks).toFixed(4)),
   stats: world.stats(),
+  parking: finalTown?.parking,
+  customers,
+  happiness: finalTown ? happiness(finalTown) : undefined,
 };
 
 if (values.json) {

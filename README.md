@@ -24,6 +24,8 @@ Select **Bulldoze** and point at a street. The red highlight shows the segment t
 
 Cars travel between the two map entrances and follow the quickest available route by free-flow travel time. If a car still needs a street you want to remove, new arrivals wait while traffic clears. Keep the simulation running to finish the edit or choose **Cancel edit**.
 
+In Meadow Vale, residents park and walk to local shops and workplaces. Open a business card to see its occupied spaces and how many drivers it turned away today. **Parking occupancy** colours free bays green and occupied bays orange. Select **Parking**, choose two, four or six spaces, and click empty frontage near a busy shop. The preview shows the construction price and daily upkeep. Upgrading a road to **Town street with parking** also adds bays along the kerb.
+
 **R** selects Road, **C** selects Curve, **B** selects Bulldoze, and **V** selects Pan. **Escape** cancels a draft. Right-drag to pan and scroll to zoom.
 
 **Space** pauses the simulation, **1–4** set speed, and **L** toggles the lane graph. The original traffic maps are available at `?scenario=roundabout` and `?scenario=straight`.

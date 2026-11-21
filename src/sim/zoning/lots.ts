@@ -70,7 +70,7 @@ export function zonedLots(scenario: Scenario, zoning: Zoning, occupied: Lot[] = 
   const gardens = scenario.decor.houses.flatMap(h => h.garden ?? []);
   for (let i = 0; i < cells.count; i++) {
     const key = cells.keys[i]! as CellKey;
-    if (!zoning.has(key)) continue;
+    if (!zoning.has(key) || zoning.get(key) === 'parking') continue;
     const q = cells.corners.subarray(i * 8, i * 8 + 8);
     const xs = [q[0]!, q[2]!, q[4]!, q[6]!], ys = [q[1]!, q[3]!, q[5]!, q[7]!];
     if (gardens.some(g => Math.min(...xs) < g.maxX && Math.max(...xs) > g.minX
@@ -91,6 +91,7 @@ export function zonedLots(scenario: Scenario, zoning: Zoning, occupied: Lot[] = 
     const { road, column, row, side } = decodeCellKey(key);
     if (row !== 0) continue;
     const zone = zoning.get(key)!;
+    if (zone === 'parking') continue;
     const detached = (zone === 'workplaces' || (column + side * 2) % 4 === 0)
       && footprint(key, DETACHED).every(k => available.has(k) && zoning.get(k) === zone);
     const size = detached ? DETACHED : COTTAGE;

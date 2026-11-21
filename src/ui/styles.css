@@ -169,3 +169,17 @@ button.bulldoze.active, button.bulldoze.active:hover { background: #904731; }
 .preview-cost { float: right; margin-left: 12px; font-size: 12px; font-variant-numeric: tabular-nums; }
 .road-picker { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
 .road-picker select { font: inherit; padding: 3px 6px; border: 1px solid var(--line); background: var(--panel); color: inherit; border-radius: 3px; }
+
+/* Keep the lot tool and the household/business cards accessible at map zoom. */
+@media (min-width: 1214px) and (max-width: 1600px) {
+  .hud:has(.editor) .hud-column { bottom: 86px; }
+}
+@media (min-width: 641px) and (max-width: 1000px) {
+  .tool kbd { display: none; }
+  .tool { padding: 0 8px; }
+}
+@media (max-width: 640px) {
+  .tool-bar { width: min(560px, calc(100vw - 24px)); display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 1px; }
+  .tool-divider { display: none; }
+  .tool { flex-direction: column; gap: 2px; padding: 3px 1px; font-size: 10px; }
+}

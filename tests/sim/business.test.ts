@@ -80,7 +80,7 @@ it('rezoning a business mid-commute cancels the trip and releases its employees'
     world.step();
     const v = world.vehicles;
     const slot = v.alive.findIndex((alive, i) => !!alive && workers.some(p => p.id === v.owner[i])
-      && v.dest[i] === world.routing.sinks.length + business.home);
+      && world.townView()!.households.some(h => h.members.some(p => p.id === v.owner[i] && p.activity === 'outbound' && p.place === business.name)));
     if (slot < 0) continue;
     const changed = new Map(zoning);
     changed.set(business.lot.key, 'residential');

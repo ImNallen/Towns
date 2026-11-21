@@ -6,7 +6,7 @@ import type { Scenario, ScenarioName } from '../sim/scenarios';
 import type { TownView } from '../sim/town/town';
 import type { SimStats } from '../sim/world';
 import type { CellKey, ZoneCells } from '../sim/zoning/cells';
-import type { ZoneKind } from '../sim/zoning/paint';
+import type { LandUse } from '../sim/zoning/paint';
 
 /** Main thread → simulation worker. */
 export type ToWorker =
@@ -17,7 +17,7 @@ export type ToWorker =
   | { type: 'upgradeRoad'; segment: number; editCount: number; roadType: RoadType }
   | { type: 'bulldozeRoad'; segment: number; editCount: number }
   /** Cells the brush passed over; the worker plans the stroke against its own edits. `zone: null` erases. */
-  | { type: 'paintZone'; zone: ZoneKind | null; cells: readonly CellKey[] }
+  | { type: 'paintZone'; zone: LandUse | null; cells: readonly CellKey[] }
   | { type: 'undo' }
   | { type: 'cancelRoadEdit' };
 

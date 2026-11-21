@@ -1,7 +1,8 @@
+import { BUDGET } from '../sim/town/economy';
 import { ROAD_ORDER, ROAD_TYPES, type RoadType } from '../sim/network/roadTypes';
 import { useEffect, useState } from 'react';
 import type { Game } from '../render/game';
-import { ZONE_KINDS, type ZoneKind } from '../sim/zoning/paint';
+import { ZONE_KINDS, type LandUse } from '../sim/zoning/paint';
 import { BudgetPanel, money, dayClock, HouseholdCard, TownPanel } from './town';
 
 const SPEEDS = [1, 2, 4, 8] as const;
@@ -23,6 +24,7 @@ export function App({ game }: { game: Game }) {
   const [fps, setFps] = useState(0);
   const [speed, setSpeed] = useState(game.speed());
   const [lastSpeed, setLastSpeed] = useState(speed || 1);
+  const [occupancy, setOccupancy] = useState(false);
   const [lanes, setLanes] = useState(game.showLanes());
 
   useEffect(() => {
@@ -54,7 +56,7 @@ export function App({ game }: { game: Game }) {
     setEditor(game.editor());
   };
   const roadPicker = editor && ['road', 'curve', 'upgrade'].includes(editor.tool);
-  const changeBrush = (brush: ZoneKind | null): void => {
+  const changeBrush = (brush: LandUse | null): void => {
     game.setBrush(brush);
     setEditor(game.editor());
   };
@@ -119,6 +121,7 @@ export function App({ game }: { game: Game }) {
     : editor?.tool === 'bulldoze' ? 'Select a street segment to remove.'
     : editor?.tool === 'upgrade' ? 'Choose a road type, then click a segment.'
     : editor?.tool === 'curve' ? 'Drag between two points, then place the bend.'
+            : editor?.tool === 'parking' ? 'Choose a size, then click empty frontage beside a street.'
     : editor?.tool === 'zone' ? (editor.brush
       ? 'Drag along the plots beside a street to zone them. Plots fill in toward the street.'
       : 'Drag across zoned plots to clear them and the plots behind.')
@@ -159,6 +162,7 @@ export function App({ game }: { game: Game }) {
               <button key={s} className={speed === s ? 'active' : ''} onClick={() => changeSpeed(s)} aria-label={`${s}× speed`} aria-pressed={speed === s} title={`${s}× speed (${i + 1})`}>{s}×</button>
             ))}
           </div>
+          {town && <label className="toggle"><input type="checkbox" checked={occupancy} onChange={e => { setOccupancy(e.target.checked); game.setParkingView(e.target.checked); }} />Parking occupancy</label>}
           <details className="traffic-details">
             <summary>Traffic details</summary>
             <dl>
@@ -182,6 +186,7 @@ export function App({ game }: { game: Game }) {
             <dt>Yesterday’s wages and taxes</dt><dd>{money(business.lastDailyCost)}</dd>
             <dt>Taxes paid to date</dt><dd>{money(business.taxesPaid)}</dd>
             <dt>Deliveries today</dt><dd>{business.deliveries}</dd>
+            <dt>Parking</dt><dd>{business.occupied}/{business.capacity} · {business.turnedAway} turned away today</dd>
             <dt>Customers today</dt><dd>{business.customers}</dd></dl>
         </section>}
         {household && <HouseholdCard household={household} onClose={() => selectHouse(null)} />}
@@ -201,6 +206,9 @@ export function App({ game }: { game: Game }) {
             game.cancelRoadEdit();
             setEditor(game.editor());
           }}>Finish road</button>}
+          {editor.tool === 'parking' && <label className="road-picker">Lot size <select value={editor.lotColumns} onChange={e => { game.setLotColumns(Number(e.target.value)); setEditor(game.editor()); }}>
+            {[1, 2, 3].map(n => <option key={n} value={n}>{n * 2} spaces · {money(n * BUDGET.parkingPerCell)}</option>)}
+          </select></label>}
           {editor.tool === 'road' && <label className="angle-toggle">
             <input type="checkbox" checked={editor.angleSnapping} onChange={(e) => {
               game.setAngleSnapping(e.target.checked);
@@ -229,6 +237,7 @@ export function App({ game }: { game: Game }) {
           <button aria-label="Bulldoze road" aria-pressed={editor.tool === 'bulldoze'} aria-keyshortcuts="B" className={editor.tool === 'bulldoze' ? 'active tool bulldoze' : 'tool bulldoze'} onClick={() => changeTool('bulldoze')} title="Bulldoze road (B)">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 12V8h6l2 4M5 8V5h4l1 3m2 5 3 1m1-6v6l2 2h-3l-1-3"/><rect x="2" y="12" width="10" height="4" rx="2"/></svg><span>Bulldoze</span><kbd>B</kbd>
           </button>
+          <button aria-label="Build parking lot" aria-pressed={editor.tool === 'parking'} className={editor.tool === 'parking' ? 'active tool' : 'tool'} onClick={() => changeTool('parking')} title="Build parking lot"><b>P</b><span>Parking</span></button>
           <button aria-label="Zone" aria-pressed={editor.tool === 'zone'} aria-keyshortcuts="Z" className={editor.tool === 'zone' ? 'active tool' : 'tool'} onClick={() => changeTool('zone')} title="Zone (Z)">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 3h6v6H3zm8 0h6v6h-6zM3 11h6v6H3zm8 0h6v6h-6z" /></svg><span>Zone</span><kbd>Z</kbd>
           </button>
