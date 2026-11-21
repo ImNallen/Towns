@@ -89,16 +89,16 @@ it('stops opening shops when residents are served, then resumes after a closure'
   const world = new World(scenario, 1);
   world.setZoning(shops);
   const initial = world.townView()!;
-  for (let i = 0; i < 5 * day; i++) world.step();
+  for (let i = 0; i < 12 * day; i++) world.step();
   const served = world.townView()!;
   expect(served.demand.shops).toBe(0);
-  expect(served.businesses).toHaveLength(Math.ceil(initial.totals.population / 12));
+  expect(served.businesses).toHaveLength(Math.ceil(initial.totals.population / 8));
   for (let i = 0; i < day; i++) world.step();
   expect(world.townView()!.businesses).toHaveLength(served.businesses.length);
   shops.delete(served.businesses[0]!.lot.key);
   world.setZoning(shops);
   expect(world.townView()!.demand.shops).toBeGreaterThan(0);
-  for (let i = 0; i < 5 * day; i++) world.step();
+  for (let i = 0; i < 12 * day; i++) world.step();
   expect(world.townView()!.demand.shops).toBe(0);
 });
 
@@ -118,4 +118,33 @@ it('closes a shop when a new road covers it and grows a replacement after undo',
   for (let t = 0; t < day; t++) undo.world.step();
   expect(undo.world.townView()!.businesses.map(b => b.zone)).toContain('shops');
   expect(undo.world.stats().lost).toBe(0);
+});
+
+it('responds to each brush before construction starts', () => {
+  for (const zone of ['residential', 'shops', 'workplaces'] as const) {
+    const world = new World(scenario, 1);
+    const before = world.townView()!.demand;
+    world.setZoning(new Map(Array.from(scenario.zones!.keys, k => [k as CellKey, zone])));
+    const after = world.townView()!.demand;
+    expect(after[zone]).toBeLessThan(before[zone]);
+    if (zone === 'residential') expect(after.workplaces).toBeGreaterThan(before.workplaces);
+    else expect(after.residential).toBeGreaterThan(before.residential);
+  }
+});
+
+it('keeps all three demand bars inside their range in the mixed preset', () => {
+  const world = new World(scenario, 1);
+  world.setZoning(new Map(Array.from(scenario.zones!.keys, raw => {
+    const key = raw as CellKey;
+    const {column, side} = decodeCellKey(key);
+    const band = (column + side * 2) % 6;
+    return [key, band < 3 ? 'residential' : band === 3 ? 'shops' : 'workplaces'];
+  })));
+  for (let d = 0; d < 10; d++) {
+    for (let t = 0; t < day; t++) world.step();
+    for (const value of Object.values(world.townView()!.demand)) {
+      expect(value).toBeGreaterThan(0);
+      expect(value).toBeLessThan(100);
+    }
+  }
 });

@@ -392,20 +392,37 @@ export class Town {
   }
 
   private demandFor(zone: ZoneKind): number {
-    let jobs = 0, workers = 0, adults = 0, people = 0, shops = 0;
-    for (let r = 0; r < this.spec.regions.length; r++) jobs += this.spec.regions[r]!.jobs;
+    let jobs = 0, adults = 0, people = 0, shops = 0, plannedShops = 0;
+    let workers = 0;
+    for (const filled of this.filled) workers += filled;
+    for (const region of this.spec.regions) jobs += region.jobs;
     for (let h = 0; h < this.spec.homes.length; h++) {
-      adults += this.level[h] ? this.adults[h]! : 0;
-      people += this.memberCount[h]!;
-      if (!this.open[h]) continue;
-      const lot = this.spec.homes[h]!.lot!;
-      jobs += lotJobs(lot);
-      if (lotZone(lot) === 'shops') shops++;
+      if (this.level[h]) {
+        adults += this.adults[h]!;
+        people += this.memberCount[h]!;
+        continue;
+      }
+      const lot = this.spec.homes[h]!.lot;
+      if (!lot) continue;
+      // Vacant serviced land counts as a quarter of its eventual supply.
+      const supply = this.open[h] ? 1 : 0.25;
+      if (lotZone(lot) === 'residential') {
+        adults += 0.4;
+        people += 0.8;
+      } else {
+        jobs += lotJobs(lot) * supply;
+        if (lotZone(lot) === 'shops') {
+          if (this.open[h]) shops++;
+          else plannedShops++;
+        }
+      }
     }
-    for (let r = 0; r < this.filled.length; r++) workers += this.filled[r]!;
-    if (zone === 'shops') return Math.min(100, Math.max(0, (people - 12 * shops) * 5));
-    if (zone === 'workplaces') return Math.min(100, (adults - workers) * 12);
-    return Math.min(100, 25 + 8 * (jobs - workers));
+    if (zone === 'shops') return Math.round(100 * Math.max(0, people - 8 * shops) / (people + 8 + 2 * plannedShops));
+    const vacancies = Math.max(0, jobs - workers);
+    const jobseekers = Math.max(0, adults - workers);
+    const totalPressure = Math.max(1, adults + jobseekers + jobs + vacancies);
+    if (zone === 'workplaces') return Math.round(100 * (adults + jobseekers) / totalPressure);
+    return Math.round(100 * (jobs + vacancies) / totalPressure);
   }
 
   private grow(minute: number, routing: Routing): void {
