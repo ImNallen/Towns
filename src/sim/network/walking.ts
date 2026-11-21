@@ -103,6 +103,7 @@ export class WalkingNetwork {
       const a = attach(link.a,0.05), b = attach(link.b,0.05);
       if (!link.crossing) { join(a,b); continue; }
       const crossing = crossingAt(network,link.a,link.b,!!link.zebra);
+      crossing.signal = link.signal;
       crossing.walkGroup = link.walkGroup;
       this.crossings.push(crossing);
       for (const zone of crossing.lanes) this.stops[zone.lane]!.push({crossing,from:zone.from,to:zone.to});
@@ -228,7 +229,8 @@ export class Walkers {
       let edge = this.edge(i);
       if (edge?.crossing) {
         const c=edge.crossing;
-        const permitted = c.walkGroup === undefined || signalAspect(c.walkGroup, tick) === 'green';
+        if (!this.along[i]) c.waiting = true;
+        const permitted = c.walkGroup === undefined || signalAspect(c.walkGroup, c.clock ?? tick) === 'green';
         c.requested ||= permitted;
         if (!this.along[i] && (c.blocked || !permitted)) continue;
         c.occupied=true;

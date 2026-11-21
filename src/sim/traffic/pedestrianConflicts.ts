@@ -4,6 +4,9 @@ import type { Network } from '../network/types';
 import type { Vehicles } from './vehicles';
 
 export interface Crossing {
+  signal?: number;
+  clock?: number;
+  waiting?: boolean;
   walkGroup?: number;
   zebra: boolean;
   /** Interval of vehicle-front positions where the nose intersects the crossing.
@@ -41,6 +44,7 @@ export function crossingAt(network: Network, a: Vec2, b: Vec2, zebra: boolean): 
 
 export function observeCrossings(crossings: Crossing[], vehicles: Vehicles): void {
   for (const c of crossings) {
+    c.waiting = false;
     c.requested = c.occupied = c.blocked = false;
     for (const zone of c.lanes) {
       for (let p = 0; p < vehicles.highWater; p++) {

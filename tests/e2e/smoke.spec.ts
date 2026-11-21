@@ -553,6 +553,8 @@ test('lights control a live junction', async ({page}) => {
   await expect.poll(editor).toMatchObject({roadCount:2,pending:false});
   await page.getByRole('button',{name:'Roads',exact:true}).click();
   await page.getByRole('button',{name:'Build traffic lights'}).click();
+  await expect(page.getByLabel('Signal plan')).toHaveValue('actuated');
+  await page.getByLabel('Signal plan').selectOption('fixed');
   await page.mouse.click(...at(0,0));
   await page.keyboard.press('v');
   await page.evaluate(()=>window.__towns!.setSpeed(60));
@@ -592,4 +594,30 @@ test('Mill Street queues divert drivers to North Road during the morning rush', 
     return true;
   });
   await page.screenshot({path: 'artifacts/screens/traffic-diversion.png'});
+});
+
+test('a quiet junction keeps the actuated main road green', async ({page}) => {
+  const {at,editor}=await connectedStreet(page,'',true);
+  await page.keyboard.press('r');
+  await page.mouse.move(...at(0,0));
+  await page.mouse.down();
+  await page.mouse.move(...at(0,45),{steps:10});
+  await page.mouse.up();
+  await expect.poll(editor).toMatchObject({roadCount:2,pending:false});
+  await page.keyboard.press('j');
+  await expect(page.getByLabel('Signal plan')).toHaveValue('actuated');
+  const balance=()=>page.evaluate(()=>window.__towns!.town()!.budget.balance);
+  const before=await balance();
+  await page.mouse.click(...at(0,0));
+  await expect.poll(balance).toBe(before-160);
+  await page.evaluate(()=>window.__towns!.setSpeed(60));
+  await page.waitForFunction(()=>{
+    const game=window.__towns!, stats=game.stats();
+    if(stats && stats.tick>=1800 && stats.tick%1000>620 && stats.tick%1000<860) {
+      game.setSpeed(0);
+      return true;
+    }
+    return false;
+  });
+  await page.screenshot({path:'artifacts/screens/actuated-lights.png'});
 });

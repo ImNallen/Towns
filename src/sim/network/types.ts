@@ -40,11 +40,12 @@ export interface Junction {
   point: { x: number; y: number };
   arms: { incoming: number; group: number }[];
   lights: boolean;
+  actuated?: boolean;
 }
 
 export interface Network {
   readonly junctions?: Junction[];
-  readonly pedestrianLinks?: { a: { x: number; y: number }; b: { x: number; y: number }; crossing: boolean; walkGroup?: number; zebra?: boolean }[];
+  readonly pedestrianLinks?: { a: { x: number; y: number }; b: { x: number; y: number }; crossing: boolean; signal?: number; walkGroup?: number; zebra?: boolean }[];
   readonly lanes: Lane[];
   readonly surfaces: Surface[];
   /** Lanes with no predecessor: where vehicles enter the map. */

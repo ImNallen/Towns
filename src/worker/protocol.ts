@@ -13,7 +13,7 @@ export type ToWorker =
   | { type: 'init'; walkLimit?: number; scenario: ScenarioName; seed: number; speed: number }
   /** Simulation speed multiplier; 0 pauses. */
   | { type: 'setSpeed'; speed: number }
-  | { type: 'buildLights'; point: Vec2 }
+  | { type: 'buildLights'; point: Vec2; actuated: boolean }
   | { type: 'buildWalk'; walk: 'footpath' | 'zebra'; start: Vec2; end: Vec2 }
   | { type: 'buildRoad'; roadType?: RoadType; start: Vec2; end: Vec2; bend?: Vec2 }
   | { type: 'upgradeRoad'; segment: number; editCount: number; roadType: RoadType }
@@ -41,6 +41,7 @@ export type FromWorker =
       /** Per slot: x, y, heading (radians). */
       positions: Float32Array;
       walkers: Float32Array;
+      signalClocks?: Int16Array;
       /** Per slot vehicle id, -1 for empty slots. */
       ids: Int32Array;
       /** Catalogue model for each occupied slot. */

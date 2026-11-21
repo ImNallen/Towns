@@ -300,6 +300,10 @@ export function App({ game }: { game: Game }) {
 
       {editor && <section className="editor" aria-label="Road editor">
         <div className="placement-info panel">
+          {editor.tool === 'lights' && <label className="road-picker">Signal plan <select value={editor.actuated ? 'actuated' : 'fixed'}
+            onChange={event => { game.setActuated(event.target.value === 'actuated'); setEditor(game.editor()); }}>
+            <option value="actuated">Traffic actuated</option><option value="fixed">Fixed time</option>
+          </select></label>}
           {roadPicker && <label className="road-picker">Road type <select value={editor.roadType}
             onChange={event => { const type = ROAD_ORDER[event.target.selectedIndex]; if (type) pickType(type); }}>
             {ROAD_ORDER.map((type, i) => <option key={type} value={type}>{ROAD_TYPES[type].name} · {i + 5}</option>)}
