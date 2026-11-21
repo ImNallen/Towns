@@ -24,7 +24,7 @@ export function Catalogue() {
       <nav aria-label="Catalogue sections">{['cheap', 'mid', 'expensive', 'street'].map(id =>
         <a key={id} href={'#' + id}>{id === 'street' ? 'Sample street' : id}</a>)}</nav>
     </header>
-    <p>Low-density homes · Each finish shown in both orientations · Lot sizes in zone cells</p>
+    <p>Low-density homes · Selected wall and roof combinations · Lot sizes in zone cells</p>
     {(['cheap', 'mid', 'expensive'] as const).map(tier => <section key={tier} id={tier}>
       <h2>{tier}</h2>
       <div className="design-grid">{BLUEPRINTS.filter(b => b.tier === tier).map(b =>

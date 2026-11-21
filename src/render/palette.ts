@@ -1,8 +1,14 @@
 /** All colours used on the map. Flat surfaces render at exactly these values (see lighting in scene.ts). */
 export const PALETTE = {
   building: {
-    cream: '#e5d9be', chalk: '#e8e7dd', clay: '#c79f86',
-    slate: '#87979c', terracotta: '#b9816c', sage: '#9fa58b',
+    walls: {
+      chalk: '#ece9de', cream: '#e5d9be', stone: '#cec8b6', mist: '#c1ced1',
+      brick: '#c48e7c', ochre: '#ddc395', celadon: '#becdb8', rose: '#ddbfb6',
+    },
+    roofs: {
+      slate: '#82949e', terracotta: '#b9816c', charcoal: '#606971', moss: '#919b7d', tan: '#bdab8e',
+    },
+    chimney: '#c79f86',
     trim: '#f5f0df', hedge: '#819774', trunk: '#9b8467', pool: '#94becb',
   },
   light: '#ffffff',

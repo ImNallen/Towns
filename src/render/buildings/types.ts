@@ -1,3 +1,5 @@
+import type { PALETTE } from '../palette';
+
 /** Metres in the lot frame: x along the frontage, y away from the front kerb; origin at lot centre. */
 export interface Footprint { x: number; y: number; width: number; depth: number }
 export type Tier = 'cheap' | 'mid' | 'expensive';
@@ -8,8 +10,8 @@ export type Part =
   | (Footprint & { kind: 'porch' | 'chimney' | 'hedge' | 'fence'; height: number })
   | (Footprint & { kind: 'pool' })
   | { kind: 'tree'; x: number; y: number; radius: number; height: number };
-export type WallSwatch = 'cream' | 'chalk' | 'clay';
-export type RoofSwatch = 'slate' | 'terracotta' | 'sage';
+export type WallSwatch = keyof typeof PALETTE.building.walls;
+export type RoofSwatch = keyof typeof PALETTE.building.roofs;
 export interface Blueprint {
   id: string;
   name: string;
@@ -17,7 +19,8 @@ export interface Blueprint {
   tier: Tier;
   density: 'low';
   lot: LotSize;
-  swatches: readonly [WallSwatch, ...WallSwatch[]];
+  roofs: readonly [RoofSwatch, RoofSwatch, RoofSwatch, ...RoofSwatch[]];
+  walls: readonly [WallSwatch, ...WallSwatch[]];
   parts: readonly Part[];
   upgradesTo?: string;
 }
