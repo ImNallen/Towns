@@ -136,7 +136,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     scene.add(roadLayer, laneOverlay);
   };
 
-  const gridVisible = (): boolean => options.showZones || editor?.state().tool === 'zone' || editor?.state().tool === 'parking';
+  const gridVisible = (): boolean => options.showZones || editor?.state().tool === 'zone' || editor?.state().tool === 'parking' || editor?.state().tool === 'park';
   const drawZones = (): void => {
     if (zoneLayer) disposeLayer(zoneLayer);
     zoneLayer = cells ? buildZoneLayer(cells) : null;

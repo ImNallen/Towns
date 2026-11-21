@@ -158,7 +158,7 @@ function postFrame(w: World): void {
   const models = new Uint8Array(w.vehicles.highWater);
   const paint = new Uint8Array(w.vehicles.highWater);
   const slots = w.writeSnapshot(positions, ids, models, paint);
-  const walkers = w.walkers?.positions() ?? new Float32Array(0);
+  const walkers = w.pedestrianPositions();
   post({ type: 'frame', walkers, tick: w.tick, slots, positions, ids, models, paint, stats: w.stats() }, [walkers.buffer, positions.buffer, ids.buffer, models.buffer, paint.buffer]);
 }
 

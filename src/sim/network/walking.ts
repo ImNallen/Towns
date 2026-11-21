@@ -24,7 +24,7 @@ export class WalkingNetwork {
   readonly stops: { crossing: Crossing; from: number; to: number }[][];
   edgeCount = 0;
 
-  constructor(network: Network, doors: readonly Vec2[], bays: readonly Bay[]) {
+  constructor(network: Network, doors: readonly Vec2[], bays: readonly Bay[], parks: readonly Vec2[] = []) {
     this.stops = network.lanes.map(() => []);
     const ids = new Map<string, number>();
     const node = (p: Vec2) => {
@@ -89,7 +89,7 @@ export class WalkingNetwork {
       join(place, id);
       return place;
     };
-    for (const point of [...doors, ...bays]) this.places.push(attach(point,30));
+    for (const point of [...doors, ...bays,...parks]) this.places.push(attach(point,30));
     for (const s of strips) if (s.surface.style === 'footpath') {
       attach(s.a,0.05,s.surface.id);
       attach(s.b,0.05,s.surface.id);

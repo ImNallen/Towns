@@ -91,7 +91,8 @@ export function TownPanel({ town }: { town: TownView }) {
 function activity(person: PersonView): string {
   const { place } = person;
   switch (person.activity) {
-    case 'walking': return 'Walking';
+    case 'park': return 'Visiting ' + place;
+    case 'walking': return person.errand === 'leisure' ? 'Walking on a park visit' : 'Walking';
     case 'searching': return 'Looking for parking';
     case 'home': return 'At home';
     case 'homebound': return 'Driving home';
@@ -133,6 +134,7 @@ export function HouseholdCard({ household, onClose }: { household: HouseholdView
         <Need label="Security" value={needs.security} />
         <Need label="Happiness" value={household.happiness} />
       </div>
+      {household.nearbyPark && <p>{household.nearbyPark.name} · {household.nearbyPark.metres} m on foot</p>}
       {household.walkIssue && <p>No safe way to walk to {household.walkIssue}.</p>}
       <ul className="members">
         {household.members.map((person) => (

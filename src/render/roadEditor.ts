@@ -1,3 +1,4 @@
+import { parkFootprint } from '../sim/town/parks';
 import { edgeOffset, ROAD_TYPES, type RoadType } from '../sim/network/roadTypes';
 import { BUDGET } from '../sim/town/economy';
 import { editCost, shortage } from '../sim/town/budget';
@@ -17,7 +18,7 @@ import { PALETTE } from './palette';
 import { buildRoads } from './roads';
 import { buildStrokePreview } from './zones';
 
-export type MapTool = 'road' | 'curve' | 'upgrade' | 'bulldoze' | 'zone' | 'parking' | 'pan' | 'footpath' | 'zebra';
+export type MapTool = 'road' | 'curve' | 'upgrade' | 'bulldoze' | 'zone' | 'parking' | 'park' | 'pan' | 'footpath' | 'zebra';
 export interface EditorState {
   tool: MapTool;
   roadType: RoadType;
@@ -153,7 +154,7 @@ export class RoadEditor {
       this.hover.visible = false;
       this.move = null;
       if ((this.tool === 'bulldoze' || this.tool === 'upgrade') && this.phase.kind === 'idle') this.highlight(null);
-      if ((this.tool === 'zone' || this.tool === 'parking') && this.phase.kind === 'idle') this.previewStroke([], this.brush, '');
+      if ((this.tool === 'zone' || this.tool === 'parking' || this.tool === 'park') && this.phase.kind === 'idle') this.previewStroke([], this.brush, '');
     }, { signal });
     canvas.addEventListener('pointerup', (e) => this.point(e, true), { signal });
     canvas.addEventListener('lostpointercapture', (e) => this.cancelPointer(e), { signal });
@@ -207,6 +208,7 @@ export class RoadEditor {
 
   private parkingCells(cursor: Vec2): CellKey[] {
     const start = cellsAlong(this.cells, cursor, cursor)[0];
+    if (start !== undefined && this.tool === 'park') return parkFootprint(start,this.lotColumns);
     return start === undefined ? [] : Array.from({ length: this.lotColumns }, (_, i) => (start + i * 8) as CellKey);
   }
 
@@ -401,9 +403,9 @@ export class RoadEditor {
       this.canvas.setPointerCapture(e.pointerId);
       return;
     }
-    if (this.tool === 'zone' || this.tool === 'parking') {
-      const use = this.tool === 'parking' ? 'parking' : this.brush;
-      const touched = new Set(this.tool === 'parking' ? this.parkingCells(cursor) : cellsAlong(this.cells, cursor, cursor));
+    if (this.tool === 'zone' || this.tool === 'parking' || this.tool === 'park') {
+      const use = this.tool === 'park' || this.tool === 'parking' ? this.tool : this.brush;
+      const touched = new Set(this.tool === 'parking' || this.tool === 'park' ? this.parkingCells(cursor) : cellsAlong(this.cells, cursor, cursor));
       this.phase = { kind: 'painting', id: e.pointerId, zone: use, touched, lastPointer: cursor };
       this.canvas.setPointerCapture(e.pointerId);
       this.previewStroke(touched, use, 'Release');
@@ -432,7 +434,7 @@ export class RoadEditor {
 
   /** A house under the cursor that a click selects rather than starting a road from a nearby street. */
   private clickableHouse(cursor: Vec2): number | null {
-    if ((this.tool === 'bulldoze' || this.tool === 'upgrade') || this.tool === 'zone' || this.tool === 'parking') return null;
+    if ((this.tool === 'bulldoze' || this.tool === 'upgrade') || this.tool === 'zone' || this.tool === 'parking' || this.tool === 'park') return null;
     const house = this.houses.houseAt(cursor);
     return house !== null && (this.tool === 'pan' || !this.snap(cursor)) ? house : null;
   }
@@ -490,7 +492,7 @@ export class RoadEditor {
     }
     if (phase.kind === 'painting') {
       if (phase.id !== e.pointerId) return;
-      if (phase.zone === 'parking') {
+      if (phase.zone === 'parking' || phase.zone === 'park') {
         phase.touched = new Set(this.parkingCells(cursor));
       } else for (const key of cellsAlong(this.cells, phase.lastPointer, cursor)) phase.touched.add(key);
       phase.lastPointer = cursor;
@@ -516,6 +518,7 @@ export class RoadEditor {
     }
     if (phase.kind === 'idle') {
       if (this.tool === 'bulldoze' || this.tool === 'upgrade') this.highlight(this.segmentAt(cursor));
+      else if (this.tool === 'park') this.previewStroke(this.parkingCells(cursor),'park','Click');
       else if (this.tool === 'parking') this.previewStroke(this.parkingCells(cursor), 'parking', 'Click');
       else if (this.tool === 'zone') this.previewStroke(cellsAlong(this.cells, cursor, cursor), this.brush, 'Click or drag');
       else this.mark(this.snap(cursor)?.point);
@@ -639,6 +642,7 @@ export class RoadEditor {
     const cost = editCost(this.edits, plan.stroke);
     const n = plots(plan.stroke.cells.length);
     this.hint = zone ? `${action} to zone ${n} ${zone}.` : `${action} to clear ${n}.`;
+    if (zone === 'park') this.hint = action + ' to build a park · $' + plan.stroke.cells.length * BUDGET.parkUpkeep + '/day.';
     if (zone === 'parking') this.hint = action + ' to build ' + plan.stroke.cells.length * 2 + ' spaces · $' + plan.stroke.cells.length * 2 * BUDGET.upkeepPerBay + '/day.';
     const reason = shortage(this.balance, cost);
     if (reason) this.hint = reason;
