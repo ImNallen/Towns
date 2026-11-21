@@ -1,17 +1,20 @@
 import * as THREE from 'three';
 import { offsetPolyline, polyline, slicePolyline, type Polyline } from '../sim/math/polyline';
 import { add, scale, distance, dot, projectOntoSegment, type Vec2 } from '../sim/math/vec';
-import { MEADOW_BUILD_BOUNDS, MEADOW_ROAD_WIDTH, meadowLayout, meadowNetwork, meadowRoadSections, snapToMeadowStreet, planMeadowRoad, type MeadowEdit } from '../sim/scenarios/meadow';
+import { MEADOW_BUILD_BOUNDS, MEADOW_ROAD_WIDTH, meadowLayout, meadowNetwork, meadowRoadSections, snapToMeadowStreet, planMeadowRoad, isZoneStroke, type MeadowEdit } from '../sim/scenarios/meadow';
 import { angleGuide, crossingAngleGuide, fitGuideToStreet, squareStreetGuide, type StreetPoint, type AngleGuide } from '../sim/network/angleSnap';
 import { JUNCTION_MOUTH } from '../sim/network/streets';
+import { cellsAlong, type CellKey, type ZoneCells } from '../sim/zoning/cells';
+import { planZoneStroke, type ZoneKind, type Zoning } from '../sim/zoning/paint';
 import type { ToWorker } from '../worker/protocol';
 import type { MapCamera } from './camera';
 import { disposeLayer } from './dispose';
 import { FlatMesh } from './flat';
 import { PALETTE } from './palette';
 import { buildRoads } from './roads';
+import { buildStrokePreview } from './zones';
 
-export type MapTool = 'road' | 'curve' | 'bulldoze' | 'pan';
+export type MapTool = 'road' | 'curve' | 'bulldoze' | 'zone' | 'pan';
 export interface EditorState {
   tool: MapTool;
   roadCount: number;
@@ -22,10 +25,19 @@ export interface EditorState {
   canUndo: boolean;
   angleSnapping: boolean;
   chaining: boolean;
+  brush: ZoneKind | null;
+  zoned: number;
+}
+
+export interface MeadowView {
+  readonly edits: readonly MeadowEdit[];
+  readonly cells: ZoneCells;
+  readonly zoning: Zoning;
 }
 
 const CHAIN_HINT = 'Click to place the next point. Click the last point or press Esc to finish.';
 const HOUSE_HINT = 'Click to see who lives here.';
+const plots = (n: number): string => `${n} ${n === 1 ? 'plot' : 'plots'}`;
 /** A press that moves further than this (px) is a drag, not a click. */
 const CLICK_SLOP = 6;
 
@@ -42,6 +54,7 @@ type EditPhase =
   /** A press on a house (or, with the pan tool, on open ground) that selects it if released in place. */
   | { kind: 'selecting'; id: number; house: number | null; press: Vec2 }
   | { kind: 'bending'; start: Vec2; end: Vec2; id: number | null }
+  | { kind: 'painting'; id: number; zone: ZoneKind | null; touched: Set<CellKey>; lastPointer: Vec2 }
   | { kind: 'chaining'; host: StreetPoint | undefined; start: Vec2; id: number | null }
   | { kind: 'pending'; chain?: { from: Vec2; to: Vec2 } }
   | { kind: 'waiting' };
@@ -79,6 +92,9 @@ function buildBoundary(): THREE.Mesh {
 
 export class RoadEditor {
   private edits: readonly MeadowEdit[] = [];
+  private cells: ZoneCells = { count: 0, keys: new Float64Array(), corners: new Float64Array() };
+  private zoning: Zoning = new Map();
+  private brush: ZoneKind | null = 'residential';
   private segments: readonly (readonly Vec2[])[] = [];
   private highlightedSegment: number | null = null;
   private roadCount = 0;
@@ -118,6 +134,7 @@ export class RoadEditor {
       this.hover.visible = false;
       this.move = null;
       if (this.tool === 'bulldoze' && this.phase.kind === 'idle') this.highlight(null);
+      if (this.tool === 'zone' && this.phase.kind === 'idle') this.previewStroke([], this.brush, '');
     }, { signal });
     canvas.addEventListener('pointerup', (e) => this.point(e, true), { signal });
     canvas.addEventListener('lostpointercapture', (e) => this.cancelPointer(e), { signal });
@@ -136,11 +153,12 @@ export class RoadEditor {
       pending: kind === 'pending' || kind === 'waiting',
       canCancel: kind === 'bending' || kind === 'waiting',
       canUndo: this.edits.length > 0,
+      brush: this.brush, zoned: this.zoning.size,
     };
   }
 
   canPan(e: PointerEvent): boolean {
-    return this.phase.kind !== 'drawing' && this.phase.kind !== 'removing' && (this.tool === 'pan' || e.button !== 0);
+    return this.phase.kind !== 'drawing' && this.phase.kind !== 'removing' && this.phase.kind !== 'painting' && (this.tool === 'pan' || e.button !== 0);
   }
 
   setAngleSnapping(enabled: boolean): void {
@@ -157,18 +175,28 @@ export class RoadEditor {
     this.boundary.visible = tool !== 'pan';
   }
 
-  accept(edits: readonly MeadowEdit[]): void {
+  setBrush(brush: ZoneKind | null): void {
+    this.cancelDraft();
+    this.brush = brush;
+    this.move ??= this.pointer;
+  }
+
+  accept({ edits, cells, zoning }: MeadowView): void {
     const chain = this.phase.kind === 'pending' ? this.phase.chain : undefined;
-    const latest = edits.at(-1);
-    const removed = edits.length > this.edits.length && latest && 'remove' in latest;
+    const latest = edits.length > this.edits.length ? edits.at(-1) : undefined;
     this.edits = edits;
+    this.cells = cells;
+    this.zoning = zoning;
     this.roadCount = edits.filter((edit) => 'points' in edit).length;
     const layout = meadowLayout(edits);
     this.streets = layout.streets;
     this.segments = layout.segments;
     this.connected = layout.connected;
     this.finish();
-    if (removed) this.hint = 'Segment removed. Undo to restore it.';
+    if (latest && 'remove' in latest) this.hint = 'Segment removed. Undo to restore it.';
+    else if (latest && isZoneStroke(latest)) {
+      this.hint = latest.zone ? `Zoned ${plots(latest.cells.length)} ${latest.zone}. Undo to remove them.` : `Cleared ${plots(latest.cells.length)}.`;
+    }
     for (const handle of [...this.handles.children]) disposeLayer(handle);
     for (const tip of layout.tips) {
       const marker = roadMarker();
@@ -210,7 +238,7 @@ export class RoadEditor {
     if (this.state().pending || this.edits.length === 0) return;
     this.finish();
     this.phase = { kind: 'pending' };
-    this.send({ type: 'undoRoad' });
+    this.send({ type: 'undo' });
   }
 
   cancel(): void {
@@ -318,6 +346,13 @@ export class RoadEditor {
       this.canvas.setPointerCapture(e.pointerId);
       return;
     }
+    if (this.tool === 'zone') {
+      const touched = new Set(cellsAlong(this.cells, cursor, cursor));
+      this.phase = { kind: 'painting', id: e.pointerId, zone: this.brush, touched, lastPointer: cursor };
+      this.canvas.setPointerCapture(e.pointerId);
+      this.previewStroke(touched, this.brush, 'Release');
+      return;
+    }
     if (this.tool === 'bulldoze') {
       const segment = this.segmentAt(cursor);
       this.highlight(segment);
@@ -341,7 +376,7 @@ export class RoadEditor {
 
   /** A house under the cursor that a click selects rather than starting a road from a nearby street. */
   private clickableHouse(cursor: Vec2): number | null {
-    if (this.tool === 'bulldoze') return null;
+    if (this.tool === 'bulldoze' || this.tool === 'zone') return null;
     const house = this.houses.houseAt(cursor);
     return house !== null && (this.tool === 'pan' || !this.snap(cursor)) ? house : null;
   }
@@ -377,8 +412,28 @@ export class RoadEditor {
       }
       return;
     }
+    if (phase.kind === 'painting') {
+      if (phase.id !== e.pointerId) return;
+      for (const key of cellsAlong(this.cells, phase.lastPointer, cursor)) phase.touched.add(key);
+      phase.lastPointer = cursor;
+      if (!release) {
+        this.previewStroke(phase.touched, phase.zone, 'Release');
+        return;
+      }
+      const plan = planZoneStroke(this.cells, this.zoning, phase.zone, [...phase.touched]);
+      this.finish();
+      if (!plan.ok) {
+        this.hint = plan.reason;
+        return;
+      }
+      this.phase = { kind: 'pending' };
+      this.hint = phase.zone ? 'Zoning plots…' : 'Clearing plots…';
+      this.send({ type: 'paintZone', zone: phase.zone, cells: [...phase.touched] });
+      return;
+    }
     if (phase.kind === 'idle') {
       if (this.tool === 'bulldoze') this.highlight(this.segmentAt(cursor));
+      else if (this.tool === 'zone') this.previewStroke(cellsAlong(this.cells, cursor, cursor), this.brush, 'Click or drag');
       else this.mark(this.snap(cursor)?.point);
       return;
     }
@@ -479,6 +534,24 @@ export class RoadEditor {
       this.finish();
       this.hint = plan.reason;
     }
+  }
+
+  private previewStroke(touched: Iterable<CellKey>, zone: ZoneKind | null, action: string): void {
+    this.clearPreview();
+    const keys = [...touched];
+    if (keys.length === 0) {
+      this.hint = '';
+      return;
+    }
+    const plan = planZoneStroke(this.cells, this.zoning, zone, keys);
+    if (!plan.ok) {
+      this.hint = plan.reason;
+      return;
+    }
+    const n = plots(plan.stroke.cells.length);
+    this.hint = zone ? `${action} to zone ${n} ${zone}.` : `${action} to clear ${n}.`;
+    this.preview = buildStrokePreview(this.cells, plan.stroke);
+    this.scene.add(this.preview);
   }
 
   private chain(start: Vec2): void {

@@ -6,7 +6,7 @@ import {
 } from '../../src/sim/scenarios/meadow';
 import type { Scenario } from '../../src/sim/scenarios/types';
 import { DT, World } from '../../src/sim/world';
-import { decodeCellKey, findCell, ZONE_KERB, ZONE_SLACK, type CellKey, type ZoneCells } from '../../src/sim/zoning/cells';
+import { cellKey, cellsAlong, decodeCellKey, findCell, ZONE_KERB, ZONE_SLACK, type CellKey, type RoadIndex, type ZoneCells } from '../../src/sim/zoning/cells';
 
 const p = vec2;
 type Gesture = readonly [start: Vec2, end: Vec2, bend?: Vec2];
@@ -226,6 +226,37 @@ describe('zone cells', () => {
     expect(zones(edits)).not.toEqual(before);
     edits.pop();
     expect(zones(edits)).toEqual(before);
+  });
+
+  it.each(LAYOUTS)('are found under the brush on %s, and roads and open ground find none', (_, edits) => {
+    const scenario = meadowScenario(edits);
+    const cells = scenario.zones!;
+    for (let i = 0; i < cells.count; i++) {
+      const c = centroid(quad(cells, i));
+      expect(cellsAlong(cells, c, c)).toEqual([cells.keys[i]]);
+    }
+    for (const surface of scenario.network.surfaces) {
+      if (surface.style === 'driveway') continue;
+      const { pts } = surface.centerline;
+      for (let k = 0; k + 3 < pts.length; k += 2) {
+        expect(cellsAlong(cells, p(pts[k]!, pts[k + 1]!), p(pts[k + 2]!, pts[k + 3]!))).toEqual([]);
+      }
+    }
+    const b = MEADOW_BUILD_BOUNDS;
+    expect(cellsAlong(cells, p(b.minX - 1, b.minY - 1), p(b.maxX + 1, b.minY - 1))).toEqual([]);
+  });
+
+  it('give the brush the lowest key where cells overlap', () => {
+    const square = (x: number) => [x, 0, x + 8, 0, x + 8, 8, x, 8];
+    const cells: ZoneCells = { count: 2, keys: Float64Array.of(40, 41), corners: Float64Array.of(...square(0), ...square(7.6)) };
+    expect(cellsAlong(cells, p(7.8, 4), p(7.8, 4))).toEqual([40]);
+    expect(cellsAlong(cells, p(15, 4), p(-1, 4))).toEqual([41, 40]);
+  });
+
+  it('are all found by one drag along a row, in the order crossed', () => {
+    const cells = zones(starter);
+    const along = cellsAlong(cells, p(-200, -8 + ZONE_KERB + 12), p(-40, -8 + ZONE_KERB + 12));
+    expect(along).toEqual(Array.from({ length: 16 }, (_, c) => cellKey(1 as RoadIndex, c, 0, 1)));
   });
 
   it('grow under the starter houses and gardens', () => {

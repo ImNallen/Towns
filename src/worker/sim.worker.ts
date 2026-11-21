@@ -3,7 +3,8 @@
  * Posts a compact snapshot whenever the simulation has advanced.
  */
 import { buildScenario, type Scenario } from '../sim/scenarios';
-import { meadowScenario, meadowSegments, planMeadowRoad, type MeadowEdit } from '../sim/scenarios/meadow';
+import { isZoneStroke, meadowScenario, meadowSegments, meadowZoning, planMeadowRoad, type MeadowEdit } from '../sim/scenarios/meadow';
+import { planZoneStroke } from '../sim/zoning/paint';
 import { DT, World } from '../sim/world';
 import type { FromWorker, ToWorker } from './protocol';
 
@@ -41,7 +42,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     }
     case 'bulldozeRoad':
     case 'buildRoad':
-    case 'undoRoad': {
+    case 'undo': {
       if (world?.scenario.name !== 'meadow') {
         post({ type: 'editRejected', reason: 'Open Meadow Vale to build a road.' });
         break;
@@ -61,6 +62,9 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
           break;
         }
         proposed = [...edits, { remove: msg.segment }];
+      } else if (edits.length && isZoneStroke(edits.at(-1)!)) {
+        commitZoning(edits.slice(0, -1));
+        break;
       } else {
         proposed = edits.slice(0, -1);
       }
@@ -70,6 +74,18 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
         world.setAdmissions(false);
         post({ type: 'editWaiting' });
       }
+      break;
+    }
+    case 'paintZone': {
+      const cells = world?.scenario.name === 'meadow' ? world.scenario.zones : undefined;
+      if (!cells) {
+        post({ type: 'editRejected', reason: 'Open Meadow Vale to zone plots.' });
+        break;
+      }
+      if (waiting) break;
+      const plan = planZoneStroke(cells, meadowZoning(edits, cells), msg.zone, msg.cells);
+      if (plan.ok) commitZoning([...edits, plan.stroke]);
+      else post({ type: 'editRejected', reason: plan.reason });
       break;
     }
     case 'cancelRoadEdit':
@@ -84,6 +100,11 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       break;
   }
 };
+
+function commitZoning(next: MeadowEdit[]): void {
+  edits = next;
+  post({ type: 'zoningChanged', edits });
+}
 
 function applyEdit(edit: { edits: MeadowEdit[]; scenario: Scenario }): boolean {
   if (!world) return false;

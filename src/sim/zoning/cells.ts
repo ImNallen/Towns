@@ -19,6 +19,7 @@ const OUTLINE = 0.45;
  */
 export const ZONE_SLACK = 0.6;
 const BUCKET = 16;
+const BRUSH_STEP = 1;
 const COLUMN_BITS = 2 ** 16;
 
 /** Position of a road in construction order: the starter chains, then one slot per edit. */
@@ -84,6 +85,30 @@ export function findCell(cells: ZoneCells, key: CellKey): number {
     else hi = mid - 1;
   }
   return -1;
+}
+
+/**
+ * Keys of the cells under the segment a→b, sampled every BRUSH_STEP metres, in the order first touched.
+ * Where cells overlap, the lower key wins. Roads and open ground hit nothing.
+ */
+export function cellsAlong(cells: ZoneCells, a: Vec2, b: Vec2): CellKey[] {
+  const minX = Math.min(a.x, b.x), minY = Math.min(a.y, b.y), maxX = Math.max(a.x, b.x), maxY = Math.max(a.y, b.y);
+  const near: { key: CellKey; quad: Quad }[] = [];
+  for (let i = 0; i < cells.count; i++) {
+    const quad = cells.corners.subarray(i * 8, i * 8 + 8);
+    const [x0, y0, x1, y1] = quadBox(quad);
+    if (x1 >= minX && x0 <= maxX && y1 >= minY && y0 <= maxY) near.push({ key: cells.keys[i]! as CellKey, quad });
+  }
+  const out: CellKey[] = [];
+  if (near.length === 0) return out;
+  const steps = Math.max(1, Math.ceil(Math.sqrt(sq(b.x - a.x, b.y - a.y)) / BRUSH_STEP));
+  for (let s = 0; s <= steps; s++) {
+    const x = a.x + ((b.x - a.x) * s) / steps;
+    const y = a.y + ((b.y - a.y) * s) / steps;
+    const hit = near.find((cell) => insideQuad(x, y, cell.quad));
+    if (hit && !out.includes(hit.key)) out.push(hit.key);
+  }
+  return out;
 }
 
 type Quad = Float64Array;

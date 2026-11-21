@@ -1,3 +1,5 @@
+import type { ZoneKind } from '../sim/zoning/paint';
+
 /** All colours used on the map. Flat surfaces render at exactly these values (see lighting in scene.ts). */
 export const PALETTE = {
   building: {
@@ -37,6 +39,7 @@ export const PALETTE = {
   editorInvalid: '#bb5941',
   buildBoundary: '#aaa99b',
   zoneGrid: '#d9d8cf',
+  zonePaint: { residential: '#d4e3ad' } satisfies Record<ZoneKind, string>,
   editorPaper: '#fffdf4',
   selection: '#21705d',
 

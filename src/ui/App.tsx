@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Game } from '../render/game';
+import { ZONE_KINDS, type ZoneKind } from '../sim/zoning/paint';
 import { dayClock, HouseholdCard, TownPanel } from './town';
 
 const SPEEDS = [1, 2, 4, 8] as const;
@@ -47,12 +48,16 @@ export function App({ game }: { game: Game }) {
     game.setTool(tool);
     setEditor(game.editor());
   };
+  const changeBrush = (brush: ZoneKind | null): void => {
+    game.setBrush(brush);
+    setEditor(game.editor());
+  };
   const selectHouse = (house: number | null): void => {
     game.selectHouse(house);
     setSelected(house);
   };
   const undo = (): void => {
-    game.undoRoad();
+    game.undo();
     setEditor(game.editor());
     setStats(game.stats());
   };
@@ -77,6 +82,8 @@ export function App({ game }: { game: Game }) {
         changeTool('curve');
       } else if (editor && e.key.toLowerCase() === 'b') {
         changeTool('bulldoze');
+      } else if (editor && e.key.toLowerCase() === 'z') {
+        changeTool('zone');
       } else if (editor && e.key.toLowerCase() === 'v') {
         changeTool('pan');
       } else if (e.code === 'Space') {
@@ -99,6 +106,9 @@ export function App({ game }: { game: Game }) {
     : editor?.tool === 'pan' ? 'Drag the map to pan.'
     : editor?.tool === 'bulldoze' ? 'Select a street segment to remove.'
     : editor?.tool === 'curve' ? 'Drag between two points, then place the bend.'
+    : editor?.tool === 'zone' ? (editor.brush
+      ? 'Drag along the plots beside a street to zone them. Plots fill in toward the street.'
+      : 'Drag across zoned plots to clear them and the plots behind.')
     : editor?.connected ? 'Drag across a street for a crossing or from its side for a branch, or click points one by one.'
     : 'Drag between marked ends to connect them, or click points one by one.');
   const household = selected === null ? undefined : town?.households.find((h) => h.home === selected);
@@ -166,6 +176,13 @@ export function App({ game }: { game: Game }) {
               setEditor(game.editor());
             }} /> Angle snap
           </label>}
+          {editor.tool === 'zone' && <span className="zone-brush" role="radiogroup" aria-label="Zone brush">
+            {[...ZONE_KINDS, null].map((kind) => (
+              <button key={kind ?? 'erase'} role="radio" aria-checked={editor.brush === kind} className={editor.brush === kind ? 'active' : ''} onClick={() => changeBrush(kind)}>
+                {kind ? kind[0]!.toUpperCase() + kind.slice(1) : 'Erase'}
+              </button>
+            ))}
+          </span>}
           <span className="mouse-help">{editor.tool === 'pan' ? '' : editor.chaining ? 'Esc finishes · ' : 'Esc cancels · '}Scroll to zoom · Right-drag to pan</span>
         </div>
         <div className="tool-bar panel" role="group" aria-label="Map tools">
@@ -178,11 +195,14 @@ export function App({ game }: { game: Game }) {
           <button aria-label="Bulldoze road" aria-pressed={editor.tool === 'bulldoze'} aria-keyshortcuts="B" className={editor.tool === 'bulldoze' ? 'active tool bulldoze' : 'tool bulldoze'} onClick={() => changeTool('bulldoze')} title="Bulldoze road (B)">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 12V8h6l2 4M5 8V5h4l1 3m2 5 3 1m1-6v6l2 2h-3l-1-3"/><rect x="2" y="12" width="10" height="4" rx="2"/></svg><span>Bulldoze</span><kbd>B</kbd>
           </button>
+          <button aria-label="Zone" aria-pressed={editor.tool === 'zone'} aria-keyshortcuts="Z" className={editor.tool === 'zone' ? 'active tool' : 'tool'} onClick={() => changeTool('zone')} title="Zone (Z)">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 3h6v6H3zm8 0h6v6h-6zM3 11h6v6H3zm8 0h6v6h-6z" /></svg><span>Zone</span><kbd>Z</kbd>
+          </button>
           <button aria-label="Pan" aria-pressed={editor.tool === 'pan'} aria-keyshortcuts="V" className={editor.tool === 'pan' ? 'active tool' : 'tool'} onClick={() => changeTool('pan')} title="Pan (V)">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v16M2 10h16M7 5l3-3 3 3M7 15l3 3 3-3M5 7l-3 3 3 3m10-6 3 3-3 3" /></svg><span>Pan</span><kbd>V</kbd>
           </button>
           <span className="tool-divider" />
-          <button aria-label="Undo road" aria-keyshortcuts="Control+Z Meta+Z" className="tool undo" onClick={undo} disabled={!editor.canUndo || editor.pending} title="Undo road (Ctrl / ⌘ Z)">
+          <button aria-label="Undo" aria-keyshortcuts="Control+Z Meta+Z" className="tool undo" onClick={undo} disabled={!editor.canUndo || editor.pending} title="Undo (Ctrl / ⌘ Z)">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4 3 8l4 4M3 8h8a5 5 0 0 1 0 10" /></svg><span>Undo</span>
           </button>
         </div>

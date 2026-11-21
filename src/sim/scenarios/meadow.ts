@@ -8,7 +8,8 @@ import { streetCrossings, throughArms, type StreetCrossing } from '../network/ju
 import { buildStreetNetwork } from '../network/streets';
 import type { Network } from '../network/types';
 import type { AccessPoint } from '../traffic/routing';
-import { buildZoneCells, type RoadIndex, type ZoneRoad } from '../zoning/cells';
+import { buildZoneCells, type CellKey, type RoadIndex, type ZoneCells, type ZoneRoad } from '../zoning/cells';
+import type { ZoneKind, ZoneStroke, Zoning } from '../zoning/paint';
 import type { Bounds, Decor, House, RegionSpec, Scenario } from './types';
 
 export interface MeadowRoad {
@@ -16,7 +17,10 @@ export interface MeadowRoad {
   readonly fourWays?: readonly StreetCrossing[];
 }
 
-export type MeadowEdit = MeadowRoad | { readonly remove: number };
+export type MeadowEdit = MeadowRoad | { readonly remove: number } | ZoneStroke;
+
+export const isZoneStroke = (edit: MeadowEdit): edit is ZoneStroke => 'zone' in edit;
+
 type RemovedArm = Pick<StreetPoint, 'point' | 'tangent'>;
 
 type Plan = { ok: true; road: MeadowRoad; path: Polyline } | { ok: false; reason: string; points?: readonly Vec2[] };
@@ -130,7 +134,6 @@ interface Replay {
   chains: Vec2[][];
   /** Parallel to `chains`. */
   sections: Section[];
-  /** Built roads by index: the starter roads, then one slot per edit (empty for a removal). */
   roads: (readonly Vec2[] | undefined)[];
   crossings: StreetCrossing[];
   removedArms: RemovedArm[];
@@ -145,6 +148,10 @@ function replayMeadow(edits: readonly MeadowEdit[]): Replay {
   const crossings: StreetCrossing[] = [];
   const removedArms: RemovedArm[] = [];
   for (const edit of edits) {
+    if (isZoneStroke(edit)) {
+      roads.push(undefined);
+      continue;
+    }
     if ('remove' in edit) {
       roads.push(undefined);
       const selected = sections.filter((section) => removable(section.points))[edit.remove];
@@ -184,6 +191,21 @@ function zoneRoads({ roads, sections }: Replay): ZoneRoad[] {
     if (spans.length) out.push({ index: index as RoadIndex, points, spans });
   }
   return out;
+}
+
+export function meadowZoning(edits: readonly MeadowEdit[], cells: ZoneCells): Zoning {
+  const named = new Map<CellKey, ZoneKind | null>();
+  for (const edit of edits) {
+    if (isZoneStroke(edit)) for (const key of edit.cells) named.set(key, edit.zone);
+  }
+  const zoning = new Map<CellKey, ZoneKind>();
+  if (named.size === 0) return zoning;
+  for (let i = 0; i < cells.count; i++) {
+    const key = cells.keys[i]! as CellKey;
+    const zone = named.get(key);
+    if (zone) zoning.set(key, zone);
+  }
+  return zoning;
 }
 
 export function meadowSegments(edits: readonly MeadowEdit[]): readonly (readonly Vec2[])[] {

@@ -2,9 +2,11 @@ import { SUN_DIRECTION, SUN_INTENSITY, AMBIENT_INTENSITY } from './lighting';
 import * as THREE from 'three';
 import type { Network } from '../sim/network/types';
 import type { ScenarioName } from '../sim/scenarios';
+import { meadowZoning, type MeadowEdit } from '../sim/scenarios/meadow';
 import type { TownView } from '../sim/town/town';
 import type { SimStats } from '../sim/world';
 import type { ZoneCells } from '../sim/zoning/cells';
+import type { ZoneKind } from '../sim/zoning/paint';
 import type { FromWorker, ToWorker } from '../worker/protocol';
 import { MapCamera } from './camera';
 import { buildLaneOverlay } from './debug';
@@ -15,7 +17,7 @@ import { HouseLayer } from './houses';
 import { PALETTE } from './palette';
 import { buildRoads } from './roads';
 import { VehicleLayer } from './vehicles';
-import { buildZoneLayer } from './zones';
+import { buildZoneLayer, buildZonePaint } from './zones';
 
 export interface GameOptions {
   scenario: ScenarioName;
@@ -31,7 +33,8 @@ export interface Game {
   editor(): EditorState | null;
   setAngleSnapping(enabled: boolean): void;
   setTool(tool: MapTool): void;
-  undoRoad(): void;
+  setBrush(brush: ZoneKind | null): void;
+  undo(): void;
   cancelRoadEdit(): void;
   stats(): SimStats | null;
   /** Residents and the town clock; null on maps without a town. */
@@ -81,6 +84,8 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   let houses: HouseLayer | null = null;
   let laneOverlay: THREE.Group | null = null;
   let zoneLayer: THREE.Group | null = null;
+  let paintLayer: THREE.Group | null = null;
+  let cells: ZoneCells | undefined;
   let showLanes = options.showLanes;
   let speed = options.speed;
   let latestStats: SimStats | null = null;
@@ -110,10 +115,21 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     scene.add(roadLayer, laneOverlay);
   };
 
-  const drawZones = (zones: ZoneCells | undefined): void => {
+  const gridVisible = (): boolean => options.showZones || editor?.state().tool === 'zone';
+  const drawZones = (): void => {
     if (zoneLayer) disposeLayer(zoneLayer);
-    zoneLayer = options.showZones && zones ? buildZoneLayer(zones) : null;
-    if (zoneLayer) scene.add(zoneLayer);
+    zoneLayer = cells ? buildZoneLayer(cells) : null;
+    if (!zoneLayer) return;
+    zoneLayer.visible = gridVisible();
+    scene.add(zoneLayer);
+  };
+  const showEdits = (edits: readonly MeadowEdit[]): void => {
+    if (!editor || !cells) return;
+    const zoning = meadowZoning(edits, cells);
+    if (paintLayer) disposeLayer(paintLayer);
+    paintLayer = buildZonePaint(cells, zoning);
+    scene.add(paintLayer);
+    editor.accept({ edits, cells, zoning });
   };
 
   worker.onmessage = (e: MessageEvent<FromWorker>) => {
@@ -124,8 +140,9 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
       houses = new HouseLayer(scenario.decor.houses);
       scene.add(houses.group);
       drawNetwork(scenario.network);
-      drawZones(scenario.zones);
-      if (editor) editor.accept([]);
+      cells = scenario.zones;
+      drawZones();
+      showEdits([]);
       vehicles = new VehicleLayer(msg.capacity);
       scene.add(vehicles.mesh);
       if (options.view) {
@@ -138,8 +155,11 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
       ready = true;
     } else if (msg.type === 'roadsChanged') {
       drawNetwork(msg.network);
-      drawZones(msg.zones);
-      editor?.accept(msg.edits);
+      cells = msg.zones;
+      drawZones();
+      showEdits(msg.edits);
+    } else if (msg.type === 'zoningChanged') {
+      showEdits(msg.edits);
     } else if (msg.type === 'editWaiting') {
       editor?.waitForTraffic();
     } else if (msg.type === 'editRejected') {
@@ -187,8 +207,12 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   const game: Game = {
     editor: () => editor?.state() ?? null,
     setAngleSnapping: (enabled) => editor?.setAngleSnapping(enabled),
-    setTool: (tool) => editor?.setTool(tool),
-    undoRoad: () => editor?.undo(),
+    setTool(tool) {
+      editor?.setTool(tool);
+      if (zoneLayer) zoneLayer.visible = gridVisible();
+    },
+    setBrush: (brush) => editor?.setBrush(brush),
+    undo: () => editor?.undo(),
     cancelRoadEdit: () => editor?.cancel(),
     stats: () => (ready ? latestStats : null),
     town: () => latestTown,
