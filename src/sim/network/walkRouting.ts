@@ -9,7 +9,7 @@ interface Neighbour {
  * then propagate improvements from new or shortened connections. */
 export class WalkRouting {
   readonly costs: Float64Array[] = [];
-  readonly next: Int32Array[] = [];
+  readonly next: (Int16Array | Int32Array)[] = [];
   private readonly nodes = new Map<string, number>();
   private readonly destinations = new Map<number, number>();
 
@@ -19,6 +19,8 @@ export class WalkRouting {
     places: readonly number[],
     previous?: WalkRouting,
   ) {
+    // Node IDs are zero-based, with -1 reserved for unreachable or arrived.
+    const HopArray = points.length <= 0x8000 ? Int16Array : Int32Array;
     const surviving = new Int32Array(points.length);
     const newToOld = points.map(({ x, y }, n) => {
       const key = x + '/' + y;
@@ -26,10 +28,22 @@ export class WalkRouting {
       this.nodes.set(key, n);
       return old;
     });
-    for (const target of places) {
+    // Rows have the same lifetime. Group them into bounded slabs so replacing the
+    // graph can release whole buffers instead of fragmenting the native allocator.
+    const rowLength = points.length;
+    const rowsPerSlab = Math.max(1, Math.floor(4 * 1024 * 1024 / (8 * Math.max(1, rowLength))));
+    let costs = new Float64Array(0);
+    let hops = new HopArray(0);
+    for (const [i, target] of places.entries()) {
+      const row = i % rowsPerSlab;
+      if (row === 0) {
+        const size = rowLength * Math.min(rowsPerSlab, places.length - i);
+        costs = new Float64Array(size).fill(Infinity);
+        hops = new HopArray(size).fill(-1);
+      }
       this.destinations.set(target, this.costs.length);
-      const cost = new Float64Array(points.length).fill(Infinity);
-      const next = new Int32Array(points.length).fill(-1);
+      const cost = costs.subarray(row * rowLength, (row + 1) * rowLength);
+      const next = hops.subarray(row * rowLength, (row + 1) * rowLength);
       this.costs.push(cost);
       this.next.push(next);
       cost[target] = 0;

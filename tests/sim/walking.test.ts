@@ -1,3 +1,4 @@
+import { WalkRouting } from '../../src/sim/network/walkRouting';
 import { walkChance } from '../../src/sim/town/mode';
 import { expect, it } from 'vitest';
 import { polyline } from '../../src/sim/math/polyline';
@@ -190,4 +191,30 @@ it('retains the cold walking routes when an edit cuts, replaces and adds frontag
   const edited = new WalkingNetwork(extended,places,[],graph.routing);
   expect(edited.costs).toEqual(cold.costs);
   expect(edited.next).toEqual(cold.next);
+});
+
+it.each([32768, 32769])('routes to the highest node with %i walking nodes', (count) => {
+  const target = count - 1;
+  const points = Array.from({ length: count }, (_, x) => ({ x, y: 0 }));
+  const edges = points.map((): { to: number; length: number }[] => []);
+  edges[0]!.push({ to: target, length: 1 });
+  edges[target]!.push({ to: 0, length: 1 });
+  const routing = new WalkRouting(points, edges, [target]);
+  expect(routing.next[0]![0]).toBe(target);
+  expect(routing.next[0]![1]).toBe(-1);
+  expect(routing.next[0]![target]).toBe(-1);
+  expect(routing.next[0]!.byteLength).toBe(count * (count === 32768 ? 2 : 4));
+});
+
+it('keeps routes independent across hundreds of destinations', () => {
+  const points = Array.from({ length: 1024 }, (_, x) => ({ x, y: 0 }));
+  const edges = points.map((_, i) =>
+    [i - 1, i + 1].filter((j) => j >= 0 && j < points.length).map((to) => ({ to, length: 1 })),
+  );
+  const targets = Array.from({ length: 520 }, (_, i) => i);
+  const routing = new WalkRouting(points, edges, targets);
+  for (const target of targets) {
+    expect(routing.costs[target]![512]).toBe(Math.abs(512 - target));
+    expect(routing.next[target]![512]).toBe(target === 512 ? -1 : target < 512 ? 511 : 513);
+  }
 });

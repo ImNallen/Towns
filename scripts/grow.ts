@@ -1,5 +1,5 @@
 // pnpm exec tsx scripts/grow.ts
-import { serialize } from 'node:v8';
+import { serialize, writeHeapSnapshot } from 'node:v8';
 import { plantValley, growTo } from './valley-layout';
 import { frameMessage } from '../src/worker/frame';
 
@@ -42,4 +42,25 @@ for (const target of [150, 500, 1000]) {
       hash: world.hash(),
     }),
   );
+  if (target === 1000 && process.env.VALLEY_HEAP_SNAPSHOT) {
+    const before = process.memoryUsage();
+    if (!global.gc) throw new Error('Use node --expose-gc --import tsx scripts/grow.ts');
+    // Keep precisely the same roots live at both checkpoints.
+    for (let pass = 0; pass < 3; pass++) {
+      global.gc();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    const after = process.memoryUsage();
+    const snapshot = writeHeapSnapshot(process.env.VALLEY_HEAP_SNAPSHOT);
+    console.log(
+      JSON.stringify({
+        before,
+        after,
+        snapshot,
+        edits: town.edits.length,
+        frameBytes: serialize(frame).length,
+        hash: world.hash(),
+      }),
+    );
+  }
 }
