@@ -23,8 +23,7 @@ export type ToWorker =
   | { type: 'bulldozeRoad'; segment: number; editCount: number }
   /** Cells the brush passed over; the worker plans the stroke against its own edits. `zone: null` erases. */
   | { type: 'paintZone'; zone: LandUse | null; cells: readonly CellKey[] }
-  | { type: 'undo' }
-  | { type: 'cancelRoadEdit' };
+  | { type: 'undo' };
 
 /** Simulation worker → main thread. */
 export type FromWorker =
@@ -34,7 +33,6 @@ export type FromWorker =
   | { type: 'roadsChanged'; network: Network; zones: ZoneCells | undefined; edits: MeadowEdit[] }
   /** A stroke was added or undone. Roads and cells are still those of the last `ready` or `roadsChanged`. */
   | { type: 'zoningChanged'; edits: MeadowEdit[] }
-  | { type: 'editWaiting' }
   | { type: 'editRejected'; reason: string }
   | { type: 'ready'; scenario: Scenario; capacity: number; edits: MeadowEdit[] }
   /** Residents and their households, a few times a second while the map has a town. */

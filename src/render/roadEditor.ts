@@ -65,8 +65,7 @@ type EditPhase =
   | { kind: 'bending'; start: Vec2; end: Vec2; id: number | null }
   | { kind: 'painting'; id: number; zone: LandUse | null; touched: Set<CellKey>; lastPointer: Vec2 }
   | { kind: 'chaining'; host: StreetPoint | undefined; start: Vec2; id: number | null }
-  | { kind: 'pending'; chain?: { from: Vec2; to: Vec2 } }
-  | { kind: 'waiting' };
+  | { kind: 'pending'; chain?: { from: Vec2; to: Vec2 } };
 
 function roadMarker(): THREE.Group {
   const marker = new THREE.Group();
@@ -163,7 +162,7 @@ export class RoadEditor {
     canvas.addEventListener('pointerup', (e) => this.point(e, true), { signal });
     canvas.addEventListener('lostpointercapture', (e) => this.cancelPointer(e), { signal });
     canvas.addEventListener('pointercancel', (e) => this.cancelPointer(e), { signal });
-    window.addEventListener('blur', () => this.cancelDraft(), { signal });
+    window.addEventListener('blur', () => this.cancel(), { signal });
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') this.cancel();
     }, { signal });
@@ -174,8 +173,8 @@ export class RoadEditor {
     return {
       tool: this.tool, actuated: this.actuated, roadType: this.roadType, cost: this.cost, hint: this.hint, roadCount: this.roadCount, connected: this.connected,
       angleSnapping: this.angleSnapping, chaining: kind === 'chaining',
-      pending: kind === 'pending' || kind === 'waiting',
-      canCancel: kind === 'bending' || kind === 'waiting',
+      pending: kind === 'pending',
+      canCancel: kind === 'bending',
       canUndo: this.edits.length > 0,
       brush: this.brush, lotColumns: this.lotColumns, zoned: this.zoning.size,
     };
@@ -192,7 +191,7 @@ export class RoadEditor {
   }
 
   setTool(tool: MapTool): void {
-    this.cancelDraft();
+    this.cancel();
     this.tool = tool;
     this.canvas.dataset.tool = tool;
     this.handles.visible = tool === 'road' || tool === 'curve';
@@ -217,7 +216,7 @@ export class RoadEditor {
   }
 
   setBrush(brush: LandUse | null): void {
-    this.cancelDraft();
+    this.cancel();
     this.brush = brush;
     this.move ??= this.pointer;
   }
@@ -254,11 +253,6 @@ export class RoadEditor {
     this.update();
   }
 
-  waitForTraffic(): void {
-    this.phase = { kind: 'waiting' };
-    this.hint = 'Waiting for traffic to clear. Keep the simulation running to finish this edit.';
-  }
-
   reject(reason: string): void {
     const chain = this.phase.kind === 'pending' ? this.phase.chain : undefined;
     if (chain) this.chain(chain.from);
@@ -282,11 +276,6 @@ export class RoadEditor {
     this.finish();
     this.phase = { kind: 'pending' };
     this.send({ type: 'undo' });
-  }
-
-  cancel(): void {
-    if (this.phase.kind === 'waiting') this.send({ type: 'cancelRoadEdit' });
-    else this.cancelDraft();
   }
 
   dispose(): void {
@@ -714,12 +703,12 @@ export class RoadEditor {
 
   private cancelPointer(e: PointerEvent): void {
     const phase = this.phase;
-    if ('id' in phase && phase.id === e.pointerId) this.cancelDraft();
+    if ('id' in phase && phase.id === e.pointerId) this.cancel();
   }
 
-  private cancelDraft(): void {
+  cancel(): void {
     if (this.phase.kind === 'pending') this.phase = { kind: 'pending' };
-    else if (this.phase.kind !== 'waiting') this.finish();
+    else this.finish();
   }
 
   private finish(): void {

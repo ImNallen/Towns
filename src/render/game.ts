@@ -247,8 +247,6 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
       showEdits(msg.edits);
     } else if (msg.type === 'zoningChanged') {
       showEdits(msg.edits);
-    } else if (msg.type === 'editWaiting') {
-      editor?.waitForTraffic();
     } else if (msg.type === 'editRejected') {
       editor?.reject(msg.reason);
     } else if (msg.type === 'town') {

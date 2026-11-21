@@ -92,7 +92,9 @@ it('builds a shorter route across an existing street and drives through the resu
   for (let i = 0; i < 100 / DT && world.vehicles.alive[car]; i++) {
     const lane = network.lanes[world.vehicles.lane[car]!]!;
     if (!crossed && lane.kind === 'connector' && distance(startOf(lane.path), node) < 13 && distance(endOf(lane.path), node) < 13) {
-      expect(world.editNetwork(before).ok).toBe(false);
+      const undo = world.editNetwork(before);
+      if (!undo.ok) throw new Error(undo.reason);
+      expect(undo.world.stats()).toMatchObject({ active: 0, cleared: 1, lost: 0 });
       crossed = true;
     }
     world.step();

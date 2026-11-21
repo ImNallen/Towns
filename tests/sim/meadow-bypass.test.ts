@@ -32,8 +32,8 @@ it('keeps live trips and sends new traffic both ways along a player-built shortc
     }
   }
   expect(directions).toEqual(new Set([-1, 1]));
-  world.setAdmissions(false);
-  for (let i = 0; i < 100 / DT && world.stats().active; i++) world.step();
+  const ids = new Set(world.vehicles.id.filter((_, i) => world.vehicles.alive[i]));
+  for (let i = 0; i < 100 / DT; i++) world.step();
   expect(world.stats().lost).toBe(0);
-  expect(world.stats().completed).toBe(world.stats().spawned);
+  expect(world.vehicles.id.some((id, i) => world.vehicles.alive[i] && ids.has(id))).toBe(false);
 });

@@ -12,7 +12,6 @@ export function plantValley() {
   session.world.treasury!.balance += 150000;
   function apply(command: EditCommand) {
     session.command(command);
-    if (session.pending) throw new Error('Benchmark edit is waiting for traffic');
     session.world.step();
   }
   function road(x: number, y: number, ex: number, ey: number, roadType: RoadType) {

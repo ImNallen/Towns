@@ -281,6 +281,7 @@ export function App({ game }: { game: Game }) {
               <summary>Traffic details</summary>
               <dl>
                 <dt>Vehicles</dt><dd>{stats?.active ?? 0}</dd>
+                <dt>Cleared by edits</dt><dd>{stats?.cleared ?? 0}</dd>
                 <dt>Trips / min</dt><dd>{stats?.completedLastMinute ?? 0}</dd>
                 <dt>Avg speed</dt><dd>{stats ? `${(stats.meanSpeed * 3.6).toFixed(0)} km/h` : '–'}</dd>
                 <dt>Stopped</dt><dd>{stats ? `${(stats.stoppedShare * 100).toFixed(0)}%` : '–'}</dd>
@@ -317,7 +318,6 @@ export function App({ game }: { game: Game }) {
           </select></label>}
           {editor.cost !== null && <strong className="preview-cost">{editor.cost < 0 ? 'Refund' : 'Costs'} {money(Math.abs(editor.cost))}</strong>}
           <p role="status" aria-live="polite">{instruction}</p>
-          {editor.canCancel && editor.pending && speed === 0 && <button className="cancel-edit" onClick={() => changeSpeed(lastSpeed)}>Resume traffic</button>}
           {editor.canCancel && <button className="cancel-edit" onClick={() => game.cancelRoadEdit()}>Cancel edit</button>}
           {editor.chaining && <button className="cancel-edit" onClick={() => {
             game.cancelRoadEdit();

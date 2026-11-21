@@ -56,6 +56,7 @@ const fmt = (st: SimStats): string =>
     `trip=${st.meanTripTime.toFixed(1)}s`,
     `deliveries=${st.deliveries}`,
     `walkers-cleared=${st.walkersCleared}`,
+    `cleared=${st.cleared}`,
     `lost=${st.lost}`,
   ].join('  ');
 

@@ -44,6 +44,11 @@ function snapshot(world: World): { positions: Float32Array; ids: Int32Array } {
   return { positions, ids };
 }
 
+function survivors(world: World): number[] {
+  const V = world.vehicles;
+  return Array.from(V.id.subarray(0, V.highWater)).filter((_, slot) => V.alive[slot]);
+}
+
 function edit(world: World, scenario: Scenario): World {
   const result = world.editNetwork(scenario);
   if (!result.ok) throw new Error(result.reason);
@@ -105,58 +110,82 @@ describe('live network migration', () => {
     expect(snapshot(migrated)).toEqual(snapshot(original));
   });
 
-  it('rejects a disconnected route atomically and drains continuous demand before undo', () => {
-    const scenario = street();
-    const original = new World(scenario, 4);
-    const control = new World(scenario, 4);
-    run(original, 150);
-    run(control, 150);
+  it('clears only the cars a disconnected route strands and leaves the old world untouched', () => {
+    const original = new World(street(false, true, 0), 4);
+    const [west, middle, east, oncoming] = [40, 100, 150, 60].map((s, i) => original.vehicles.spawn(i < 3 ? 0 : 1, s, 8, i < 3 ? 0 : 1, 0));
     const before = snapshot(original);
-    const stats = original.stats();
-    const disconnected = street(true, false);
-    const result = original.editNetwork(disconnected);
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toContain('Pause arrivals');
+    const disconnected = edit(original, street(true, false, 0));
+    expect(survivors(disconnected)).toEqual([east, oncoming].map((slot) => original.vehicles.id[slot]));
+    expect(disconnected.stats()).toMatchObject({ active: 2, cleared: 2, lost: 0 });
     expect(snapshot(original)).toEqual(before);
-    expect(original.stats()).toEqual(stats);
-    run(original, 20);
-    run(control, 20);
-    expect(original.hash()).toBe(control.hash());
-    expect(snapshot(original)).toEqual(snapshot(control));
-    original.setAdmissions(false);
-    const spawned = original.stats().spawned;
-    run(original, 1200);
-    expect(original.stats().active).toBe(0);
-    expect(original.stats().spawned).toBe(spawned);
-    expect(original.stats().lost).toBe(0);
-    const undone = edit(original, disconnected);
-    expect(undone.stats()).toEqual(original.stats());
-    run(undone, 100);
-    expect(undone.stats().spawned).toBe(spawned);
-    undone.setAdmissions(true);
-    run(undone, 300);
-    expect(undone.stats().spawned).toBeGreaterThan(spawned);
+    expect(original.stats().cleared).toBe(0);
+    expect([west, middle].every((slot) => original.vehicles.alive[slot])).toBe(true);
+    run(disconnected, 600);
+    expect(disconnected.stats()).toMatchObject({ completed: 2, active: 0, cleared: 2, lost: 0 });
+    const reconnected = edit(disconnected, street(false, true, 0.5));
+    expect(reconnected.stats().cleared).toBe(2);
+    run(reconnected, 1200);
+    expect(reconnected.stats().spawned).toBeGreaterThan(0);
+    expect(reconnected.stats().completed).toBeGreaterThan(2);
+    expect(reconnected.stats().lost).toBe(0);
   });
 
-  it('rejects changed curves and opposite-direction lanes instead of teleporting active cars', () => {
+  it('clears a car whose curve moved away and never maps it onto an opposite-direction lane', () => {
     const original = new World(street(false, true, 0), 1);
     original.vehicles.spawn(0, 100, 8, 0, 0);
-    const before = snapshot(original);
     const b = new NetworkBuilder();
-    b.addLane('road', polyline([{ x: 0, y: 0 }, { x: 100, y: 2 }, { x: 200, y: 0 }]), 10);
+    b.addLane('road', polyline([{ x: 0, y: 0 }, { x: 100, y: 6 }, { x: 200, y: 0 }]), 10);
     // An exact positional match faces backwards, and even has a route to the destination.
     const wrong = b.addLane('road', polyline([{ x: 110, y: 0 }, { x: 90, y: 0 }]), 10);
     const loop = b.addLane('connector', polyline([{ x: 90, y: 0 }, { x: 0, y: 0 }]), 10);
     b.connect(wrong, loop);
     b.connect(loop, 0);
-    expect(original.editNetwork({ ...street(), network: b.build(), demand: [] }).ok).toBe(false);
-    expect(snapshot(original)).toEqual(before);
+    const edited = edit(original, { ...street(), network: b.build(), demand: [] });
+    expect(edited.stats()).toMatchObject({ active: 0, cleared: 1, lost: 0 });
+    expect(original.stats().active).toBe(1);
   });
 
-  it('rejects a new route that overlaps cars across a split lane boundary', () => {
+  it('moves a car onto a lane reshaped within two metres and keeps its trip', () => {
+    const original = new World(street(false, true, 0), 1);
+    const car = original.vehicles.spawn(0, 100, 8, 0, 0);
+    const b = new NetworkBuilder();
+    const reshaped = b.addLane('road', polyline([{ x: 0, y: 0 }, { x: 100, y: 1.5 }, { x: 200, y: 0 }]), 10);
+    b.addLane('road', polyline([{ x: 200, y: 3.5 }, { x: 0, y: 3.5 }]), 10);
+    const edited = edit(original, { ...street(), network: b.build(), demand: [] });
+    expect(edited.stats()).toMatchObject({ active: 1, cleared: 0 });
+    expect(edited.vehicles.lane[car]).toBe(reshaped);
+    const [before, after] = [original, edited].map((world) => snapshot(world).positions.slice(car * 3, car * 3 + 2));
+    expect(Math.hypot(after![0]! - before![0]!, after![1]! - before![1]!)).toBeLessThan(1.5);
+    run(edited, 600);
+    expect(edited.stats()).toMatchObject({ completed: 1, lost: 0 });
+  });
+
+  it('clears the follower when a split puts two cars closer than a car length along a new route', () => {
     const original = new World(street(false, true, 0), 1);
     original.vehicles.spawn(0, 88, 0, 0, 0);
-    original.vehicles.spawn(0, 91, 0, 0, 0);
-    expect(original.editNetwork(street(true, true, 0)).ok).toBe(false);
+    const leader = original.vehicles.spawn(0, 91, 0, 0, 0);
+    const edited = edit(original, street(true, true, 0));
+    expect(survivors(edited)).toEqual([original.vehicles.id[leader]]);
+    expect(edited.stats()).toMatchObject({ active: 1, cleared: 1 });
   });
+
+  it('clears only the front of a queue of spacing conflicts', () => {
+    const original = new World(street(false, true, 0), 1);
+    const [back, , front] = [85, 88, 91].map((s) => original.vehicles.spawn(0, s, 0, 0, 0));
+    const edited = edit(original, street(true, true, 0));
+    expect(survivors(edited)).toEqual([back, front].map((slot) => original.vehicles.id[slot]));
+    expect(edited.stats()).toMatchObject({ active: 2, cleared: 1 });
+  });
+});
+
+it.each([[29.9, 0], [30.1, 1]])('applies the projection heading limit at %s degrees', (degrees, cleared) => {
+  const original = new World(street(false, true, 0), 1);
+  original.vehicles.spawn(0, 100, 8, 0, 0);
+  const b = new NetworkBuilder();
+  const rise = 20 * Math.tan(degrees * Math.PI / 180);
+  b.addLane('road', polyline([
+    { x: 80, y: -rise }, { x: 120, y: rise }, { x: 175, y: 0 }, { x: 200, y: 0 },
+  ]), 10);
+  const changed = edit(original, { ...street(), network: b.build(), demand: [] });
+  expect(changed.stats()).toMatchObject({ active: 1 - cleared, cleared, lost: 0 });
 });

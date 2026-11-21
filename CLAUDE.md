@@ -13,6 +13,7 @@ pnpm build                # typecheck and build for production
 pnpm preview              # serve the production build
 pnpm sim                  # Roundabout, seed 1, 12,000 ticks, final stats and hash
 pnpm sim --scenario meadow --connect --paint mixed --ticks 288000 --every 28800
+pnpm edits                # six live Meadow road edits, with clearance and overlap counts
 pnpm exec playwright install chromium
 pnpm e2e                  # Playwright writes PNGs to artifacts/screens/
 ```
@@ -51,7 +52,7 @@ Browser options live in `src/main.tsx`. Use `?scenario=meadow` (also `valley`, `
 
 `main.tsx` calls `createGame`. The worker builds the scenario and World, sends `ready` for the initial map, then publishes frames after batches of fixed ticks. The renderer interpolates positions. Town messages supply household, business, demand, and budget data for the HUD.
 
-The editor and worker share placement planners. The worker checks funds and owns each town’s ordered edit history. A road edit builds a candidate network and projects vehicles onto reachable lanes. If a vehicle loses its route or safe spacing, the worker holds new arrivals and retries. Walkers transfer to reachable pavements or return home and increment `walkersCleared`. Both threads derive paint from live cell keys and the edit history. Painting or undoing a stroke updates zoning in place.
+The editor and worker share placement planners. The worker checks funds and owns each town's ordered edit history. A road edit builds a candidate network and projects vehicles onto reachable lanes. Vehicles keep their pose or snap to a reachable lane within 2 m and 30°. Avenue narrowing merges the two queues. An edit clears stranded vehicles and overlapping followers immediately and records them in `stats.cleared`. Walkers transfer to reachable pavements or return home and increment `walkersCleared`. Both threads derive paint from live cell keys and the edit history. Painting or undoing a stroke updates zoning in place. Version 2 saves replay commands at their original ticks. Loading a version 1 save reports an unsupported version because those edits could wait for traffic.
 
 ## Rules (enforced by tests/architecture.test.ts where possible)
 

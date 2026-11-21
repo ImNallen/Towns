@@ -4,7 +4,7 @@ import { planZoneStroke } from '../sim/zoning/paint';
 import { editCost, shortage, undoCost } from '../sim/town/budget';
 import { World } from '../sim/world';
 import type { FromWorker } from './protocol';
-import type { EditCommand, ReplayEvent, TownSave, InitialTown } from './save';
+import { SAVE_VERSION, type EditCommand, type ReplayEvent, type TownSave, type InitialTown } from './save';
 
 export const CAPACITY = 4096;
 export type Session = ReturnType<typeof createSession>;
@@ -13,7 +13,6 @@ export function createSession(initial: InitialTown, post: (msg: FromWorker) => v
   const map = editableScenario(initial.scenario);
   let edits: MeadowEdit[] = [];
   type RoadChange = { edits: MeadowEdit[]; scenario: Scenario; cost: number; allowLaneShift: boolean };
-  let waiting: RoadChange | null = null;
   let world = new World(buildScenario(initial.scenario), initial.seed, CAPACITY, 0, initial.walkLimit);
   const events: ReplayEvent[] = [];
 
@@ -29,7 +28,6 @@ export function createSession(initial: InitialTown, post: (msg: FromWorker) => v
           post({ type: 'editRejected', reason: 'Open a town map to build a road.' });
           break;
         }
-        if (waiting) break;
         let proposed: MeadowEdit[];
         if (msg.type === 'buildLights') {
           const junction = world.network.junctions?.find(j => Math.hypot(j.point.x-msg.point.x,j.point.y-msg.point.y) < 12);
@@ -72,11 +70,7 @@ export function createSession(initial: InitialTown, post: (msg: FromWorker) => v
         const cost = msg.type === 'undo' ? undoCost(edits, map) : editCost(edits, proposed.at(-1)!, map);
         const changed = (msg.type === 'undo' ? edits : proposed).at(-1)!;
         const edit = { allowLaneShift: 'upgrade' in changed, edits: proposed, scenario: map.meadowScenario(proposed), cost };
-        if (!applyEdit(edit)) {
-          waiting = edit;
-          world.setAdmissions(false);
-          post({ type: 'editWaiting' });
-        }
+        applyEdit(edit);
         break;
       }
       case 'paintZone': {
@@ -85,28 +79,15 @@ export function createSession(initial: InitialTown, post: (msg: FromWorker) => v
           post({ type: 'editRejected', reason: 'Open a town map to zone plots.' });
           break;
         }
-        if (waiting) break;
         const plan = planZoneStroke(cells, meadowZoning(edits, cells), msg.zone, msg.cells);
         if (plan.ok) commitZoning([...edits, plan.stroke], editCost(edits, plan.stroke, map));
         else post({ type: 'editRejected', reason: plan.reason });
         break;
       }
-      case 'cancelRoadEdit':
-        if (waiting) {
-          waiting = null;
-          world.setAdmissions(true);
-          post({ type: 'editRejected', reason: 'Edit cancelled.' });
-        }
-        break;
-      case 'retry':
-        if (waiting) applyEdit(waiting);
-        break;
     }
   }
   function rejectShortage(reason: string | undefined): boolean {
     if (!reason) return false;
-    waiting = null;
-    world.setAdmissions(true);
     post({ type: 'editRejected', reason });
     return true;
   }
@@ -120,28 +101,27 @@ export function createSession(initial: InitialTown, post: (msg: FromWorker) => v
     post({ type: 'zoningChanged', edits });
   }
 
-  function applyEdit(edit: RoadChange): boolean {
-    if (rejectShortage(shortage(world.treasury!.balance, edit.cost))) return true;
+  function applyEdit(edit: RoadChange): void {
+    if (rejectShortage(shortage(world.treasury!.balance, edit.cost))) return;
     const result = world.editNetwork(edit.scenario, meadowZoning(edit.edits, edit.scenario.zones!), edit.allowLaneShift);
-    if (!result.ok) return false;
-    if (rejectShortage(result.world.treasury!.book(edit.cost))) return true;
+    if (!result.ok) {
+      post({ type: 'editRejected', reason: result.reason });
+      return;
+    }
+    if (rejectShortage(result.world.treasury!.book(edit.cost))) return;
     world = result.world;
-    world.setAdmissions(true);
     edits = edit.edits;
-    waiting = null;
     post({ type: 'roadsChanged', network: edit.scenario.network, zones: edit.scenario.zones, edits });
-    return true;
   }
   return {
     get world() { return world; },
     get edits() { return edits; },
-    get pending() { return waiting !== null; },
     command(command: EditCommand) {
       events.push({ tick: world.tick, command });
       apply(command);
     },
     save(): TownSave {
-      return { version: 1, ...initial, tick: world.tick, events: events.slice() };
+      return { version: SAVE_VERSION, ...initial, tick: world.tick, events: events.slice() };
     },
   };
 }

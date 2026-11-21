@@ -49,7 +49,7 @@ describe('building destinations', () => {
     expect(world.stats()).toMatchObject({ spawned: 1, completed: 1, lost: 0 });
   });
 
-  it('refuses to pull out next to a car ahead, before a car that cannot stop, or while admissions are closed', () => {
+  it('refuses to pull out next to a car ahead or before a car that cannot stop', () => {
     const { scenario, forward } = withBuilding();
     const world = new World(scenario, 1);
     const east = world.routing.sinks.indexOf(forward);
@@ -61,9 +61,6 @@ describe('building destinations', () => {
     expect(world.trySpawnAt(forward, 400, east, 1)).toBe(false);
     world.vehicles.s[fast] = 300;
     world.vehicles.v[fast] = 10;
-    world.setAdmissions(false);
-    expect(world.trySpawnAt(forward, 400, east, 1)).toBe(false);
-    world.setAdmissions(true);
     expect(world.trySpawnAt(forward, 400, east, 1)).toBe(true);
     for (let i = 0; i < 1500; i++) world.step();
     expect(world.stats()).toMatchObject({ completed: 2, lost: 0 });
