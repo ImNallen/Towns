@@ -54,7 +54,8 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       if (waiting) break;
       let proposed: MeadowEdit[];
       if (msg.type === 'buildWalk') {
-        const plan = planWalk(world.network, msg.walk, msg.start, msg.end);
+        const cells = world.scenario.zones!;
+        const plan = planWalk(world.network, msg.walk, msg.start, msg.end, { cells, zoning: meadowZoning(edits,cells) });
         if (typeof plan === 'string') { post({ type: 'editRejected', reason: plan }); break; }
         proposed = [...edits,plan];
       } else if (msg.type === 'buildRoad') {
