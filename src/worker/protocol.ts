@@ -4,6 +4,7 @@ import type { MeadowEdit } from '../sim/scenarios/meadow';
 import type { Scenario, ScenarioName } from '../sim/scenarios';
 import type { TownView } from '../sim/town/town';
 import type { SimStats } from '../sim/world';
+import type { ZoneCells } from '../sim/zoning/cells';
 
 /** Main thread → simulation worker. */
 export type ToWorker =
@@ -17,7 +18,7 @@ export type ToWorker =
 
 /** Simulation worker → main thread. */
 export type FromWorker =
-  | { type: 'roadsChanged'; network: Network; edits: MeadowEdit[] }
+  | { type: 'roadsChanged'; network: Network; zones: ZoneCells | undefined; edits: MeadowEdit[] }
   | { type: 'editWaiting' }
   | { type: 'editRejected'; reason: string }
   | { type: 'ready'; scenario: Scenario; capacity: number }

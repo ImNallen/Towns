@@ -15,8 +15,8 @@ pnpm sim --scenario straight --ticks 2400 --seed 7 --every 600
 pnpm e2e            # Playwright: boots the app, saves screenshots to artifacts/screens/
 ```
 
-URL params: `?scenario=meadow|roundabout|straight&seed=1&speed=0..8&lanes=1&x=0&y=0&mpp=0.14`
-(`x`,`y` = view centre in metres, `mpp` = metres per pixel; `lanes=1` shows the lane graph).
+URL params: `?scenario=meadow|roundabout|straight&seed=1&speed=0..8&lanes=1&zones=1&x=0&y=0&mpp=0.14`
+(`x`,`y` = view centre in metres, `mpp` = metres per pixel; `lanes=1` shows the lane graph; `zones=1` shows the zone cells).
 
 ## Architecture
 
@@ -26,6 +26,7 @@ src/sim/        Pure, deterministic simulation. No DOM, no Three.js, no React, n
   network/      Lane graph (lanes, next/prev, give-way) + drawable surfaces; NetworkBuilder validates it
   traffic/      IDM car-following, SoA vehicle storage, next-hop routing tables
   scenarios/    Map definitions (network + demand + scenery)
+  zoning/       Zone cells beside every built road (Meadow Vale only; the World does not read them yet)
   world.ts      World: fixed 20 Hz tick (DT = 1/20), stats, snapshot, hash
 src/worker/     Runs World in a Web Worker; protocol.ts defines every message
 src/render/     Three.js: camera, road meshes, scenery, instanced vehicles, debug overlay, game loop

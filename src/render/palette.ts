@@ -24,6 +24,7 @@ export const PALETTE = {
   editorPreview: '#8ecbb5',
   editorInvalid: '#bb5941',
   buildBoundary: '#aaa99b',
+  zoneGrid: '#d9d8cf',
   editorPaper: '#fffdf4',
   selection: '#21705d',
 
