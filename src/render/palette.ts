@@ -35,8 +35,6 @@ export const PALETTE = {
   houses: ['#a6cf5f', '#9bc756', '#b0d56d'],
   vehicles: ['#5b7fd6', '#7aa7e8', '#58b38f', '#e4c04c', '#e07f5f', '#9a7fd1', '#4f9fb5', '#d9d9d4'],
   vehicleGlass: '#5d6577',
-  /** Residents' cars by household car model (1 = oldest, 3 = newest). */
-  carModels: ['#a08465', '#2f6d55', '#a8324a'],
 
   gardens: ['#d8dfc8', '#e2e6d2', '#dbe2cb'],
   yardGravel: '#d6c9b3',

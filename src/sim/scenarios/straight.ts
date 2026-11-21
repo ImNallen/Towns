@@ -1,3 +1,4 @@
+import { Model } from '../../vehicles/catalogue';
 import { polyline } from '../math/polyline';
 import { vec2 } from '../math/vec';
 import { NetworkBuilder } from '../network/builder';
@@ -12,8 +13,8 @@ export function straightRoad(): Scenario {
     name: 'straight',
     network: b.build(),
     demand: [
-      { lane: road.forward, rate: 0.35 },
-      { lane: road.backward, rate: 0.35 },
+      { lane: road.forward, model: Model.Estate, rate: 0.35 },
+      { lane: road.backward, model: Model.Estate, rate: 0.35 },
     ],
     decor: { houses: [], lakes: [], hills: [] },
     bounds: { minX: -400, minY: -150, maxX: 400, maxY: 150 },

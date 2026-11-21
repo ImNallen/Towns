@@ -151,8 +151,9 @@ function postFrame(w: World): void {
   const positions = new Float32Array(w.vehicles.highWater * 3);
   const ids = new Int32Array(w.vehicles.highWater);
   const models = new Uint8Array(w.vehicles.highWater);
-  const slots = w.writeSnapshot(positions, ids, models);
-  post({ type: 'frame', tick: w.tick, slots, positions, ids, models, stats: w.stats() }, [positions.buffer, ids.buffer, models.buffer]);
+  const paint = new Uint8Array(w.vehicles.highWater);
+  const slots = w.writeSnapshot(positions, ids, models, paint);
+  post({ type: 'frame', tick: w.tick, slots, positions, ids, models, paint, stats: w.stats() }, [positions.buffer, ids.buffer, models.buffer, paint.buffer]);
 }
 
 function postTown(w: World): void {

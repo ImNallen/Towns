@@ -1,6 +1,6 @@
+import { Model } from '../../src/vehicles/catalogue';
 import { expect, it } from 'vitest';
 import { meadowScenario, planMeadowRoad } from '../../src/sim/scenarios/meadow';
-import { VEHICLE_LENGTH } from '../../src/sim/traffic/idm';
 import { World } from '../../src/sim/world';
 import { decodeCellKey, type CellKey } from '../../src/sim/zoning/cells';
 import type { ZoneKind } from '../../src/sim/zoning/paint';
@@ -19,21 +19,34 @@ function run() {
   const world = new World(scenario, 1);
   world.setZoning(zoning);
   const initial = world.townView()!;
+  const arrivals = new Set<number>(), returns = new Set<number>();
+  const unloading = new Set<string>();
   let customers = 0, gap = Infinity, eastShopped = false;
   for (let tick = 0; tick < 5 * day; tick++) {
     world.step();
     const v = world.vehicles;
     for (let i = 0; i < v.highWater; i++) {
       if (!v.alive[i]) continue;
+      if (v.owner[i]! < -1) {
+        const inbound = v.dest[i]! >= world.routing.sinks.length;
+        if (inbound && v.s[i] === 0) expect(v.dest[i]! - world.routing.sinks.length).toBe(-2 - v.owner[i]!);
+        (inbound ? arrivals : returns).add(v.model[i]!);
+      }
       for (let j = 0; j < i; j++) {
-        if (v.alive[j] && v.lane[i] === v.lane[j]) gap = Math.min(gap, Math.abs(v.s[i]! - v.s[j]!));
+        if (v.alive[j] && v.lane[i] === v.lane[j]) gap = Math.min(gap, Math.abs(v.s[i]! - v.s[j]!) - v.length[v.s[i]! >= v.s[j]! ? i : j]!);
       }
     }
     if (tick % 200 !== 0) continue;
     const view = world.townView()!;
-    for (const business of view.businesses) customers = Math.max(customers, business.customers);
+    for (const business of view.businesses) {
+      customers = Math.max(customers, business.customers);
+      if (business.unloading && business.deliveries) unloading.add(business.zone);
+    }
     if (view.households.some(h => h.region === 'Eastford' && h.members.some(p => p.errand === 'shop' && p.place === 'Eastford'))) eastShopped = true;
   }
+  expect(arrivals).toEqual(new Set([Model.Lorry, Model.DeliveryVan]));
+  expect(returns).toEqual(arrivals);
+  expect(unloading).toEqual(new Set(['shops', 'workplaces']));
   return { world, initial, customers, gap, eastShopped };
 }
 
@@ -51,7 +64,7 @@ it('hires reachable residents, serves local shoppers and retains the isolated of
   expect(eastShopped).toBe(true);
   expect(view.demand.workplaces).toBeLessThan(initial.demand.workplaces);
   expect(view.demand.residential).toBeGreaterThanOrEqual(initial.demand.residential);
-  expect(gap).toBeGreaterThanOrEqual(VEHICLE_LENGTH - 0.01);
+  expect(gap).toBeGreaterThanOrEqual(-0.01);
   expect(world.stats().lost).toBe(0);
   const replay = run().world;
   expect(replay.hash()).toBe(world.hash());

@@ -5,7 +5,7 @@ import { buildStreetNetwork } from '../../src/sim/network/streets';
 import { meadowScenario, meadowTips, upgradeFailure, planMeadowRoad } from '../../src/sim/scenarios/meadow';
 import { editCost, undoCost } from '../../src/sim/town/budget';
 import { BUDGET } from '../../src/sim/town/economy';
-import { VEHICLE_LENGTH } from '../../src/sim/traffic/idm';
+import { Model, vehicleType } from '../../src/vehicles/catalogue';
 import { Routing } from '../../src/sim/traffic/routing';
 import { World } from '../../src/sim/world';
 import { decodeCellKey, type CellKey } from '../../src/sim/zoning/cells';
@@ -15,10 +15,12 @@ it.each(ROAD_ORDER)('%s governs free-flow time, driving speed and roadside surfa
   const { network } = buildStreetNetwork(new NetworkBuilder(), [ends], ends, [], [type]);
   const limit = ROAD_TYPES[type].speedLimit;
   expect(new Routing(network).travelTime(1, 0)).toBeCloseTo(1500 / limit);
-  const world = new World({ ...meadowScenario(), town: undefined, network, demand: [] }, 1);
-  const slot = world.vehicles.spawn(0, 0, 1, 1, 0);
-  for (let i = 0; i < 1000; i++) world.step();
-  expect(world.vehicles.v[slot]).toBeCloseTo(limit, 1);
+  for (const model of [Model.Estate, Model.Lorry]) {
+    const world = new World({ ...meadowScenario(), town: undefined, network, demand: [] }, 1);
+    const slot = world.vehicles.spawn(0, 0, 1, 1, 0, -1, model);
+    for (let i = 0; i < 1000; i++) world.step();
+    expect(world.vehicles.v[slot]).toBeCloseTo(Math.min(limit, vehicleType(model).speed), 1);
+  }
   expect(network.surfaces.filter(s => s.style === 'parking')).toHaveLength(type === 'parking' ? 2 : 0);
   expect(network.surfaces.filter(s => s.style === 'pavement')).toHaveLength(type === 'country' ? 0 : 2);
 });
@@ -61,13 +63,16 @@ it('upgrades and undoes under traffic deterministically with no lost or overlapp
         const change = world.editNetwork(tick === 800 ? upgraded : original);
         if (!change.ok) throw new Error(change.reason);
         expect(change.world.vehicles.id).toEqual(world.vehicles.id);
+        expect(change.world.vehicles.model).toEqual(world.vehicles.model);
         world = change.world;
       }
       world.step();
       const v = world.vehicles;
       for (let i = 0; i < v.highWater; i++) for (let j = 0; j < i; j++) {
-        if (v.alive[i] && v.alive[j] && v.lane[i] === v.lane[j])
-          expect(Math.abs(v.s[i]! - v.s[j]!)).toBeGreaterThanOrEqual(VEHICLE_LENGTH - 0.25);
+        if (v.alive[i] && v.alive[j] && v.lane[i] === v.lane[j]) {
+          const leader = v.s[i]! > v.s[j]! ? i : j;
+          expect(Math.abs(v.s[i]! - v.s[j]!)).toBeGreaterThanOrEqual(v.length[leader]!);
+        }
       }
     }
     expect(world.stats().lost).toBe(0);

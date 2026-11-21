@@ -91,7 +91,7 @@ describe('Meadow Vale residents', () => {
     expect(world.stats().lost).toBe(0);
   });
 
-  it('reports each resident car with its household car model and through traffic as 0', () => {
+  it('reports each resident car with its household car model and through traffic with a catalogue type', () => {
     const world = new World(meadowScenario(connected()), 1);
     let checked = 0;
     live(world, 3 * 1440, (town) => {
@@ -104,7 +104,9 @@ describe('Meadow Vale residents', () => {
       for (let slot = 0; slot < V.highWater; slot++) {
         if (ids[slot]! < 0) continue;
         const owner = V.owner[slot]!;
-        expect(models[slot]).toBe(owner >= 0 ? model.get(owner) : 0);
+        expect(models[slot]).toBe(V.model[slot]);
+        if (owner >= 0) expect(models[slot]).toBe(model.get(owner));
+        else expect(models[slot]).toBeGreaterThan(0);
         if (owner >= 0) checked++;
       }
     });
