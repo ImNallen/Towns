@@ -160,6 +160,7 @@ export function BudgetPanel({ town }: { town: TownView }) {
           <td>{town.day === 1 ? '–' : money(yesterday[key] * sign)}</td></tr>;
       })}</tbody>
     </table>
+    <p>Taxes and road upkeep settle at midnight.</p>
     <h3>Closing balances</h3>
     {history.length ? <ol>{history.map((amount, i) => {
       const day = town.day - history.length + i;

@@ -78,6 +78,12 @@ it('closes actual earnings and payroll at midnight and carries seven balances ac
     world.step();
     const view = world.townView()!;
     const { homes, shops, workplaces, upkeep } = view.budget.yesterday;
+    // Growth runs on the hour, so shops that first open at midnight owe their first rate then.
+    const newShopRates = view.businesses.filter(b => b.zone === 'shops' && !before.businesses.some(old => old.home === b.home))
+      .reduce((sum, b) => sum + b.lot.columns * b.lot.rows * BUDGET.shopRatePerCell, 0);
+    expect({ ...before.budget.today, shops: before.budget.today.shops + newShopRates }).toEqual(view.budget.yesterday);
+    expect(before.budget.today.homes).toBeGreaterThan(0);
+    expect(before.budget.today.shops).toBeGreaterThan(0);
     let expected = 0;
     for (const h of view.households) {
       const tax = Math.round((h.wages - (previousWages.get(h.id) ?? 0)) * BUDGET.homeTax);
@@ -134,4 +140,19 @@ it('runs short maintaining unzoned roads while the clock and traffic keep moving
   expect(world.stats().completed).toBeGreaterThan(0);
   expect(world.stats().lost).toBe(0);
   expect(world.hash()).toBe(run().hash());
+});
+
+it('retains tax on wages already earned when housing is erased before midnight', () => {
+  const world = new World(meadowScenario(), 1);
+  const paint = new Map(Array.from(world.scenario.zones!.keys, raw => [raw as CellKey, 'residential'] as const));
+  world.setZoning(paint);
+  for (let i = 0; i < 4 * day; i++) world.step();
+  // By 22:00 the day’s returning commuters have booked their pay.
+  for (let i = 0; i < (22 * 60 - CLOCK_START) * 20; i++) world.step();
+  const before = world.townView()!;
+  expect(before.households.some(h => h.lot && h.wages > 0)).toBe(true);
+  world.setZoning(new Map());
+  expect(world.townView()!.budget.today.homes).toBe(before.budget.today.homes);
+  for (let i = 0; i <= 2 * 60 * 20; i++) world.step();
+  expect(world.townView()!.budget.yesterday.homes).toBe(before.budget.today.homes);
 });

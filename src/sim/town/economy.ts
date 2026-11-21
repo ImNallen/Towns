@@ -3,10 +3,11 @@ export const BUDGET = {
   roadPerMetre: 12,
   zonePerCell: 2,
   salvageShare: 0.5,
-  upkeepPerMetre: 0.55,
-  homeTax: 0.08,
-  shopTax: 0.08,
-  workplaceTax: 0.06,
+  upkeepPerMetre: 1.4,
+  homeTax: 0.045,
+  shopTax: 0.16,
+  shopRatePerCell: 12,
+  workplaceTax: 0.035,
 } as const;
 
 /** Household and employer prices in dollars. Level and model prices are indexed from one. */
