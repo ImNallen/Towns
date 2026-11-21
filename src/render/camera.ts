@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { Vec2 } from '../sim/math/vec';
 import type { Bounds } from '../sim/scenarios/types';
 
 const MIN_MPP = 0.04;
@@ -61,10 +62,14 @@ export class MapCamera {
     };
   }
 
+  worldToScreen(p: Vec2): Vec2 {
+    return { x: this.width / 2 + (p.x - this.centerX) / this.mpp, y: this.height / 2 - (p.y - this.centerY) / this.mpp };
+  }
+
   screenBounds(b: Bounds): DOMRect {
+    const origin = this.worldToScreen({ x: b.minX, y: b.maxY });
     return new DOMRect(
-      this.width / 2 + (b.minX - this.centerX) / this.mpp,
-      this.height / 2 - (b.maxY - this.centerY) / this.mpp,
+      origin.x, origin.y,
       (b.maxX - b.minX) / this.mpp,
       (b.maxY - b.minY) / this.mpp,
     );
