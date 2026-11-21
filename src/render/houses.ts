@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { polyline } from '../sim/math/polyline';
 import type { Vec2 } from '../sim/math/vec';
-import type { House } from '../sim/scenarios/types';
+import type { Bounds, House } from '../sim/scenarios/types';
 import { BLUEPRINTS } from '../buildings/catalogue';
 import type { BusinessView, HouseholdView } from '../sim/town/town';
 import { buildBuildingLayer, type BuildingInstance } from './buildings/mesh';
@@ -89,6 +89,7 @@ export class HouseLayer {
   private grownLayer = new THREE.Group();
   private selected: number | null = null;
   private selection: THREE.Mesh | null = null;
+  selectedBounds: Bounds | null = null;
 
   constructor(private readonly houses: readonly House[]) {
     this.group.name = 'houses';
@@ -225,6 +226,7 @@ export class HouseLayer {
 
   select(index: number | null): void {
     this.selected = index;
+    this.selectedBounds = null;
     if (this.selection) {
       this.selection.geometry.dispose();
       this.selection.removeFromParent();
@@ -242,6 +244,10 @@ export class HouseLayer {
         const sin = Math.sin(house!.angle);
         return { x: house!.x + c.x * cos - c.y * sin, y: house!.y + c.x * sin + c.y * cos };
       });
+    this.selectedBounds = {
+      minX: Math.min(...corners.map(p => p.x)), maxX: Math.max(...corners.map(p => p.x)),
+      minY: Math.min(...corners.map(p => p.y)), maxY: Math.max(...corners.map(p => p.y)),
+    };
     const outline = new FlatMesh(0.3);
     outline.ribbon(polyline(corners, true), 0.35);
     this.selection = new THREE.Mesh(outline.build(), this.outlineMaterial);

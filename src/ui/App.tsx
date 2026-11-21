@@ -1,6 +1,6 @@
 import { BUDGET } from '../sim/town/economy';
 import { ROAD_ORDER, ROAD_TYPES, type RoadType } from '../sim/network/roadTypes';
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Game } from '../render/game';
 import { ZONE_KINDS, type LandUse } from '../sim/zoning/paint';
 import { BudgetPanel, money, dayClock, HouseholdCard, TownPanel } from './town';
@@ -17,6 +17,7 @@ function clock(seconds: number): string {
 }
 
 export function App({ game }: { game: Game }) {
+  const hud = useRef<HTMLElement>(null);
   const [stats, setStats] = useState(game.stats());
   const [town, setTown] = useState(game.town());
   const [selected, setSelected] = useState(game.selectedHouse());
@@ -132,10 +133,43 @@ export function App({ game }: { game: Game }) {
     : 'Drag between marked ends to connect them, or click points one by one.');
   const household = selected === null ? undefined : town?.households.find((h) => h.home === selected);
   const business = town?.businesses.find(b => b.home === selected);
+  const inspecting = !!(household || business);
+  useLayoutEffect(() => {
+    if (!inspecting || !hud.current) return;
+    const root = hud.current;
+    const panels = Array.from(root.querySelectorAll<HTMLElement>('.panel'));
+    const left = root.querySelector<HTMLElement>('.hud-column.left')!;
+    const right = root.querySelector<HTMLElement>('.hud-column.right')!;
+    const controls = right.querySelector<HTMLElement>('.simulation')!;
+    const card = right.querySelector<HTMLElement>('.household')!;
+    const toolbar = root.querySelector<HTMLElement>('.editor')!;
+    const reveal = () => {
+      const parcel = game.selectedParcelOnScreen();
+      if (!parcel) return;
+      const margin = 8;
+      const visible = parcel.left >= margin && parcel.top >= margin &&
+        parcel.right <= root.clientWidth - margin && parcel.bottom <= root.clientHeight - margin;
+      if (visible && panels.every(panel => {
+        const r = panel.getBoundingClientRect();
+        return parcel.right + margin <= r.left || parcel.left >= r.right + margin ||
+          parcel.bottom + margin <= r.top || parcel.top >= r.bottom + margin;
+      })) return;
+      const narrow = window.matchMedia('(max-width: 640px)').matches;
+      const x = narrow ? margin : left.getBoundingClientRect().right + margin;
+      const y = narrow ? Math.max(left.getBoundingClientRect().bottom, controls.getBoundingClientRect().bottom) + margin : margin;
+      const endX = narrow ? root.clientWidth - margin : right.getBoundingClientRect().left - margin;
+      const endY = (narrow ? card : toolbar).getBoundingClientRect().top - margin;
+      game.revealSelectedParcel(new DOMRect(x, y, endX - x, endY - y));
+    };
+    const observer = new ResizeObserver(reveal);
+    for (const el of [root, ...panels]) observer.observe(el);
+    reveal();
+    return () => observer.disconnect();
+  }, [game, selected, inspecting]);
   const tripStatus = editor?.pending ? 'Updating roads' : speed === 0 ? 'Paused' : editor && !editor.connected ? 'Waiting for a connection' : 'Traffic running';
 
   return (
-    <aside className="hud" aria-label="Map controls">
+    <aside ref={hud} className={inspecting ? 'hud inspecting' : 'hud'} aria-label="Map controls">
       <div className="hud-column left">
         <section className="map-info panel" aria-label="Map objective">
           <header className="map-heading">
@@ -179,7 +213,6 @@ export function App({ game }: { game: Game }) {
             <div className="performance">{fps.toFixed(0)} fps</div>
           </details>
         </section>
-        {town && <BudgetPanel town={town} />}
         {business && <section className="household panel" aria-label="Business">
           <div className="panel-heading">{business.zone === 'shops' ? 'Shop' : 'Workplace'}
             <button className="close" onClick={() => selectHouse(null)} aria-label="Close business card">×</button>
@@ -193,6 +226,7 @@ export function App({ game }: { game: Game }) {
             <dt>Customers today</dt><dd>{business.customers}</dd></dl>
         </section>}
         {household && <HouseholdCard household={household} onClose={() => selectHouse(null)} />}
+        {town && <BudgetPanel town={town} />}
       </div>
 
       {editor && <section className="editor" aria-label="Road editor">

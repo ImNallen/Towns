@@ -47,6 +47,8 @@ export interface Game {
   town(): TownView | null;
   /** Index into `scenario.decor.houses` (= `HouseholdView.home`) of the inspected house. */
   selectedHouse(): number | null;
+  selectedParcelOnScreen(): DOMRect | null;
+  revealSelectedParcel(area: DOMRect): void;
   selectHouse(house: number | null): void;
   fps(): number;
   speed(): number;
@@ -251,6 +253,8 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     town: () => latestTown,
     selectedHouse: () => selectedHouse,
     selectHouse,
+    selectedParcelOnScreen: () => houses?.selectedBounds ? mapCamera.screenBounds(houses.selectedBounds) : null,
+    revealSelectedParcel: area => { if (houses?.selectedBounds) mapCamera.reveal(houses.selectedBounds, area); },
     fps: () => fps,
     speed: () => speed,
     setSpeed(next) {

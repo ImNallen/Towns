@@ -23,7 +23,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ground
 .panel { pointer-events: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 3px 14px #263b2b0c; }
 .hud-column { position: absolute; top: 24px; bottom: 24px; display: flex; flex-direction: column; justify-content: space-between; gap: 10px; }
 .hud-column.left { left: 24px; width: 300px; }
-.hud-column.right { right: 24px; width: 300px; align-items: flex-end; }
+.hud-column.right { justify-content: flex-start; right: 24px; width: 300px; align-items: flex-end; }
 .map-info { padding: 17px 18px 0; flex: none; }
 .map-heading { display: flex; justify-content: space-between; align-items: center; }
 .wordmark { font-size: 11px; font-weight: 750; letter-spacing: .15em; text-transform: uppercase; }
@@ -49,7 +49,7 @@ h2 { margin: 2px 0 5px; font-size: 12px; line-height: 1.35; font-weight: 650; }
 .town-feed li { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 11px; line-height: 1.4; }
 .town-feed time { flex: none; color: var(--muted); font-size: 10px; }
 .town-feed li:not(:first-child) span { color: var(--muted); }
-.simulation { width: 220px; padding: 13px; flex: none; }
+.simulation { margin-bottom: auto; width: 220px; padding: 13px; flex: none; }
 .household { width: 100%; padding: 12px 18px 12px; overflow: auto; min-height: 0; }
 .household .close { width: 24px; height: 24px; margin: -5px -8px -5px 0; font-size: 16px; line-height: 1; color: var(--muted); letter-spacing: 0; }
 .household-name { margin: 4px 0 2px; font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif; font-size: 22px; font-weight: 500; letter-spacing: -.02em; line-height: 1.2; }
@@ -111,7 +111,7 @@ button.bulldoze.active, button.bulldoze.active:hover { background: #904731; }
   h1 { font-size: 25px; margin-bottom: 13px; }
   .objective { margin-bottom: 13px; }
   .trip-summary { margin: 0 -14px; padding: 10px 14px; }
-  .hud-column.right { top: auto; bottom: max(160px, calc(env(safe-area-inset-bottom) + 148px)); right: 12px; width: calc(100% - 24px); max-height: calc(100% - 172px); flex-direction: column-reverse; justify-content: flex-start; }
+  .hud-column.right { top: auto; bottom: max(160px, calc(env(safe-area-inset-bottom) + 148px)); right: 12px; width: calc(100% - 24px); max-height: calc(100% - 172px); flex-direction: column; justify-content: flex-end; }
   .simulation { width: 190px; padding: 10px; }
   .simulation-heading { margin-bottom: 6px; }
   .traffic-details { margin-top: 7px; padding-top: 6px; }
@@ -170,10 +170,6 @@ button.bulldoze.active, button.bulldoze.active:hover { background: #904731; }
 .road-picker { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
 .road-picker select { font: inherit; padding: 3px 6px; border: 1px solid var(--line); background: var(--panel); color: inherit; border-radius: 3px; }
 
-/* Keep the lot tool and the household/business cards accessible at map zoom. */
-@media (min-width: 1214px) and (max-width: 1600px) {
-  .hud:has(.editor) .hud-column { bottom: 86px; }
-}
 @media (min-width: 641px) and (max-width: 1000px) {
   .tool kbd { display: none; }
   .tool { padding: 0 8px; }
@@ -182,4 +178,55 @@ button.bulldoze.active, button.bulldoze.active:hover { background: #904731; }
   .tool-bar { width: min(560px, calc(100vw - 24px)); display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 1px; }
   .tool-divider { display: none; }
   .tool { flex-direction: column; gap: 2px; padding: 3px 1px; font-size: 10px; }
+}
+
+@media (min-width: 641px) {
+  .inspecting .hud-column { width: min(300px, 28vw); }
+  .inspecting .budget { max-height: 45%; overflow: auto; }
+}
+
+@media (max-width: 640px) {
+  .inspecting .hud-column.left { width: calc(48% - 18px); max-height: 28dvh; overflow: auto; }
+  .inspecting .hud-column.left > .panel { flex: none; }
+  .inspecting .map-info { padding: 8px 10px 0; }
+  .inspecting .map-info h1 { margin: 4px 0 6px; font-size: 18px; }
+  .inspecting .map-info .objective { margin-bottom: 6px; }
+  .inspecting .trip-summary { margin: 0 -10px; padding: 5px 10px; }
+  .inspecting .simulation { position: fixed; top: 12px; right: 12px; width: calc(52% - 18px); max-height: 28dvh; overflow: auto; }
+  .inspecting .hud-column.right { height: 34dvh; }
+  .inspecting .household { flex: 0 1 auto; }
+  .inspecting .budget { flex: none; max-height: 55%; overflow: auto; }
+}
+
+@media (max-width: 640px) {
+  .inspecting .map-info .traffic-status, .inspecting .town-demand { display: none; }
+  .inspecting .trip-summary strong { font-size: 15px; }
+  .inspecting .town { padding: 8px 10px; }
+}
+
+/* Let the toolbar reserve its actual height when tools and touch instructions wrap. */
+.hud:has(> .editor) {
+  display: grid;
+  grid-template: minmax(0, 1fr) auto / minmax(0, 1fr);
+  row-gap: 8px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+.hud:has(> .editor) .hud-column.right { grid-area: 1 / 1 / 2 / 2; bottom: 0; }
+.hud > .editor { position: static; grid-row: 2; justify-self: center; transform: none; }
+@media (min-width: 641px) {
+  .hud:has(> .editor) .hud-column.left { grid-area: 1 / 1 / 2 / 2; bottom: 0; }
+  .inspecting .simulation { max-width: 100%; }
+}
+@media (min-width: 641px) and (max-width: 1000px) {
+  .tool { flex-direction: column; gap: 2px; padding: 3px 6px; }
+}
+
+@media (min-width: 641px) and (max-width: 1213px) and (max-height: 560px) {
+  .inspecting .hud-column { overflow: auto; }
+  .inspecting .map-info { padding: 8px 10px 0; }
+  .inspecting .map-info h1 { margin: 4px 0; font-size: 18px; }
+  .inspecting .objective { margin-bottom: 5px; }
+  .inspecting .trip-summary { margin: 0 -10px; padding: 4px 10px; }
+  .inspecting .simulation { max-height: 35%; overflow: auto; padding: 6px 9px; }
+  .inspecting .budget { max-height: 38%; }
 }

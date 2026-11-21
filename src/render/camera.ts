@@ -61,6 +61,26 @@ export class MapCamera {
     };
   }
 
+  screenBounds(b: Bounds): DOMRect {
+    return new DOMRect(
+      this.width / 2 + (b.minX - this.centerX) / this.mpp,
+      this.height / 2 - (b.maxY - this.centerY) / this.mpp,
+      (b.maxX - b.minX) / this.mpp,
+      (b.maxY - b.minY) / this.mpp,
+    );
+  }
+
+  /** Pan just enough to show the outlined parcel in the clear part of the map. */
+  reveal(b: Bounds, area: DOMRect): void {
+    if (area.width <= 0 || area.height <= 0) return;
+    this.mpp = Math.max(this.mpp, (b.maxX - b.minX) / area.width, (b.maxY - b.minY) / area.height);
+    const rect = this.screenBounds(b);
+    const x = Math.max(area.left, Math.min(rect.left, area.right - rect.width));
+    const y = Math.max(area.top, Math.min(rect.top, area.bottom - rect.height));
+    this.centerX += (rect.left - x) * this.mpp;
+    this.centerY -= (rect.top - y) * this.mpp;
+  }
+
   dispose(): void {
     this.abort.abort();
   }
