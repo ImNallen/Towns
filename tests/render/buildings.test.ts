@@ -1,9 +1,9 @@
 import { expect, test } from 'vitest';
 import { CELL_WIDTH, CELL_DEPTH, ZONE_ROWS } from '../../src/sim/zoning/cells';
-import { BLUEPRINTS } from '../../src/render/buildings/catalogue';
+import { BLUEPRINTS } from '../../src/buildings/catalogue';
 import { buildingGeometry, buildBuildingLayer } from '../../src/render/buildings/mesh';
-import type { BuildingPick } from '../../src/render/buildings/types';
-import { pickBuilding, catalogueVariants } from '../../src/render/buildings/variation';
+import type { BuildingPick } from '../../src/buildings/types';
+import { pickBuilding, catalogueVariants } from '../../src/buildings/variation';
 
 const tiers = ['cheap', 'mid', 'expensive'] as const;
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { BLUEPRINTS } from '../render/buildings/catalogue';
+import { BLUEPRINTS } from '../buildings/catalogue';
 import { PreviewRenderer } from '../render/buildings/preview';
 import './catalogue.css';
 

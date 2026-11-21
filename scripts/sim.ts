@@ -20,6 +20,7 @@ const { values } = parseArgs({
     seed: { type: 'string', default: '1' },
     every: { type: 'string', default: '0' },
     json: { type: 'boolean', default: false },
+    paint: { type: 'boolean', default: false },
     connect: { type: 'boolean', default: false },
   },
 });
@@ -50,6 +51,7 @@ const town = (view: TownView): string => {
   const clock = `${String(Math.floor(view.minuteOfDay / 60)).padStart(2, '0')}:${String(view.minuteOfDay % 60).padStart(2, '0')}`;
   return [
     `  town day ${view.day} ${clock}`,
+    `homes=${view.households.length}`,
     `people=${t.population}`,
     `employed=${t.employed}/${t.adults}`,
     `cross=${t.crossCommuters}`,
@@ -77,6 +79,11 @@ if (values.connect && scenarioName !== 'meadow') {
   process.exit(1);
 }
 const world = new World(values.connect ? connectedMeadow() : buildScenario(scenarioName), seed);
+if (values.paint) {
+  const cells = world.scenario.zones;
+  if (!cells) throw new Error('--paint requires --scenario meadow');
+  world.setZoning(new Map(Array.from(cells.keys, key => [key as import('../src/sim/zoning/cells').CellKey, 'residential'])));
+}
 const started = performance.now();
 for (let t = 0; t < ticks; t++) {
   world.step();

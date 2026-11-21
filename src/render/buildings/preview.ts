@@ -4,8 +4,8 @@ import { disposeLayer } from '../dispose';
 import { AMBIENT_INTENSITY, SUN_DIRECTION, SUN_INTENSITY } from '../lighting';
 import { PALETTE } from '../palette';
 import { buildBuildingLayer, type BuildingInstance } from './mesh';
-import type { Blueprint, BuildingPick, Tier } from './types';
-import { pickBuilding, catalogueVariants } from './variation';
+import type { Blueprint, BuildingPick, Tier } from '../../buildings/types';
+import { pickBuilding, catalogueVariants } from '../../buildings/variation';
 
 function ground(group: THREE.Group, x: number, y: number, width: number, depth: number, color: string, height = -0.02) {
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, depth), new THREE.MeshLambertMaterial({ color }));

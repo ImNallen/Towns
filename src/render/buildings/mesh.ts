@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { PALETTE } from '../palette';
-import type { Blueprint, BuildingPick, Variant } from './types';
+import type { Blueprint, BuildingPick, Variant } from '../../buildings/types';
 
 export function buildingGeometry(blueprint: Blueprint, variant: Variant): THREE.BufferGeometry {
   const pieces: THREE.BufferGeometry[] = [];

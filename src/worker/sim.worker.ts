@@ -102,13 +102,18 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
 };
 
 function commitZoning(next: MeadowEdit[]): void {
+  if (world?.scenario.zones) {
+    world.setZoning(meadowZoning(next, world.scenario.zones));
+    postTown(world);
+    postFrame(world);
+  }
   edits = next;
   post({ type: 'zoningChanged', edits });
 }
 
 function applyEdit(edit: { edits: MeadowEdit[]; scenario: Scenario }): boolean {
   if (!world) return false;
-  const result = world.editNetwork(edit.scenario);
+  const result = world.editNetwork(edit.scenario, meadowZoning(edit.edits, edit.scenario.zones!));
   if (!result.ok) return false;
   world = result.world;
   world.setAdmissions(true);

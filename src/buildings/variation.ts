@@ -36,6 +36,10 @@ export function pickBuilding(key: string, tier: Tier, lot: LotSize, neighbours: 
   const fitting = eligible.filter((b) => b.lot.columns * b.lot.rows === area);
   const blueprint = fitting[hash(key) % fitting.length];
   if (!blueprint) throw new Error('No compatible blueprint');
+  return finishBuilding(key, blueprint, neighbours);
+}
+
+export function finishBuilding(key: string, blueprint: Blueprint, neighbours: readonly BuildingPick[] = []): BuildingPick {
   const wall = blueprint.walls[finishHash(key, 'wall') % blueprint.walls.length]!;
   const roofs = blueprint.roofs.filter(roof => !neighbours.some(n => n.variant.wall === wall && n.variant.roof === roof));
   // Each design allows at least three roofs, so two neighbours always leave a choice.

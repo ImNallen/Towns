@@ -1,4 +1,4 @@
-import type { PALETTE } from '../palette';
+import type { PALETTE } from '../render/palette';
 
 /** Metres in the lot frame: x along the frontage, y away from the front kerb; origin at lot centre. */
 export interface Footprint { x: number; y: number; width: number; depth: number }

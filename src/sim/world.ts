@@ -1,6 +1,9 @@
 import { endOf, sampleAt, startOf, type PathSample } from './math/polyline';
 import type { Lane, Network } from './network/types';
 import { Rng } from './rng';
+import { residentialLots } from './zoning/lots';
+import type { Zoning } from './zoning/paint';
+import { accessPoints } from './scenarios/meadow';
 import type { Scenario } from './scenarios/types';
 import { IDM, VEHICLE_LENGTH, idmAccel } from './traffic/idm';
 import { Routing } from './traffic/routing';
@@ -58,7 +61,8 @@ interface Spawner {
 export class World {
   readonly scenario: Scenario;
   readonly network: Network;
-  readonly routing: Routing;
+  routing: Routing;
+  private zoning: Zoning = new Map();
   readonly vehicles: Vehicles;
 
   private readonly lanes: Lane[];
@@ -155,15 +159,56 @@ export class World {
     this.admissionsOpen = open;
   }
 
+  /** Paint edits change driveway targets without remapping cars already on the street. */
+  setZoning(zoning: Zoning): void {
+    if (!this.town) return;
+    this.installLots(zoning, this.town);
+    const v = this.vehicles;
+    for (let i = 0; i < v.highWater; i++) {
+      if (v.alive[i] && this.town.departed(v.owner[i]!)) v.despawn(i);
+    }
+  }
+
+  private installLots(zoning: Zoning, previous: Town): void {
+    const base = this.scenario.town!;
+    this.zoning = zoning;
+    const occupied = previous.occupiedLots();
+    const lots = residentialLots(this.scenario, zoning, occupied);
+    const surviving = new Set(lots);
+    const homes = [...base.homes];
+    const free: number[] = [];
+    const occupiedSlots = new Map<(typeof lots)[number], number>();
+    for (let h = homes.length; h < previous.spec.homes.length; h++) {
+      const lot = previous.spec.homes[h]!.lot;
+      if (lot && surviving.has(lot)) occupiedSlots.set(lot, h);
+      else free.push(h);
+      homes.push({ access: [], region: 0 });
+    }
+    let used = 0;
+    for (const lot of lots) {
+      const h = occupiedSlots.get(lot) ?? free[used++] ?? homes.length;
+      const access = accessPoints(this.network, { x: lot.streetX, y: lot.streetY });
+      homes[h] = { lot, access, region: lot.streetX < 0 ? 0 : 1 };
+    }
+    this.routing = new Routing(this.network, homes.map(home => home.access));
+    this.town = new Town({ ...base, homes }, this.routing.sinks.length, 0, this.routing, base.homes.length);
+    this.town.copyFrom(previous);
+  }
+
   /**
    * Construct an independent world with new geometry, preserving all running trips.
    * A removal or changed curve that cannot represent a car's current pose is deferred;
    * close admissions, keep stepping this world, and retry when traffic has cleared.
    */
-  editNetwork(scenario: Scenario): { ok: true; world: World } | { ok: false; reason: string } {
+  editNetwork(scenario: Scenario, zoning: Zoning = this.zoning): { ok: true; world: World } | { ok: false; reason: string } {
     const edited = new World(scenario, 0, this.vehicles.capacity, this.tick);
-    if (this.town && edited.town?.spec.homes.length !== this.town.spec.homes.length) {
+    if (this.town && scenario.town?.homes.length !== this.scenario.town?.homes.length) {
       return { ok: false, reason: 'The edited map must keep every home.' };
+    }
+    if (this.town && (zoning.size || this.town.spec.homes.length > scenario.town!.homes.length)) {
+      edited.installLots(zoning, this.town);
+    } else if (this.town) {
+      edited.town!.copyFrom(this.town);
     }
     const V = this.vehicles;
     const sinkCount = this.routing.sinks.length;
@@ -187,6 +232,10 @@ export class World {
     edited.vehicles.copyFrom(V);
     for (let slot = 0; slot < V.highWater; slot++) {
       if (!V.alive[slot]) continue;
+      if (edited.town?.departed(V.owner[slot]!)) {
+        edited.vehicles.despawn(slot);
+        continue;
+      }
       const dest = destinations[V.dest[slot]!]!;
       if (dest < 0) return fail(slot);
       const pose = sampleAt(this.lanes[V.lane[slot]!]!.path, V.s[slot]!, { x: 0, y: 0, hx: 0, hy: 0 });
@@ -220,7 +269,7 @@ export class World {
     // along each driver's new route, rather than only inside individual lanes.
     edited.buildBuckets();
     for (let slot = 0; slot < V.highWater; slot++) {
-      if (!V.alive[slot]) continue;
+      if (!edited.vehicles.alive[slot]) continue;
       const lane = edited.vehicles.lane[slot]!;
       const s = edited.vehicles.s[slot]!;
       const rank = edited.rank[slot]!;
@@ -238,8 +287,7 @@ export class World {
       }
     }
     edited.rng.copyFrom(this.rng);
-    if (this.town) edited.town!.copyFrom(this.town);
-    else edited.town = null;
+    if (!this.town) edited.town = null;
     edited.admissionsOpen = this.admissionsOpen;
     edited.spawned = this.spawned;
     edited.completed = this.completed;
