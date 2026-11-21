@@ -49,3 +49,19 @@ it('builds a low-cost reversible footpath and requires a paved road for zebras',
   const p={x:-110,y:-8};
   expect(typeof planWalk(meadowScenario([{upgrade:0,roadType:'country'}]).network,'zebra',p,p)).toBe('string');
 });
+
+it('upgrades an ordinary crossing in place',()=>{
+  const scenario=meadowScenario(), point={x:-45,y:-8};
+  const edit=planWalk(scenario.network,'zebra',point,point);
+  if(typeof edit==='string') throw new Error(edit);
+  const old=new World(scenario,1), changed=new World(meadowScenario([edit]),1);
+  expect(changed.walkers!.graph.crossings).toHaveLength(old.walkers!.graph.crossings.length);
+  expect(changed.walkers!.graph.crossings.filter(c=>c.zebra)).toHaveLength(1);
+});
+
+it('preserves the pedestrian right of way when a new street would cross a footpath',()=>{
+  const path=planWalk(meadowScenario().network,'footpath',{x:0,y:-20},{x:0,y:25});
+  if(typeof path==='string') throw new Error(path);
+  const [a,b]=meadowTips([]);
+  expect(planMeadowRoad([path],a!,b!)).toMatchObject({ok:false,reason:'Leave the footpath clear of the new street.'});
+});

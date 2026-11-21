@@ -374,11 +374,17 @@ export function meadowScenario(roads: readonly MeadowEdit[] = []): Scenario {
   for (const edit of roads) {
     if (!('walk' in edit)) continue;
     if (edit.walk === 'footpath') {
+      if (crossesCarriageway(scenario.network,edit.a,edit.b)) continue;
       scenario.network.surfaces.push({ style: 'footpath', centerline: polyline([edit.a,edit.b]), width: 1.8, id: scenario.network.surfaces.length });
     } else {
       const crossing = zebraAt(scenario.network, scale(add(edit.a,edit.b),0.5));
       if (!crossing) continue;
-      scenario.network.pedestrianLinks?.push({ a: crossing.a, b: crossing.b, crossing: true, zebra: true });
+      const links = scenario.network.pedestrianLinks!;
+      const ordinary = links.find(link => link.crossing && (
+        (same(link.a,crossing.a) && same(link.b,crossing.b)) || (same(link.b,crossing.a) && same(link.a,crossing.b))
+      ));
+      if (ordinary) ordinary.zebra = true;
+      else links.push({ a: crossing.a, b: crossing.b, crossing: true, zebra: true });
     }
     scenario.town!.roadUpkeep! += edit.walk === 'zebra' ? 1 : Math.ceil(distance(edit.a,edit.b)*0.07);
   }
@@ -422,6 +428,15 @@ function zebraAt(network: Network, cursor: Vec2): WalkEdit | undefined {
   return a && b ? { walk: 'zebra', a:a.point, b:b.point } : undefined;
 }
 
+function crossesCarriageway(network: Network, a: Vec2, b: Vec2): boolean {
+  const steps = Math.max(1,Math.ceil(distance(a,b)));
+  for (let i=0; i<=steps; i++) {
+    const p=add(a,scale(sub(b,a),i/steps));
+    if (nearestSurface(network,p,['twoWay','junction'],3.55)) return true;
+  }
+  return false;
+}
+
 export function planWalk(network: Network, walk: WalkEdit['walk'], start: Vec2, end: Vec2): WalkEdit | string {
   if (!insideMeadow(start) || !insideMeadow(end)) return 'Stay inside the meadow.';
   if (walk === 'zebra') {
@@ -434,9 +449,9 @@ export function planWalk(network: Network, walk: WalkEdit['walk'], start: Vec2, 
   const a = snap(start), b = snap(end);
   const length = distance(a,b), decor = scenery();
   if (length < 3) return 'Drag a path at least three metres long.';
+  if (crossesCarriageway(network,a,b)) return 'Use a crossing to cross the street.';
   for (let i=0; i<=Math.ceil(length); i++) {
     const p = add(a,scale(sub(b,a),i/Math.ceil(length)));
-    if (nearestSurface(network,p,['twoWay','junction'],3.55)) return 'Use a crossing to cross the street.';
     if (blockedByScenery(p,decor,0.5) && Math.min(distance(p,a),distance(p,b))>2) return 'Keep the path on open ground.';
   }
   return { walk, a, b };
@@ -700,7 +715,18 @@ export function planMeadowRoad(roads: readonly MeadowEdit[], start: Vec2, end: V
   let rejected: Plan | undefined;
   for (const shape of roadShapes(source, target, start, end, bend, replay.removedArms, decor)) {
     const plan = 'reason' in shape ? fail(shape.reason) : checkRoad(chains, source, target, shape, decor, types, roadType);
-    if (plan.ok) return { ...plan, road: { ...plan.road, roadType } };
+    if (plan.ok) {
+      const road = { ...plan.road, roadType };
+      const paths = roads.filter((edit): edit is WalkEdit => 'walk' in edit && edit.walk === 'footpath');
+      if (paths.length) {
+        const proposed = meadowNetwork([...roads,road]);
+        if (paths.some(path => crossesCarriageway(proposed,path.a,path.b))) {
+          rejected ??= fail('Leave the footpath clear of the new street.');
+          continue;
+        }
+      }
+      return { ...plan, road };
+    }
     rejected ??= plan;
   }
   return rejected!;
