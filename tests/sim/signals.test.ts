@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import { signalAspect } from '../../src/sim/network/signals';
 import { meadowScenario, planMeadowRoad } from '../../src/sim/scenarios/meadow';
 import { editCost, undoCost } from '../../src/sim/town/budget';
+import { decodeCellKey, type CellKey } from '../../src/sim/zoning/cells';
 import { World } from '../../src/sim/world';
 
 it('installs lights under traffic and clears conflicting movements and occupied crossings every tick', () => {
@@ -21,9 +22,16 @@ it('installs lights under traffic and clears conflicting movements and occupied 
   if(!changed.ok) throw new Error(changed.reason);
   const world=changed.world, v=world.vehicles;
   const arms=after.network.junctions![0]!.arms;
+  world.setZoning(new Map(Array.from(after.zones!.keys, raw => {
+    const key = raw as CellKey, { column, side } = decodeCellKey(key);
+    const band = (column + side*2) % 6;
+    return [key, band<3?'residential':band===3?'shops':'workplaces'] as const;
+  })));
   let entries=0;
+  let walkingTicks=0;
+  const occupiedLastTick = new Set<import('../../src/sim/traffic/pedestrianConflicts').Crossing>();
   const previous = new Int32Array(v.capacity);
-  for(let tick=0;tick<6000;tick++) {
+  for(let tick=0;tick<57600;tick++) {
     previous.set(v.lane);
     world.step();
     const occupied = new Set<number>();
@@ -40,12 +48,17 @@ it('installs lights under traffic and clears conflicting movements and occupied 
         expect(occupied.has(other)).toBe(false);
       }
     }
-    for(const c of world.walkers!.graph.crossings) if(c.occupied) {
+    for(const c of world.walkers!.graph.crossings) {
+      if (!c.occupied || c.walkGroup === undefined) { occupiedLastTick.delete(c); continue; }
+      if (!occupiedLastTick.has(c)) expect(signalAspect(c.walkGroup,world.tick-1)).toBe('green');
+      occupiedLastTick.add(c);
+      walkingTicks++;
       for(const zone of c.lanes) for(let i=0;i<v.highWater;i++) {
-        if(v.alive[i] && v.lane[i]===zone.lane) expect(v.s[i]!<zone.from || v.s[i]!-v.length[i]!>zone.to).toBe(true);
+        if(v.alive[i] && v.lane[i]===zone.lane) if (v.s[i]! > zone.from+0.001 && v.s[i]!-v.length[i]! < zone.to-0.001) throw new Error('Walker conflict at tick '+tick);
       }
     }
   }
+  expect(walkingTicks).toBeGreaterThan(100);
   expect(entries).toBeGreaterThan(20);
   expect(world.stats().lost).toBe(0);
   expect(world.editNetwork(before).ok).toBe(true);
