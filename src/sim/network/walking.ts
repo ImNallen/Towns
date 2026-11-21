@@ -1,5 +1,6 @@
 import { crossingAt, observeCrossings, type Crossing } from '../traffic/pedestrianConflicts';
 import type { Vehicles } from '../traffic/vehicles';
+import { WalkRouting } from './walkRouting';
 import type { Vec2 } from '../math/vec';
 import type { Network } from './types';
 import type { Bay } from '../town/parking';
@@ -18,13 +19,14 @@ export class WalkingNetwork {
   readonly points: Vec2[] = [];
   readonly edges: Edge[][] = [];
   readonly places: number[] = [];
-  readonly next: Int32Array[] = [];
-  readonly costs: Float64Array[] = [];
+  readonly routing: WalkRouting;
+  get next() { return this.routing.next; }
+  get costs() { return this.routing.costs; }
   readonly crossings: Crossing[] = [];
   readonly stops: { crossing: Crossing; from: number; to: number }[][];
   edgeCount = 0;
 
-  constructor(network: Network, doors: readonly Vec2[], bays: readonly Bay[]) {
+  constructor(network: Network, doors: readonly Vec2[], bays: readonly Bay[], previous?: WalkRouting) {
     this.stops = network.lanes.map(() => []);
     const ids = new Map<string, number>();
     const node = (p: Vec2) => {
@@ -110,30 +112,7 @@ export class WalkingNetwork {
     bays.forEach((b, i) => {
       if (b.home >= 0) join(this.places[b.home]!, this.places[doors.length + i]!);
     });
-    for (const target of this.places) {
-      const cost = new Float64Array(this.points.length).fill(Infinity);
-      const next = new Int32Array(this.points.length).fill(-1);
-      const seen = new Uint8Array(this.points.length);
-      cost[target] = 0;
-      for (;;) {
-        let n = -1,
-          min = Infinity;
-        for (let i = 0; i < cost.length; i++)
-          if (!seen[i] && cost[i]! < min) {
-            min = cost[i]!;
-            n = i;
-          }
-        if (n < 0) break;
-        seen[n] = 1;
-        for (const edge of this.edges[n]!) {
-          if (min + edge.length >= cost[edge.to]!) continue;
-          cost[edge.to] = min + edge.length;
-          next[edge.to] = n;
-        }
-      }
-      this.costs.push(cost);
-      this.next.push(next);
-    }
+    this.routing = new WalkRouting(this.points,this.edges,this.places,previous);
   }
 
   distance(from: number, to: number): number {
