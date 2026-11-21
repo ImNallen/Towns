@@ -28,10 +28,11 @@ function readOptions(): GameOptions {
 }
 
 const canvas = document.getElementById('map') as HTMLCanvasElement;
-const game = createGame(canvas, readOptions());
-
-createRoot(document.getElementById('ui')!).render(
-  <StrictMode>
-    <App game={game} />
-  </StrictMode>,
-);
+const root = createRoot(document.getElementById('ui')!);
+if (new URLSearchParams(location.search).get('catalogue') === '1') {
+  canvas.remove();
+  void import('./ui/Catalogue').then(({ Catalogue }) => root.render(<Catalogue />));
+} else {
+  const game = createGame(canvas, readOptions());
+  root.render(<StrictMode><App game={game} /></StrictMode>);
+}

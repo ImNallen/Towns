@@ -2,6 +2,18 @@ import type { ZoneKind } from '../sim/zoning/paint';
 
 /** All colours used on the map. Flat surfaces render at exactly these values (see lighting in scene.ts). */
 export const PALETTE = {
+  building: {
+    walls: {
+      chalk: '#ece9de', cream: '#e5d9be', stone: '#cec8b6', mist: '#c1ced1',
+      brick: '#c48e7c', ochre: '#ddc395', celadon: '#becdb8', rose: '#ddbfb6',
+    },
+    roofs: {
+      slate: '#82949e', terracotta: '#b9816c', charcoal: '#969591', moss: '#919b7d', tan: '#bdab8e',
+    },
+    chimney: '#c79f86',
+    trim: '#f5f0df', hedge: '#819774', trunk: '#9b8467', pool: '#94becb',
+  },
+  light: '#ffffff',
   ground: '#ecebe4',
   water: '#b7c3f0',
   sand: '#f0e3ad',

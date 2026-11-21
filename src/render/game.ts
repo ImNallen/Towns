@@ -1,3 +1,4 @@
+import { SUN_DIRECTION, SUN_INTENSITY, AMBIENT_INTENSITY } from './lighting';
 import * as THREE from 'three';
 import type { Network } from '../sim/network/types';
 import type { ScenarioName } from '../sim/scenarios';
@@ -48,15 +49,6 @@ export interface Game {
   setShowLanes(show: boolean): void;
   dispose(): void;
 }
-
-/**
- * Lighting is tuned so up-facing surfaces render at exactly their palette colour:
- * Lambert output = albedo · (ambient + sun · cosθ) / π, and we make that bracket equal π.
- * Shadowed ground keeps only the ambient share (~75% brightness).
- */
-const SUN_DIRECTION = new THREE.Vector3(-160, 300, -200).normalize(); // from the north-west
-const SUN_INTENSITY = 1.0;
-const AMBIENT_INTENSITY = Math.PI - SUN_INTENSITY * SUN_DIRECTION.y;
 
 export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Game {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
