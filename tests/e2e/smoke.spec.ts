@@ -216,3 +216,43 @@ test('road quote, salvage and insufficient funds agree with the HUD', async ({ p
   }
   throw new Error('Repeated construction and salvage should exhaust the budget');
 });
+
+test('rear gardens and service yards on a mature mixed street', async ({ page }) => {
+  test.setTimeout(200_000);
+  const { drag, editor } = await connectedStreet(page);
+  for (const [brush, start, end, sign] of [['h', -34, 76, -1], ['s', -34, 16, 1], ['w', 18, 76, 1]] as const) {
+    await page.keyboard.press(brush);
+    for (const offset of [8, 16, 24, 32]) {
+      await drag(start, 8 + sign * offset, end);
+      await expect.poll(editor).toMatchObject({ pending: false });
+    }
+  }
+  await page.getByRole('button', { name: 'Pan' }).click();
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => window.__towns!.setSpeed(480));
+  await expect.poll(() => page.evaluate(() => window.__towns!.town()!.day), {timeout: 180_000}).toBeGreaterThanOrEqual(10);
+  await page.evaluate(() => window.__towns!.setSpeed(0));
+  await page.screenshot({path: 'artifacts/screens/mature-mixed.png'});
+});
+
+test('erasing a rear row updates the occupied garden while paused', async ({ page }) => {
+  const { at, editor } = await connectedStreet(page);
+  const rear = at(2, -24);
+  await page.mouse.click(...rear);
+  await expect.poll(editor).toMatchObject({ pending: false, zoned: 4 });
+  await page.getByRole('button', { name: 'Pan' }).click();
+  await page.evaluate(() => window.__towns!.setSpeed(120));
+  await expect.poll(() => page.evaluate(() => window.__towns!.town()!.households.some(h => h.lot)), { timeout: 30_000 }).toBe(true);
+  await page.evaluate(() => window.__towns!.setSpeed(0));
+  await page.mouse.click(...rear);
+  const household = page.getByRole('region', { name: 'Household' });
+  await expect(household).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('z');
+  await page.getByRole('radio', { name: 'Erase' }).click();
+  await page.mouse.click(...rear);
+  await expect.poll(editor).toMatchObject({ pending: false, zoned: 3 });
+  await page.getByRole('button', { name: 'Pan' }).click();
+  await page.mouse.click(...rear);
+  expect(await page.evaluate(() => window.__towns!.selectedHouse())).toBeNull();
+});

@@ -127,6 +127,8 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     if (!editor || !cells) return;
     const zoning = meadowZoning(edits, cells);
     if (paintLayer) disposeLayer(paintLayer);
+    houses?.setPaint({ cells, zoning });
+    if (latestTown) houses?.update(latestTown.households, latestTown.businesses);
     paintLayer = buildZonePaint(cells, zoning);
     scene.add(paintLayer);
     editor.accept({ edits, cells, zoning });

@@ -41,7 +41,13 @@ export function buildZonePaint(cells: ZoneCells, zoning: Zoning): THREE.Group {
     let fill = fills.get(kind);
     if (!fill) fills.set(kind, (fill = new FlatMesh(PAINT_HEIGHT)));
     const [a, b, c, d] = inset(cellQuad(cells, findCell(cells, key)), GAP);
-    fill.quad(a!, b!, c!, d!);
+    // Survey lines leave open ground in the middle of vacant plots.
+    const outer = [a!, b!, c!, d!];
+    const inner = inset(outer, 0.6);
+    for (let k = 0; k < 4; k++) {
+      const next = (k + 1) % 4;
+      fill.quad(outer[k]!, outer[next]!, inner[next]!, inner[k]!);
+    }
   }
   const group = new THREE.Group();
   group.name = 'zone-paint';
@@ -74,7 +80,7 @@ export function buildStrokePreview(cells: ZoneCells, stroke: ZoneStroke): THREE.
   return group;
 }
 
-function cellQuad(cells: ZoneCells, i: number): Vec2[] {
+export function cellQuad(cells: ZoneCells, i: number): Vec2[] {
   return [0, 1, 2, 3].map((k) => ({ x: cells.corners[i * 8 + k * 2]!, y: cells.corners[i * 8 + k * 2 + 1]! }));
 }
 
