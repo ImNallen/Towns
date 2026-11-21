@@ -8,6 +8,7 @@ import type { BusinessView, HouseholdView } from '../sim/town/town';
 import { buildBuildingLayer, type BuildingInstance } from './buildings/mesh';
 import { disposeLayer } from './dispose';
 import { FlatMesh, flatMaterial } from './flat';
+import { extendYard, type PaintedLand } from './yards';
 import { PALETTE } from './palette';
 
 /** A walled block with a gable roof, in the house's frame: ridge along local x or z, centred on z = 0. */
@@ -83,7 +84,10 @@ export class HouseLayer {
   private readonly meshes: THREE.InstancedMesh[];
   private readonly levels: Uint8Array;
   private grown = new Map<number, NonNullable<HouseholdView['lot']>>();
+  private land?: PaintedLand;
+  private drawnLand?: PaintedLand;
   private grownLayer = new THREE.Group();
+  private selected: number | null = null;
   private selection: THREE.Mesh | null = null;
 
   constructor(private readonly houses: readonly House[]) {
@@ -124,6 +128,10 @@ export class HouseLayer {
     });
   }
 
+  setPaint(land: PaintedLand): void {
+    this.land = land;
+  }
+
   update(households: HouseholdView[], businesses: BusinessView[]): void {
     const grown = new Map<number, NonNullable<HouseholdView['lot']>>();
     for (const h of households) {
@@ -131,10 +139,11 @@ export class HouseLayer {
       else this.setLevel(h.home, h.level);
     }
     for (const business of businesses) grown.set(business.home, business.lot);
-    if (grown.size === this.grown.size && [...grown].every(([id, lot]) => {
+    if (this.drawnLand === this.land && grown.size === this.grown.size && [...grown].every(([id, lot]) => {
       const old = this.grown.get(id);
       return old?.key === lot.key && old.design === lot.design && old.columns === lot.columns && old.rows === lot.rows;
     })) return;
+    this.drawnLand = this.land;
     this.grown = grown;
     disposeLayer(this.grownLayer);
     const instances: BuildingInstance[] = [];
@@ -142,21 +151,52 @@ export class HouseLayer {
     // Paving covers the driveway ribbon inside the parcel, leaving the kerb entrance visible.
     const yards = new FlatMesh(0.054);
     const driveways = new FlatMesh(0.048);
-    for (const lot of grown.values()) {
+    const hedges = new FlatMesh(0.08);
+    const timber = new FlatMesh(0.35);
+    const straps = new FlatMesh(0.37);
+    const markings = new FlatMesh(0.07);
+    const trees: Vec2[] = [];
+    const sheds: Array<Vec2 & { angle: number }> = [];
+    for (const [id, lot] of grown) {
       const blueprint = BLUEPRINTS.find(b => b.id === lot.design)!;
       instances.push({ ...lot, blueprint });
       const surface = blueprint.zone === 'workplaces' ? yards : gardens;
       surface.polygon(lot.corners);
+      if (this.land) {
+        const ground = blueprint.zone === 'residential' ? gardens : yards;
+        const corners = extendYard(lot, blueprint, this.land, this.houses, { ground, hedge: hedges, marking: markings, trees, sheds, timber, straps });
+        grown.set(id, { ...lot, corners });
+      }
       driveways.ribbon(polyline([{ x: lot.streetX, y: lot.streetY }, lot]), 2.4);
     }
     this.grownLayer = buildBuildingLayer(instances);
-    for (const [mesh, colour] of [[gardens, PALETTE.gardens[0]], [yards, PALETTE.building.industrial.apron], [driveways, PALETTE.roadSurface]] as const) {
+    if (sheds.length) {
+      const shape = houseGeometry([{ minX: -1.2, maxX: 1.2, depth: 2.3, wall: 1.6, roof: 0.55, ridge: 'x' }]);
+      const material = new THREE.MeshLambertMaterial({ color: PALETTE.building.industrial.timber, vertexColors: true });
+      const mesh = new THREE.InstancedMesh(shape, material, sheds.length);
+      sheds.forEach((p, i) => mesh.setMatrixAt(i, new THREE.Matrix4().makeRotationY(p.angle).setPosition(p.x, 0, -p.y)));
+      mesh.castShadow = true;
+      this.grownLayer.add(mesh);
+    }
+    if (trees.length) {
+      const crowns = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1.6, 1), flatMaterial(PALETTE.orchard[0]), trees.length);
+      trees.forEach((p, i) => crowns.setMatrixAt(i, new THREE.Matrix4().makeTranslation(p.x, 1.7, -p.y)));
+      crowns.castShadow = true;
+      this.grownLayer.add(crowns);
+    }
+    const industrial = PALETTE.building.industrial;
+    const surfaces = [
+      [hedges, PALETTE.building.hedge], [markings, industrial.marking], [timber, industrial.timber],
+      [straps, industrial.strap], [gardens, PALETTE.gardens[0]], [yards, industrial.apron], [driveways, PALETTE.roadSurface],
+    ] as const;
+    for (const [mesh, colour] of surfaces) {
       if (mesh.empty) continue;
       const ground = new THREE.Mesh(mesh.build(), flatMaterial(colour));
       ground.receiveShadow = true;
       this.grownLayer.add(ground);
     }
     this.group.add(this.grownLayer);
+    if (this.selected !== null) this.select(this.selected);
   }
 
   /** The house whose parcel (its garden, or the house itself) contains `p`. */
@@ -184,6 +224,7 @@ export class HouseLayer {
   }
 
   select(index: number | null): void {
+    this.selected = index;
     if (this.selection) {
       this.selection.geometry.dispose();
       this.selection.removeFromParent();

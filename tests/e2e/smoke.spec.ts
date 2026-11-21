@@ -216,3 +216,21 @@ test('road quote, salvage and insufficient funds agree with the HUD', async ({ p
   }
   throw new Error('Repeated construction and salvage should exhaust the budget');
 });
+
+test('rear gardens and service yards on a mature mixed street', async ({ page }) => {
+  test.setTimeout(200_000);
+  const { drag, editor } = await connectedStreet(page);
+  for (const [brush, start, end, sign] of [['h', -34, 76, -1], ['s', -34, 16, 1], ['w', 18, 76, 1]] as const) {
+    await page.keyboard.press(brush);
+    for (const offset of [8, 16, 24, 32]) {
+      await drag(start, 8 + sign * offset, end);
+      await expect.poll(editor).toMatchObject({ pending: false });
+    }
+  }
+  await page.getByRole('button', { name: 'Pan' }).click();
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => window.__towns!.setSpeed(480));
+  await expect.poll(() => page.evaluate(() => window.__towns!.town()!.day), {timeout: 180_000}).toBeGreaterThanOrEqual(10);
+  await page.evaluate(() => window.__towns!.setSpeed(0));
+  await page.screenshot({path: 'artifacts/screens/mature-mixed.png'});
+});
