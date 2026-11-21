@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { offsetPolyline, polyline, slicePolyline, type Polyline } from '../sim/math/polyline';
 import { add, scale, distance, dot, projectOntoSegment, type Vec2 } from '../sim/math/vec';
-import { MEADOW_BUILD_BOUNDS, MEADOW_ROAD_WIDTH, meadowLayout, meadowRoadSections, meadowScenario, snapToMeadowStreet, planMeadowRoad, type MeadowEdit } from '../sim/scenarios/meadow';
+import { MEADOW_BUILD_BOUNDS, MEADOW_ROAD_WIDTH, meadowLayout, meadowNetwork, meadowRoadSections, snapToMeadowStreet, planMeadowRoad, type MeadowEdit } from '../sim/scenarios/meadow';
 import { angleGuide, crossingAngleGuide, fitGuideToStreet, squareStreetGuide, type StreetPoint, type AngleGuide } from '../sim/network/angleSnap';
 import { JUNCTION_MOUTH } from '../sim/network/streets';
 import type { ToWorker } from '../worker/protocol';
@@ -447,7 +447,7 @@ export class RoadEditor {
       hint = `${this.phase.kind === 'chaining' ? 'Click' : 'Release'} to build ${count}.`;
     }
     this.hint = alignment ? `${alignment.label} · ${hint}` : hint;
-    const preview = buildRoads(meadowScenario([...this.edits, plan.road]).network, 'dashed');
+    const preview = buildRoads(meadowNetwork([...this.edits, plan.road]), 'dashed');
     const edges = new FlatMesh(0.19);
     const atJunction = (p: Vec2) => fourWays.some(({ point }) => distance(point, p) < 1e-6)
       || (alignment?.label === '90° at both ends' && (distance(p, start) < 1e-6 || distance(p, end) < 1e-6))

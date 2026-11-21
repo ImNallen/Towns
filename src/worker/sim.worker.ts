@@ -93,7 +93,7 @@ function applyEdit(edit: { edits: MeadowEdit[]; scenario: Scenario }): boolean {
   world.setAdmissions(true);
   edits = edit.edits;
   waiting = null;
-  post({ type: 'roadsChanged', network: edit.scenario.network, edits });
+  post({ type: 'roadsChanged', network: edit.scenario.network, zones: edit.scenario.zones, edits });
   postFrame(world);
   postTown(world);
   return true;

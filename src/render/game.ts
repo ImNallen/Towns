@@ -3,6 +3,7 @@ import type { Network } from '../sim/network/types';
 import type { ScenarioName } from '../sim/scenarios';
 import type { TownView } from '../sim/town/town';
 import type { SimStats } from '../sim/world';
+import type { ZoneCells } from '../sim/zoning/cells';
 import type { FromWorker, ToWorker } from '../worker/protocol';
 import { MapCamera } from './camera';
 import { buildLaneOverlay } from './debug';
@@ -13,12 +14,14 @@ import { HouseLayer } from './houses';
 import { PALETTE } from './palette';
 import { buildRoads } from './roads';
 import { VehicleLayer } from './vehicles';
+import { buildZoneLayer } from './zones';
 
 export interface GameOptions {
   scenario: ScenarioName;
   seed: number;
   speed: number;
   showLanes: boolean;
+  showZones: boolean;
   /** Optional initial view: centre (world meters) and meters per pixel. */
   view?: { x: number; y: number; mpp: number };
 }
@@ -85,6 +88,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
   let vehicles: VehicleLayer | null = null;
   let houses: HouseLayer | null = null;
   let laneOverlay: THREE.Group | null = null;
+  let zoneLayer: THREE.Group | null = null;
   let showLanes = options.showLanes;
   let speed = options.speed;
   let latestStats: SimStats | null = null;
@@ -114,6 +118,12 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
     scene.add(roadLayer, laneOverlay);
   };
 
+  const drawZones = (zones: ZoneCells | undefined): void => {
+    if (zoneLayer) disposeLayer(zoneLayer);
+    zoneLayer = options.showZones && zones ? buildZoneLayer(zones) : null;
+    if (zoneLayer) scene.add(zoneLayer);
+  };
+
   worker.onmessage = (e: MessageEvent<FromWorker>) => {
     const msg = e.data;
     if (msg.type === 'ready') {
@@ -122,6 +132,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
       houses = new HouseLayer(scenario.decor.houses);
       scene.add(houses.group);
       drawNetwork(scenario.network);
+      drawZones(scenario.zones);
       if (editor) editor.accept([]);
       vehicles = new VehicleLayer(msg.capacity);
       scene.add(vehicles.mesh);
@@ -135,6 +146,7 @@ export function createGame(canvas: HTMLCanvasElement, options: GameOptions): Gam
       ready = true;
     } else if (msg.type === 'roadsChanged') {
       drawNetwork(msg.network);
+      drawZones(msg.zones);
       editor?.accept(msg.edits);
     } else if (msg.type === 'editWaiting') {
       editor?.waitForTraffic();

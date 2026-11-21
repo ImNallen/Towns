@@ -7,7 +7,7 @@ import './ui/styles.css';
 
 /**
  * URL parameters (handy for screenshots and debugging):
- *   ?scenario=meadow|roundabout|straight  ?seed=1  ?speed=0..8  ?lanes=1
+ *   ?scenario=meadow|roundabout|straight  ?seed=1  ?speed=0..8  ?lanes=1  ?zones=1
  *   ?x=0&y=0&mpp=0.15   initial view centre (meters) and zoom (meters per pixel)
  */
 function readOptions(): GameOptions {
@@ -22,6 +22,7 @@ function readOptions(): GameOptions {
     seed: num('seed', 1),
     speed: num('speed', 1),
     showLanes: q.get('lanes') === '1',
+    showZones: q.get('zones') === '1',
     ...(q.has('mpp') ? { view: { x: num('x', 0), y: num('y', 0), mpp: num('mpp', 0.5) } } : {}),
   };
 }
