@@ -25,19 +25,19 @@ it.each(ROAD_ORDER)('%s governs free-flow time, driving speed and roadside surfa
   expect(network.surfaces.filter(s => s.style === 'pavement')).toHaveLength(type === 'country' ? 0 : 2);
 });
 
-it('prices a segment upgrade, downgrade, undo and daily upkeep at its current type', () => {
-  const upgrade = { upgrade: 0, roadType: 'parking' } as const;
+it.each(['parking', 'avenue'] as const)('prices a %s upgrade, downgrade, undo and daily upkeep at its current type', type => {
+  const upgrade = { upgrade: 0, roadType: type };
   const downgrade = { upgrade: 0, roadType: 'town' } as const;
   const metres = 129;
-  const difference = metres * (ROAD_TYPES.parking.cost - ROAD_TYPES.town.cost);
+  const difference = metres * (ROAD_TYPES[type].cost - ROAD_TYPES.town.cost);
   expect(editCost([], upgrade)).toBe(difference);
   expect(undoCost([upgrade])).toBe(-difference);
   expect(editCost([upgrade], downgrade)).toBe(-Math.round(difference * BUDGET.salvageShare));
   const scenario = meadowScenario([upgrade]);
-  expect(scenario.town!.roadUpkeep).toBe(Math.round((280 - metres) * ROAD_TYPES.town.upkeep + metres * ROAD_TYPES.parking.upkeep));
+  expect(scenario.town!.roadUpkeep).toBe(Math.round((280 - metres) * ROAD_TYPES.town.upkeep + metres * ROAD_TYPES[type].upkeep));
   const cells = scenario.zones!;
   const i = cells.keys.findIndex(k => { const c = decodeCellKey(k as CellKey); return c.road === 1 && c.side === 0 && c.row === 0; });
-  expect(cells.corners[i * 8 + 1]).toBeCloseTo(-8 + edgeOffset('parking', 'left') + 0.5);
+  expect(cells.corners[i * 8 + 1]).toBeCloseTo(-8 + edgeOffset(type, 'left') + 0.5);
 });
 
 it('joins mixed types at a crossing with yielding movements', () => {
@@ -49,18 +49,18 @@ it('joins mixed types at a crossing with yielding movements', () => {
   expect(new Set(network.lanes.filter(l => l.kind === 'road').map(l => l.speedLimit))).toEqual(new Set([11.1, 16.7]));
 });
 
-it('upgrades and undoes under traffic deterministically with no lost or overlapping cars', () => {
+it.each(['parking', 'avenue'] as const)('upgrades to %s and undoes under traffic deterministically with no lost or overlapping cars', roadType => {
   const [a, b] = meadowTips([]);
   const road = planMeadowRoad([], a!, b!);
   if (!road.ok) throw new Error(road.reason);
   const original = meadowScenario([road.road]);
-  const upgraded = meadowScenario([road.road, { upgrade: 2, roadType: 'parking' }]);
+  const upgraded = meadowScenario([road.road, { upgrade: 2, roadType }]);
   function run() {
     let world = new World(original, 12);
     for (let tick = 0; tick < 2400; tick++) {
       if (tick === 800 || tick === 1600) {
         expect(world.stats().active).toBeGreaterThan(0);
-        const change = world.editNetwork(tick === 800 ? upgraded : original);
+        const change = world.editNetwork(tick === 800 ? upgraded : original, undefined, true);
         if (!change.ok) throw new Error(change.reason);
         expect(change.world.vehicles.id).toEqual(world.vehicles.id);
         expect(change.world.vehicles.model).toEqual(world.vehicles.model);

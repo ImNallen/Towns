@@ -41,10 +41,10 @@ export function Catalogue() {
         const road = ROAD_TYPES[type];
         const layers = (side: 'left' | 'right') => road.strips.filter(strip => strip.side === 'both' || strip.side === side);
         const travel = { kind: 'lane' as const, width: road.laneWidth };
-        const bands = [...layers('left').reverse(), travel, travel, ...layers('right')];
+        const bands = [...layers('left').reverse(), ...Array.from({length:road.lanesPerDirection*2}, () => travel), ...layers('right')];
         return <figure key={type}><figcaption><strong>{road.name}</strong><span>{Math.round(3.6 * road.speedLimit)} km/h</span></figcaption>
           <div className="road-section">{bands.map((band, i) => <span key={i} style={{ width: band.width * 20, background: band.kind === 'lane' ? PALETTE.roadSurface : PALETTE[band.kind] }}>
-            {band.kind === 'lane' ? (i === layers('left').length ? '↓' : '↑') : band.kind === 'parking' ? 'P' : 'Walk'}
+            {band.kind === 'lane' ? (i < layers('left').length + road.lanesPerDirection ? '↓' : '↑') : band.kind === 'parking' ? 'P' : 'Walk'}
           </span>)}</div>
           <small>{edgeOffset(type, 'left') + edgeOffset(type, 'right')} m wide · ${road.cost}/m · ${road.upkeep}/m daily upkeep</small>
         </figure>;

@@ -36,6 +36,7 @@ export const PALETTE = {
   parkingFree: '#8ac8a2',
   parkingFull: '#e38865',
   roadOutline: '#a3a29c',
+  laneMark: '#b9bcb7',
   centerLine: '#e6c440',
   giveWay: '#8a8983',
 

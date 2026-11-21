@@ -44,6 +44,7 @@ export interface Junction {
 }
 
 export interface Network {
+  readonly reservedMovements?: readonly number[];
   readonly junctions?: Junction[];
   readonly pedestrianLinks?: { a: { x: number; y: number }; b: { x: number; y: number }; crossing: boolean; signal?: number; walkGroup?: number; zebra?: boolean }[];
   readonly lanes: Lane[];

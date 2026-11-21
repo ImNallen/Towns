@@ -621,3 +621,33 @@ test('a quiet junction keeps the actuated main road green', async ({page}) => {
   });
   await page.screenshot({path:'artifacts/screens/actuated-lights.png'});
 });
+
+test('avenue lanes join a signalised junction', async ({page}) => {
+  const {at,editor} = await connectedStreet(page,'',true);
+  await page.keyboard.press('r');
+  await page.mouse.move(...at(0,0));
+  await page.mouse.down();
+  await page.mouse.move(...at(0,45), {steps:12});
+  await page.mouse.up();
+  await expect.poll(editor).toMatchObject({roadCount:2,pending:false});
+  await page.keyboard.press('u');
+  await page.keyboard.press('8');
+  const balance = () => page.evaluate(()=>window.__towns!.town()!.budget.balance);
+  const before = await balance();
+  await page.mouse.click(...at(28,5));
+  await expect.poll(balance).toBeLessThan(before);
+  await page.keyboard.press('j');
+  await page.getByLabel('Signal plan').selectOption('fixed');
+  await page.mouse.click(...at(0,0));
+  await page.keyboard.press('v');
+  await page.evaluate(()=>window.__towns!.setSpeed(60));
+  await page.waitForFunction(()=>{
+    const game=window.__towns!, stats=game.stats();
+    if (stats && stats.tick>3000 && stats.stoppedShare>0.12) {
+      game.setSpeed(0);
+      return true;
+    }
+    return false;
+  });
+  await page.screenshot({path:'artifacts/screens/avenue-lights.png'});
+});

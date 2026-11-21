@@ -1,5 +1,5 @@
 import { cubicPoints } from '../math/curves';
-import { offsetPolyline, endOf, polyline, slicePolyline, startOf, type Polyline } from '../math/polyline';
+import { offsetPolyline, endOf, polyline, reversePolyline, slicePolyline, startOf, type Polyline } from '../math/polyline';
 import { add, cross, distance, dot, normalize, scale, sub, type Vec2 } from '../math/vec';
 import type { Demand } from '../scenarios/types';
 import { Routing } from '../traffic/routing';
@@ -14,6 +14,8 @@ const key = (p: Vec2): string => `${p.x},${p.y}`;
 
 interface Arm {
   incoming: number;
+  outerIn?: number;
+  outerOut?: number;
   outgoing: number;
   /** Heading away from the junction. */
   tangent: Vec2;
@@ -54,11 +56,15 @@ export function buildStreetNetwork(
   crossings: readonly StreetCrossing[] = [], types: readonly RoadType[] = [], lights: readonly (Vec2 & { actuated?: boolean })[] = [],
 ): { network: Network; demand: Demand[]; entries: number[] } {
   const headings = new Map<string, Vec2[]>();
-  for (const points of streets) {
+  const widths = new Map<string, Set<number>>();
+  for (const [index, points] of streets.entries()) {
     if (points.length < 2) throw new Error('A street needs at least two points');
     const last = points.length - 1;
     for (const [end, neighbor] of [[points[0]!, points[1]!], [points[last]!, points[last - 1]!]] as const) {
       const node = key(end);
+      const counts = widths.get(node) ?? new Set();
+      counts.add(ROAD_TYPES[types[index] ?? 'town'].lanesPerDirection);
+      widths.set(node, counts);
       const list = headings.get(node) ?? [];
       list.push(normalize(sub(neighbor, end)));
       headings.set(node, list);
@@ -66,7 +72,7 @@ export function buildStreetNetwork(
   }
   const mouthNodes = new Set<string>();
   for (const [node, arms] of headings) {
-    if (arms.length >= 3 || (arms.length === 2 && dot(arms[0]!, arms[1]!) > -0.999999)) mouthNodes.add(node);
+    if (widths.get(node)!.size > 1 || arms.length >= 3 || (arms.length === 2 && dot(arms[0]!, arms[1]!) > -0.999999)) mouthNodes.add(node);
   }
   const corners = new Map<string, { heading: number; left?: Vec2; right?: Vec2 }[]>();
   const pedestrianLinks: NonNullable<Network['pedestrianLinks']> = [];
@@ -89,6 +95,10 @@ export function buildStreetNetwork(
     const spec = ROAD_TYPES[type];
     const half = spec.laneWidth * spec.lanesPerDirection;
     const lanes = builder.addTwoWayRoad(center, { width: half * 2, laneWidth: spec.laneWidth, speedLimit: spec.speedLimit, roadType: type });
+    const outer = spec.lanesPerDirection === 2 ? {
+      forward: builder.addLane('road', offsetPolyline(center, -1.5 * spec.laneWidth), spec.speedLimit),
+      backward: builder.addLane('road', offsetPolyline(reversePolyline(center), -1.5 * spec.laneWidth), spec.speedLimit),
+    } : undefined;
     const ends = [first, last].map((point, i) => {
       const inward = i ? points[points.length - 2]! : points[1]!;
       const arm: { heading: number; left?: Vec2; right?: Vec2 } = { heading: Math.atan2(inward.y - point.y, inward.x - point.x) };
@@ -112,8 +122,8 @@ export function buildStreetNetwork(
       }
     }
     const arms: [Vec2, Arm][] = [
-      [first, { incoming: lanes.backward, outgoing: lanes.forward, tangent: normalize(sub(points[1]!, first)) }],
-      [last, { incoming: lanes.forward, outgoing: lanes.backward, tangent: normalize(sub(points[points.length - 2]!, last)) }],
+      [first, { outerIn: outer?.backward, outerOut: outer?.forward, incoming: lanes.backward, outgoing: lanes.forward, tangent: normalize(sub(points[1]!, first)) }],
+      [last, { outerIn: outer?.forward, outerOut: outer?.backward, incoming: lanes.forward, outgoing: lanes.backward, tangent: normalize(sub(points[points.length - 2]!, last)) }],
     ];
     for (const [point, arm] of arms) {
       const list = nodes.get(key(point)) ?? [];
@@ -121,44 +131,57 @@ export function buildStreetNetwork(
       nodes.set(key(point), list);
     }
   }
+  const reservedMovements: number[] = [];
   const junctions: NonNullable<Network['junctions']> = [];
   const priorityAxes = new Map(crossings.map((c) => [key(c.point), c.priorityAxis]));
   for (const [node, arms] of nodes) {
     if (arms.length < 2) continue;
-    if (arms.length === 2 && mouthNodes.has(node)) {
-      turn(builder, arms[0]!.incoming, arms[1]!.outgoing);
-      turn(builder, arms[1]!.incoming, arms[0]!.outgoing);
-      continue;
-    }
-    if (arms.length === 2) {
-      builder.connect(arms[0]!.incoming, arms[1]!.outgoing);
-      builder.connect(arms[1]!.incoming, arms[0]!.outgoing);
+    if (arms.length === 2 && !mouthNodes.has(node)) {
+      for (const [from, to] of [[arms[0]!, arms[1]!], [arms[1]!, arms[0]!]] as const) {
+        builder.connect(from.incoming, to.outgoing);
+        if (from.outerIn !== undefined && to.outerOut !== undefined) builder.connect(from.outerIn, to.outerOut);
+      }
       continue;
     }
     const main = throughArms(arms, priorityAxes.get(node));
     const [x, y] = node.split(',').map(Number);
     const point = { x: x!, y: y! };
     const light = lights.find(p => key(p) === node);
-    junctions.push({ point, lights: !!light, actuated: !!light?.actuated,
-      arms: arms.map(a => ({ incoming: a.incoming, group: main.includes(a) ? 0 : 1 })) });
-    const movements = arms.flatMap((from) => arms.filter((to) => to !== from).map((to) => {
+    if (arms.length > 2) junctions.push({ point, lights: !!light, actuated: !!light?.actuated,
+      arms: arms.flatMap(a => (a.outerIn === undefined ? [a.incoming] : [a.incoming, a.outerIn])
+        .map(incoming => ({ incoming, group: main.includes(a) ? 0 : 1 }))) });
+    const movements: { incoming: number; rank: number; id: number }[] = [];
+    for (const from of arms) for (const to of arms) {
+      if (from === to) continue;
       const primary = main.includes(from);
       const through = main.includes(to) === primary;
       const leftTurn = !through && cross(to.tangent, from.tangent) > 0;
+      const straight = dot(from.tangent, to.tangent) < -0.75 || arms.length === 2;
       const rank = (primary ? 0 : 2) + Number(leftTurn);
-      return { from, rank, id: turn(builder, from.incoming, to.outgoing) };
-    }));
+      const inputs = from.outerIn === undefined ? [from.incoming] : [from.incoming, from.outerIn];
+      const outputs = to.outerOut === undefined ? [to.outgoing] : [to.outgoing, to.outerOut];
+      for (const [i, incoming] of inputs.entries()) {
+        if (inputs.length > 1 && !straight && (i === 0) !== (cross(to.tangent, from.tangent) > 0)) continue;
+        for (const [j, outgoing] of outputs.entries()) {
+          if (straight && inputs.length === 2 && outputs.length === 2 && i !== j) continue;
+          movements.push({ incoming, rank, id: turn(builder, incoming, outgoing) });
+        }
+      }
+    }
+    if (arms.some(arm => arm.outerIn !== undefined)) {
+      for (const movement of movements) reservedMovements.push(movement.id);
+    }
     for (const movement of movements) {
       const priority = movements.filter((other) =>
-        other.from !== movement.from
-        && (other.rank < movement.rank || (other.rank === movement.rank && other.from.incoming < movement.from.incoming))
+        other.incoming !== movement.incoming
+        && (other.rank < movement.rank || (other.rank === movement.rank && other.incoming < movement.incoming))
         && conflicts(builder.lane(movement.id).path, builder.lane(other.id).path));
       builder.giveWayAtEntry(movement.id, priority.map((p) => p.id));
     }
   }
   for (const [node, arms] of corners) {
     const junction = junctions.find(j => key(j.point) === node && j.lights);
-    const walkGroups = arms.map((arm, i) => [arm, 1 - (junction?.arms[i]?.group ?? 0)] as const);
+    const walkGroups = arms.map((arm, i) => [arm, 1 - (junction?.arms.find(a => a.incoming === nodes.get(node)![i]!.incoming)?.group ?? 0)] as const);
     const groups = new Map(walkGroups);
     arms.sort((a, b) => a.heading - b.heading);
     for (let i = 0; i < arms.length; i++) {
@@ -170,7 +193,7 @@ export function buildStreetNetwork(
   }
   const built = builder.build();
   const portalArms = portals.flatMap((p) => nodes.get(key(p)) ?? []);
-  const network: Network = { ...built, junctions, pedestrianLinks, sinks: portalArms.map((arm) => arm.incoming) };
+  const network: Network = { ...built, reservedMovements, junctions, pedestrianLinks, sinks: portalArms.map((arm) => arm.incoming) };
   const routing = new Routing(network);
   const connected = portals.length === 2 && portalArms.length === 2
     && portalArms.every((arm, i) => routing.canReach(1 - i, arm.outgoing));

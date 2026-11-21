@@ -134,7 +134,7 @@ export function App({ game }: { game: Game }) {
         if (selected !== null && !editor?.chaining && !editor?.canCancel) selectHouse(null);
       } else if (editor?.tool === 'zone' && ['h', 's', 'w', 'e'].includes(e.key.toLowerCase())) {
         changeBrush(ZONE_KINDS['hswe'.indexOf(e.key.toLowerCase())] ?? null);
-      } else if (roadPicker && ['5', '6', '7'].includes(e.key)) {
+      } else if (roadPicker && ['5', '6', '7', '8'].includes(e.key)) {
         pickType(ROAD_ORDER[Number(e.key) - 5]!);
       } else if (editor && e.key.toLowerCase() === 'j') {
         changeTool('lights');

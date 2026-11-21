@@ -16,7 +16,7 @@ const MAX_STEPS_PER_PUMP = 40;
 const TOWN_INTERVAL = 250;
 
 let edits: MeadowEdit[] = [];
-type RoadChange = { edits: MeadowEdit[]; scenario: Scenario; cost: number };
+type RoadChange = { edits: MeadowEdit[]; scenario: Scenario; cost: number; allowLaneShift: boolean };
 let waiting: RoadChange | null = null;
 let world: World | null = null;
 let speed = 1;
@@ -93,7 +93,8 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       }
       if (!edits.length && msg.type === 'undo') break;
       const cost = msg.type === 'undo' ? undoCost(edits) : editCost(edits, proposed.at(-1)!);
-      const edit = { edits: proposed, scenario: meadowScenario(proposed), cost };
+      const changed = (msg.type === 'undo' ? edits : proposed).at(-1)!;
+      const edit = { allowLaneShift: 'upgrade' in changed, edits: proposed, scenario: meadowScenario(proposed), cost };
       if (!applyEdit(edit)) {
         waiting = edit;
         world.setAdmissions(false);
@@ -148,7 +149,7 @@ function commitZoning(next: MeadowEdit[], cost: number): void {
 function applyEdit(edit: RoadChange): boolean {
   if (!world) return false;
   if (rejectShortage(shortage(world.treasury!.balance, edit.cost))) return true;
-  const result = world.editNetwork(edit.scenario, meadowZoning(edit.edits, edit.scenario.zones!));
+  const result = world.editNetwork(edit.scenario, meadowZoning(edit.edits, edit.scenario.zones!), edit.allowLaneShift);
   if (!result.ok) return false;
   if (rejectShortage(result.world.treasury!.book(edit.cost))) return true;
   world = result.world;

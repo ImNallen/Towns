@@ -1,6 +1,6 @@
 import { signalAspect } from '../sim/network/signals';
 import * as THREE from 'three';
-import { polyline, sampleAt, type PathSample, type Polyline } from '../sim/math/polyline';
+import { offsetPolyline, polyline, sampleAt, type PathSample, type Polyline } from '../sim/math/polyline';
 import type { Network } from '../sim/network/types';
 import { FlatMesh, flatMaterial } from './flat';
 import { PALETTE } from './palette';
@@ -22,6 +22,7 @@ export function buildRoads(network: Network, marking: 'dashed' | 'solid' = 'soli
 
   const pavement = new FlatMesh(0.13);
   const parking = new FlatMesh(0.12);
+  const laneMarks = new FlatMesh(0.15);
   const bayMarks = new FlatMesh(0.15);
   for (const s of network.surfaces) {
     outline.ribbon(s.centerline, s.width + OUTLINE * 2);
@@ -39,6 +40,9 @@ export function buildRoads(network: Network, marking: 'dashed' | 'solid' = 'soli
     }
     surface.ribbon(s.centerline, s.width);
     if (s.style === 'twoWay') {
+      if (s.roadType === 'avenue') {
+        for (const offset of [-3.5, 3.5]) laneMarks.dashes(offsetPolyline(s.centerline, offset), 0.18, 2, 5);
+      }
       if (s.roadType === 'country') continue;
       if (marking === 'dashed') centerLines.dashes(s.centerline, 0.22, 3, 6);
       else centerLines.ribbon(s.centerline, 0.3);
@@ -128,6 +132,7 @@ export function buildRoads(network: Network, marking: 'dashed' | 'solid' = 'soli
   add(pavement, PALETTE.pavement);
   add(parking, PALETTE.parking);
   add(bayMarks, PALETTE.roadSurface);
+  add(laneMarks, PALETTE.laneMark);
   add(centerLines, PALETTE.centerLine);
   add(stripes, PALETTE.crossing);
   add(giveWay, PALETTE.giveWay);
