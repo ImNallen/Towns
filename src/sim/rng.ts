@@ -1,3 +1,4 @@
+import type { SnapshotIO } from './snapshot';
 /**
  * Seeded PRNG (sfc32, seeded through splitmix32).
  * The only source of randomness allowed inside `src/sim`.
@@ -22,6 +23,13 @@ export class Rng {
     this.c = splitmix();
     this.d = splitmix();
     for (let i = 0; i < 12; i++) this.nextU32();
+  }
+
+  snapshotState(io: SnapshotIO): void {
+    this.a = io.number(this.a);
+    this.b = io.number(this.b);
+    this.c = io.number(this.c);
+    this.d = io.number(this.d);
   }
 
   /** Continue precisely the same random stream without consuming a draw. */

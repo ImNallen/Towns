@@ -1,3 +1,4 @@
+import type { SnapshotIO } from '../snapshot';
 import type { Network } from '../network/types';
 import type { Routing } from './routing';
 import type { Vehicles } from './vehicles';
@@ -9,6 +10,10 @@ export class AvenueLanes {
   private readonly forks: number[] = [];
   private readonly driver: Int32Array;
   private readonly chosen: Int32Array;
+
+  snapshotState(io: SnapshotIO): void {
+    io.arrays(this.driver, this.chosen);
+  }
 
   constructor(private readonly network: Network) {
     const n = network.lanes.length;

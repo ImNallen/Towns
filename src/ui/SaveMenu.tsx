@@ -12,7 +12,7 @@ export function SaveMenu({ game, open }: { game: Game; open: boolean }) {
   useEffect(() => {
     const timer = setInterval(async () => {
       try {
-        browserSaves.write('Autosave', await game.save());
+        await browserSaves.write('Autosave', await game.save());
         setAuto('Autosaved at ' + new Date().toLocaleTimeString());
       } catch (error) { setAuto(error instanceof Error ? error.message : 'Autosave failed.'); }
     }, 60_000);
@@ -37,7 +37,7 @@ export function SaveMenu({ game, open }: { game: Game; open: boolean }) {
         {slots.map(name => <option key={name}>{name}</option>)}
       </select>
       <button disabled={slot === 'Autosave'} onClick={() => run(async () => browserSaves.write(slot, await game.save()), slot + ' saved.')}>Save</button>
-      <button onClick={() => run(() => load(browserSaves.read(slot)), slot + ' loaded.')}>Load</button>
+      <button onClick={() => run(async () => load(await browserSaves.read(slot)), slot + ' loaded.')}>Load</button>
       <button onClick={() => run(async () => browserSaves.exportFile(await game.save()), 'Exported town.')}>Export</button>
       <button onClick={() => file.current?.click()}>Import</button>
       <input ref={file} hidden type="file" aria-label="Import town file" accept=".json,application/json" onChange={e => {

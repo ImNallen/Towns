@@ -61,6 +61,40 @@ function parcelGeometry(cells: ZoneCells, indices: Map<CellKey, number>, key: Ce
     corners: [...front, ...rear.reverse()] };
 }
 
+/** Slot order and finishes survive subsequent changes to the surrounding parcels. */
+export interface ParcelSlot {
+  key: CellKey;
+  designs: [blueprint: string, wall: number, roof: number, mirrored: boolean][];
+}
+
+export function saveParcel(lot: Lot): ParcelSlot {
+  return { key: lot.key, designs: lot.designs.map(({ blueprint, variant }) =>
+    [blueprint.id, blueprint.walls.indexOf(variant.wall), blueprint.roofs.indexOf(variant.roof), variant.mirrored]) };
+}
+
+export function restoreParcels(cells: ZoneCells, slots: (ParcelSlot | null)[], zoning: Zoning): (Lot | null)[] {
+  const indices = new Map<CellKey, number>();
+  for (let i = 0; i < cells.count; i++) indices.set(cells.keys[i]! as CellKey, i);
+  const reserved = new Set<CellKey>();
+  return slots.map(slot => {
+    if (!slot) return null;
+    const designs = slot.designs.map(([id, wall, roof, mirrored]) => {
+      const blueprint = BLUEPRINTS.find(b => b.id === id);
+      if (!blueprint || !blueprint.walls[wall] || !blueprint.roofs[roof] || blueprint.zone !== zoning.get(slot.key))
+        throw new Error('Unknown snapshot building design.');
+      return { blueprint, variant: { wall: blueprint.walls[wall]!, roof: blueprint.roofs[roof]!, mirrored } };
+    });
+    const size = designs[0]!.blueprint.lot;
+    const zone = zoning.get(slot.key);
+    if (designs.length !== (zone === 'residential' ? 3 : 1)) throw new Error('Incomplete snapshot building design.');
+    for (const key of footprint(slot.key, size)) {
+      if (!indices.has(key) || reserved.has(key) || zoning.get(key) !== zone) throw new Error('Invalid snapshot parcel.');
+      reserved.add(key);
+    }
+    return { key: slot.key, ...size, designs, ...parcelGeometry(cells, indices, slot.key, size) };
+  });
+}
+
 /** Keep occupied parcels while all their cells survive. Each four columns allow one
  * detached house and two cottages. Stagger the wider lots on opposite sides of the street. */
 export function zonedLots(scenario: Scenario, zoning: Zoning, occupied: Lot[] = []): Lot[] {

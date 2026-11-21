@@ -10,6 +10,7 @@ function town() {
 }
 
 async function roundTrip(session: Session) {
+  await session.checkpoint();
   const restored = await replay(parseSave(JSON.stringify(session.save())));
   expect(restored.edits).toEqual(session.edits);
   expect(restored.world.tick).toBe(session.world.tick);
@@ -52,7 +53,7 @@ it('restores a junction, actuated lights, and an avenue at distinct edit ticks',
 
 it('rejects incompatible versions and invalid edit histories', () => {
   const save = town().save();
-  expect(() => parseSave(JSON.stringify({ ...save, version: 2 }))).toThrow(/version/);
+  expect(() => parseSave(JSON.stringify({ ...save, version: 999 }))).toThrow(/version/);
   expect(() => parseSave(JSON.stringify({ ...save, events: [{ tick: 5, command: { type: 'undo' } }] }))).toThrow(/history/);
   expect(() => parseSave(JSON.stringify({ ...save, events: [{ tick: 0, command: { type: 'load' } }] }))).toThrow(/history/);
 });
@@ -94,4 +95,33 @@ it('restores North Valley streets, occupied homes and subsequent simulation tick
   expect(session.world.townView()!.households.length).toBeGreaterThan(0);
   expect(session.world.stats().lost).toBe(0);
   await roundTrip(session);
+});
+
+it('keeps a completed checkpoint immutable and replays commands at and after its tick', async () => {
+  const session = town();
+  session.command({ type: 'buildRoad', start: { x: -65, y: -45 }, end: { x: -65, y: 62 } });
+  while (session.world.tick < 6000) session.world.step();
+  expect(session.checkpointDue()).toBe(true);
+  const packing = session.checkpoint();
+  session.command({ type: 'buildLights', point: { x: -65, y: -8 }, actuated: true });
+  for (let i = 0; i < 300; i++) session.world.step();
+  await packing;
+  const saved = session.save();
+  expect(saved).toMatchObject({ version: 3, snapshot: { tick: 6000, eventCount: 1 }, tick: 6300 });
+  const restored = await replay(parseSave(JSON.stringify(saved)));
+  expect(restored.world.hash()).toBe(session.world.hash());
+  expect(restored.edits).toEqual(session.edits);
+  expect(restored.checkpointDue()).toBe(false);
+});
+
+it('reads format 1 files and rejects damaged checkpoint data', async () => {
+  const session = town();
+  while (session.world.tick < 3000) session.world.step();
+  const legacy = parseSave(JSON.stringify({ ...session.save(), version: 1 }));
+  expect((await replay(legacy)).world.hash()).toBe(session.world.hash());
+  await session.checkpoint();
+  const saved = session.save();
+  if (saved.version === 1 || !saved.snapshot) throw new Error('Expected checkpoint');
+  await expect(replay({ ...saved, snapshot: { ...saved.snapshot, state: 'AAAA' } })).rejects.toThrow();
+  await expect(replay({ ...saved, snapshot: { ...saved.snapshot, hash: '00000000' } })).rejects.toThrow(/hash/);
 });

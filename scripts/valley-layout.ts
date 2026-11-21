@@ -4,12 +4,12 @@ import { decodeCellKey, type CellKey } from '../src/sim/zoning/cells';
 import type { LandUse } from '../src/sim/zoning/paint';
 import type { RoadType } from '../src/sim/network/roadTypes';
 
-export function plantValley() {
+export function plantValley(capitalGrant = 150000) {
   const session = createSession({ scenario: 'valley', seed: 1 }, (message) => {
     if (message.type === 'editRejected') throw new Error(message.reason);
   });
   // Capital grant for the benchmark subdivision. The playable map starts with the normal treasury.
-  session.world.treasury!.balance += 150000;
+  session.world.treasury!.balance += capitalGrant;
   function apply(command: EditCommand) {
     session.command(command);
     if (session.pending) throw new Error('Benchmark edit is waiting for traffic');

@@ -1,3 +1,4 @@
+import type { SnapshotIO } from '../snapshot';
 import { Model } from '../../vehicles/catalogue';
 import { QUALITY } from '../town/qualityOfLife';
 import type { Polyline } from '../math/polyline';
@@ -17,6 +18,12 @@ export class TrafficConditions {
   private readonly observedDelay: Float64Array;
   private readonly approach: Uint8Array;
   private readonly count: Uint16Array;
+
+  snapshotState(io: SnapshotIO): void {
+    io.arrays(this.seconds, this.ratio, this.queue, this.jamMinutes, this.noiseDensity);
+    io.arrays(this.volume);
+    this.worst = io.number(this.worst);
+  }
 
   constructor(private readonly network: Network) {
     this.free = Float64Array.from(network.lanes, lane => lane.length / lane.speedLimit);

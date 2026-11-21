@@ -1,3 +1,4 @@
+import type { SnapshotIO } from '../snapshot';
 import { Model, vehicleType } from '../../vehicles/catalogue';
 
 /**
@@ -34,6 +35,19 @@ export class Vehicles {
   private readonly freeSlots: Int32Array;
   private freeTop: number;
   private nextId = 1;
+
+  snapshotState(io: SnapshotIO): void {
+    io.arrays(this.alive, this.id, this.lane, this.dest, this.owner);
+    io.arrays(this.s, this.v, this.model, this.length, this.maxAccel);
+    io.arrays(this.brake, this.topSpeed, this.acc, this.tripDelay, this.laneDelay);
+    io.arrays(this.departTime, this.freeSlots);
+    this.highWater = io.number(this.highWater);
+    this.count = io.number(this.count);
+    this.freeTop = io.number(this.freeTop);
+    this.nextId = io.number(this.nextId);
+    if (![this.count, this.highWater, this.freeTop].every(n => Number.isInteger(n) && n >= 0 && n <= this.capacity)
+      || this.count > this.highWater || this.freeTop + this.count !== this.capacity) throw new Error('Invalid snapshot vehicle counts.');
+  }
 
   constructor(capacity: number) {
     this.capacity = capacity;

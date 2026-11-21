@@ -1,3 +1,4 @@
+import type { SnapshotIO } from '../snapshot';
 import type { Network } from '../network/types';
 
 /** Where a building meets the street: a point on one directional lane. */
@@ -30,6 +31,55 @@ export class Routing {
   private readonly heap: MinHeap;
   private cursor = 0;
   private sweepAt = 0;
+
+  snapshotState(io: SnapshotIO): void {
+    this.cursor = io.number(this.cursor);
+    this.sweepAt = io.number(this.sweepAt);
+    if (!Number.isInteger(this.cursor) || this.cursor < 0 || this.cursor >= Math.max(1, this.destinations))
+      throw new Error('Invalid snapshot routing cursor.');
+    io.table(this.nextHops);
+    io.table(this.inverseSpeed);
+    if (io.mode === 'measure') {
+      io.table(this.costs);
+      return;
+    }
+    // A route cost is almost exactly its successor's cost plus this lane's
+    // travel time. Keep the bitwise residual, including rounding and turn penalties.
+    const n = this.network.lanes.length;
+    const estimate = new Float64Array(1);
+    const bits = new Uint32Array(estimate.buffer);
+    const stack = new Int32Array(n);
+    const visited = new Uint8Array(n);
+    for (let d = 0; d < this.destinations; d++) {
+      const next = this.nextHops[d]!, cost = this.costs[d]!, pace = this.inverseSpeed[d]!;
+      const actual = new Uint32Array(cost.buffer, cost.byteOffset, 2 * n);
+      const residual = new Uint32Array(2 * n);
+      if (io.mode === 'read') io.arrays(residual);
+      visited.fill(0);
+      for (let i = 0; i < n; i++) {
+        let lane = i, depth = 0;
+        while (lane !== -1 && visited[lane] !== 2) {
+          if (lane < 0 || lane >= n || visited[lane]) throw new Error('Invalid snapshot route tree.');
+          visited[lane] = 1;
+          stack[depth++] = lane;
+          lane = next[lane]!;
+        }
+        while (depth) {
+          lane = stack[--depth]!;
+          visited[lane] = 2;
+          const hop = next[lane]!;
+          estimate[0] = hop < 0 ? this.exits[d]![lane]! * pace[lane]!
+            : cost[hop]! + this.network.lanes[lane]!.length * pace[lane]!;
+          for (let word = 0; word < 2; word++) {
+            const j = lane * 2 + word;
+            if (io.mode === 'read') actual[j] = residual[j]! ^ bits[word]!;
+            else residual[j] = actual[j]! ^ bits[word]!;
+          }
+        }
+      }
+      if (io.mode === 'write') io.arrays(residual);
+    }
+  }
 
   constructor(private readonly network: Network, targets: readonly (readonly AccessPoint[])[] = []) {
     this.sinks = network.sinks;

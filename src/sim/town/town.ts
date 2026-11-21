@@ -1,3 +1,4 @@
+import type { SnapshotIO } from '../snapshot';
 import { QUALITY } from './qualityOfLife';
 import type { TrafficConditions } from '../traffic/conditions';
 import { parkBenefit, PARK_BENEFITS, type Park } from './parks';
@@ -315,6 +316,42 @@ export class Town {
   private parked = 0;
   private turnedAway = 0;
   private walkMetres = 0;
+
+  snapshotState(io: SnapshotIO): void {
+    io.arrays(this.taxable, this.taxesPaid, this.payroll, this.lastDailyCost, this.surname);
+    io.arrays(this.funds, this.wages, this.level, this.cars, this.carModel);
+    io.arrays(this.pantry, this.firstMember, this.memberCount, this.adults, this.household);
+    io.arrays(this.role, this.age, this.firstName, this.job, this.activity);
+    io.arrays(this.errand, this.at, this.arrivedAt, this.until, this.workedDay);
+    io.arrays(this.early, this.filled, this.open, this.deliveries, this.freightState);
+    io.arrays(this.freightDue, this.customers, this.eventDay, this.eventMinute, this.eventHousehold);
+    io.arrays(this.eventKind, this.eventDetail, this.eventPerson, this.carBay, this.driverCar);
+    io.arrays(this.target, this.origin, this.failed, this.circled, this.due);
+    io.arrays(this.denied, this.commuteStart, this.commute, this.delay, this.noise);
+    io.arrays(this.accessibleShop, this.unhappy, this.vacantUntil, this.frustration, this.visitPark);
+    io.arrays(this.leisureDay, this.walkIssue, this.modeDay, this.modeRoll);
+    this.people = io.number(this.people);
+    if (!Number.isInteger(this.people) || this.people < 0 || this.people > this.role.length) throw new Error('Invalid snapshot population.');
+    this.carsBought = io.number(this.carsBought);
+    this.houseUpgrades = io.number(this.houseUpgrades);
+    this.carUpgrades = io.number(this.carUpgrades);
+    this.eventHead = io.number(this.eventHead);
+    this.eventCount = io.number(this.eventCount);
+    if (!Number.isInteger(this.eventHead) || this.eventHead < 0 || this.eventHead >= EVENT_CAPACITY
+      || !Number.isInteger(this.eventCount) || this.eventCount < 0 || this.eventCount > EVENT_CAPACITY) throw new Error('Invalid snapshot event ring.');
+    this.parkVisits = io.number(this.parkVisits);
+    this.walkedTrips = io.number(this.walkedTrips);
+    this.trips = io.number(this.trips);
+    this.parked = io.number(this.parked);
+    this.turnedAway = io.number(this.turnedAway);
+    this.walkMetres = io.number(this.walkMetres);
+    for (const zone of ['residential', 'shops', 'workplaces'] as const) this.growth[zone] = io.number(this.growth[zone]);
+    io.strings(this.eventPlace);
+    this.rng.snapshotState(io);
+    this.treasury.snapshotState(io);
+    io.arrays(this.parking.occupant);
+    this.walkers.snapshotState(io);
+  }
 
   constructor(spec: TownSpec, homeDest: number, seed: number, private readonly routing: Routing, readonly parking: Parking, houses: Vec2[], network: Network, private readonly walkLimit = WALK_TRIP_LIMIT, starterHomes = spec.homes.length, previous?: WalkRouting, readonly parks: Park[] = []) {
     this.spec = spec;
