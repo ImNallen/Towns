@@ -1,0 +1,15 @@
+html:has(.catalogue), body:has(.catalogue) { height: auto; overflow: visible; }
+#ui:has(.catalogue) { position: static; pointer-events: auto; }
+.catalogue { max-width: 1440px; margin: auto; padding: 30px clamp(16px, 4vw, 64px); }
+.catalogue header { border-bottom: 1px solid var(--line); padding-bottom: 14px; }
+.catalogue h1 { margin: 5px 0 12px; font-size: 42px; }
+.catalogue nav { display: flex; gap: 20px; flex-wrap: wrap; }
+.catalogue nav a { color: var(--accent); text-transform: capitalize; }
+.catalogue p, .catalogue nav { font-size: 13px; }
+.catalogue section { margin: 30px 0; }
+.catalogue h2 { font: 26px Georgia, serif; text-transform: capitalize; margin: 0 0 10px; }
+.design-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 10px; align-items: stretch; }
+.catalogue figure { margin: 0; padding: 10px; background: var(--panel); }
+.catalogue figcaption { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 7px; }
+.catalogue figcaption span { color: var(--muted); }
+.catalogue canvas { width: 100%; height: auto; display: block; }

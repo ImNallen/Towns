@@ -31,3 +31,17 @@ test('map renders and traffic flows', async ({ page }) => {
 
   expect(errors).toEqual([]);
 });
+
+test('residential catalogue and sample street render', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/?catalogue=1');
+  await expect(page.locator('.catalogue')).toHaveAttribute('data-ready', 'true', { timeout: 30_000 });
+  await expect(page.locator('figure canvas')).toHaveCount(24);
+  await page.getByRole('link', { name: 'Sample street' }).click();
+  await page.locator('#street').screenshot({ path: 'artifacts/screens/building-street.png' });
+  await page.locator('#street').evaluate(el => { el.setAttribute('hidden', ''); });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ fullPage: true, path: 'artifacts/screens/building-catalogue.png' });
+  expect(errors).toEqual([]);
+});
