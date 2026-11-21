@@ -237,6 +237,8 @@ export function App({ game }: { game: Game }) {
           <button aria-label="Bulldoze road" aria-pressed={editor.tool === 'bulldoze'} aria-keyshortcuts="B" className={editor.tool === 'bulldoze' ? 'active tool bulldoze' : 'tool bulldoze'} onClick={() => changeTool('bulldoze')} title="Bulldoze road (B)">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 12V8h6l2 4M5 8V5h4l1 3m2 5 3 1m1-6v6l2 2h-3l-1-3"/><rect x="2" y="12" width="10" height="4" rx="2"/></svg><span>Bulldoze</span><kbd>B</kbd>
           </button>
+          <button aria-label="Build footpath" aria-pressed={editor.tool === 'footpath'} onClick={() => changeTool('footpath')} className={'tool' + (editor.tool === 'footpath' ? ' active' : '')}><b>⌁</b><span>Path</span></button>
+          <button aria-label="Build zebra crossing" aria-pressed={editor.tool === 'zebra'} onClick={() => changeTool('zebra')} className={'tool' + (editor.tool === 'zebra' ? ' active' : '')}><b>▥</b><span>Crossing</span></button>
           <button aria-label="Build parking lot" aria-pressed={editor.tool === 'parking'} className={editor.tool === 'parking' ? 'active tool' : 'tool'} onClick={() => changeTool('parking')} title="Build parking lot"><b>P</b><span>Parking</span></button>
           <button aria-label="Zone" aria-pressed={editor.tool === 'zone'} aria-keyshortcuts="Z" className={editor.tool === 'zone' ? 'active tool' : 'tool'} onClick={() => changeTool('zone')} title="Zone (Z)">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 3h6v6H3zm8 0h6v6h-6zM3 11h6v6H3zm8 0h6v6h-6z" /></svg><span>Zone</span><kbd>Z</kbd>

@@ -20,7 +20,8 @@ export interface MeadowRoad {
   readonly fourWays?: readonly StreetCrossing[];
 }
 
-export type MeadowEdit = MeadowRoad | { readonly remove: number } | { readonly upgrade: number; readonly roadType: RoadType } | ZoneStroke;
+export interface WalkEdit { walk: "footpath" | "zebra"; a: Vec2; b: Vec2 }
+export type MeadowEdit = WalkEdit | MeadowRoad | { readonly remove: number } | { readonly upgrade: number; readonly roadType: RoadType } | ZoneStroke;
 
 export const isZoneStroke = (edit: MeadowEdit): edit is ZoneStroke => 'zone' in edit;
 
@@ -152,7 +153,7 @@ function replayMeadow(edits: readonly MeadowEdit[]): Replay {
   const crossings: StreetCrossing[] = [];
   const removedArms: RemovedArm[] = [];
   for (const edit of edits) {
-    if (isZoneStroke(edit)) {
+    if (isZoneStroke(edit) || 'walk' in edit) {
       roads.push(undefined);
       continue;
     }
@@ -381,7 +382,64 @@ export function meadowScenario(roads: readonly MeadowEdit[] = []): Scenario {
     const xs = [q[0]!, q[2]!, q[4]!, q[6]!], ys = [q[1]!, q[3]!, q[5]!, q[7]!];
     return Number(scenario.decor.houses.some(({ garden: g }) => g && Math.min(...xs) < g.maxX && Math.max(...xs) > g.minX && Math.min(...ys) < g.maxY && Math.max(...ys) > g.minY));
   });
+  for (const edit of roads) {
+    if (!('walk' in edit)) continue;
+    if (edit.walk === 'footpath') {
+      scenario.network.surfaces.push({ style: 'footpath', centerline: polyline([edit.a,edit.b]), width: 1.8, id: scenario.network.surfaces.length });
+    } else {
+      const crossing = zebraAt(scenario.network, scale(add(edit.a,edit.b),0.5));
+      if (!crossing) continue;
+      scenario.network.pedestrianLinks?.push({ a: crossing.a, b: crossing.b, crossing: true, zebra: true });
+    }
+    scenario.town!.roadUpkeep! += edit.walk === 'zebra' ? 1 : Math.ceil(distance(edit.a,edit.b)*0.07);
+  }
   return { ...scenario, zones };
+}
+
+function nearestSurface(network: Network, cursor: Vec2, styles: readonly string[], reach: number) {
+  let best: { point: Vec2; tangent: Vec2; type?: RoadType } | undefined;
+  for (const s of network.surfaces) {
+    if (!styles.includes(s.style)) continue;
+    const pts = s.centerline.pts;
+    for (let i=2; i<pts.length; i+=2) {
+      const a = { x: pts[i-2]!, y: pts[i-1]! }, b = { x: pts[i]!, y: pts[i+1]! };
+      const point = projectOntoSegment(cursor,a,b);
+      const gap = distance(point,cursor);
+      if (gap >= reach) continue;
+      reach = gap;
+      best = { point, tangent: normalize(sub(b,a)), type: s.roadType };
+    }
+  }
+  return best;
+}
+
+function zebraAt(network: Network, cursor: Vec2): WalkEdit | undefined {
+  const road = nearestSurface(network,cursor,['twoWay'],5);
+  if (!road?.type || road.type === 'country') return;
+  const normal = scale(perp(road.tangent),edgeOffset(road.type,'left') - 0.75);
+  const a = nearestSurface(network,add(road.point,normal),['pavement'],1);
+  const b = nearestSurface(network,sub(road.point,normal),['pavement'],1);
+  return a && b ? { walk: 'zebra', a:a.point, b:b.point } : undefined;
+}
+
+export function planWalk(network: Network, walk: WalkEdit['walk'], start: Vec2, end: Vec2): WalkEdit | string {
+  if (!insideMeadow(start) || !insideMeadow(end)) return 'Stay inside the meadow.';
+  if (walk === 'zebra') {
+    const crossing = zebraAt(network,end);
+    if (!crossing) return 'Choose a street with pavements on both sides.';
+    if (network.pedestrianLinks?.some(link => link.zebra && distance(link.a,crossing.a)<5)) return 'There is already a crossing here.';
+    return crossing;
+  }
+  const snap = (p: Vec2) => nearestSurface(network,p,['footpath','pavement'],3)?.point ?? p;
+  const a = snap(start), b = snap(end);
+  const length = distance(a,b), decor = scenery();
+  if (length < 3) return 'Drag a path at least three metres long.';
+  for (let i=0; i<=Math.ceil(length); i++) {
+    const p = add(a,scale(sub(b,a),i/Math.ceil(length)));
+    if (nearestSurface(network,p,['twoWay','junction'],3.55)) return 'Use a crossing to cross the street.';
+    if (blockedByScenery(p,decor,0.5) && Math.min(distance(p,a),distance(p,b))>2) return 'Keep the path on open ground.';
+  }
+  return { walk, a, b };
 }
 
 function meadowWithoutZones(replay: Replay): Scenario {

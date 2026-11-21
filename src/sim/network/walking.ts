@@ -1,3 +1,5 @@
+import { crossingAt, observeCrossings, type Crossing } from '../traffic/pedestrianConflicts';
+import type { Vehicles } from '../traffic/vehicles';
 import type { Vec2 } from '../math/vec';
 import type { Network } from './types';
 import type { Bay } from '../town/parking';
@@ -7,6 +9,7 @@ interface Edge {
   to: number;
   length: number;
   id: number;
+  crossing?: Crossing;
 }
 
 /** Frontages are split into the pavement polyline at their perpendicular projection.
@@ -17,9 +20,12 @@ export class WalkingNetwork {
   readonly places: number[] = [];
   readonly next: Int32Array[] = [];
   readonly costs: Float64Array[] = [];
+  readonly crossings: Crossing[] = [];
+  readonly stops: { crossing: Crossing; from: number; to: number }[][];
   edgeCount = 0;
 
   constructor(network: Network, doors: readonly Vec2[], bays: readonly Bay[]) {
+    this.stops = network.lanes.map(() => []);
     const ids = new Map<string, number>();
     const node = (p: Vec2) => {
       const key = Math.round(p.x * 10000) + '/' + Math.round(p.y * 10000);
@@ -30,17 +36,17 @@ export class WalkingNetwork {
       ids.set(key, id);
       return id;
     };
-    const join = (a: number, b: number) => {
+    const join = (a: number, b: number, crossing?: Crossing) => {
       if (a === b) return;
       const p = this.points[a]!,
         q = this.points[b]!;
       const length = Math.hypot(p.x - q.x, p.y - q.y);
       const id = this.edgeCount++;
-      this.edges[a]!.push({ to: b, length, id });
-      this.edges[b]!.push({ to: a, length, id });
+      this.edges[a]!.push({ to: b, length, id, crossing });
+      this.edges[b]!.push({ to: a, length, id, crossing });
     };
     const strips = network.surfaces
-      .filter((s) => s.style === 'pavement')
+      .filter((s) => s.style === 'pavement' || s.style === 'footpath')
       .flatMap((s) => {
         const segments = [];
         const pts = s.centerline.pts;
@@ -50,6 +56,7 @@ export class WalkingNetwork {
           segments.push({
             a,
             b,
+            surface: s,
             cuts: [
               { t: 0, id: node(a) },
               { t: 1, id: node(b) },
@@ -58,13 +65,14 @@ export class WalkingNetwork {
         }
         return segments;
       });
-    for (const point of [...doors, ...bays]) {
+    const attach = (point: Vec2, reach: number, skip = -1) => {
       const place = node(point);
-      this.places.push(place);
-      let best = 30 * 30,
+
+      let best = reach * reach,
         at = 0;
       let strip: (typeof strips)[number] | undefined;
       for (const s of strips) {
+        if (s.surface.id === skip) continue;
         const dx = s.b.x - s.a.x,
           dy = s.b.y - s.a.y;
         const t = Math.max(0, Math.min(1, ((point.x - s.a.x) * dx + (point.y - s.a.y) * dy) / (dx * dx + dy * dy)));
@@ -75,16 +83,30 @@ export class WalkingNetwork {
           strip = s;
         }
       }
-      if (!strip) continue;
+      if (!strip) return place;
       const id = node({ x: strip.a.x + at * (strip.b.x - strip.a.x), y: strip.a.y + at * (strip.b.y - strip.a.y) });
       strip.cuts.push({ t: at, id });
       join(place, id);
+      return place;
+    };
+    for (const point of [...doors, ...bays]) this.places.push(attach(point,30));
+    for (const s of strips) if (s.surface.style === 'footpath') {
+      attach(s.a,0.05,s.surface.id);
+      attach(s.b,0.05,s.surface.id);
+    }
+    for (const link of network.pedestrianLinks ?? []) {
+      const a = attach(link.a,0.05), b = attach(link.b,0.05);
+      if (!link.crossing) { join(a,b); continue; }
+      const crossing = crossingAt(network,link.a,link.b,!!link.zebra);
+      this.crossings.push(crossing);
+      for (const zone of crossing.lanes) this.stops[zone.lane]!.push({crossing,from:zone.from,to:zone.to});
+      join(a,b,crossing);
     }
     for (const strip of strips) {
       strip.cuts.sort((a, b) => a.t - b.t);
       for (let i = 1; i < strip.cuts.length; i++) join(strip.cuts[i - 1]!.id, strip.cuts[i]!.id);
     }
-    for (const link of network.pedestrianLinks ?? []) join(node(link.a), node(link.b));
+
     bays.forEach((b, i) => {
       if (b.home >= 0) join(this.places[b.home]!, this.places[doors.length + i]!);
     });
@@ -152,7 +174,8 @@ export class Walkers {
     for (const edge of this.graph.edges[n]!) if (edge.to === to) return edge;
     return undefined;
   }
-  step(dt: number): void {
+  step(dt: number, vehicles?: Vehicles): void {
+    if (vehicles) observeCrossings(this.graph.crossings,vehicles);
     if (!this.count) return;
     this.crowd.fill(0);
     for (let i = 0; i < this.goal.length; i++) {
@@ -163,11 +186,19 @@ export class Walkers {
     for (let i = 0; i < this.goal.length; i++) {
       if (this.goal[i]! < 0) continue;
       let edge = this.edge(i);
+      if (edge?.crossing) {
+        const c=edge.crossing;
+        c.requested=true;
+        if (!this.along[i] && c.blocked) continue;
+        c.occupied=true;
+      }
       this.along[i] += (this.speed[i]! * dt) / (1 + 0.15 * Math.max(0, (edge ? this.crowd[edge.id]! : 0) - 1));
       while (edge && this.along[i]! >= edge.length) {
         this.along[i] -= edge.length;
+        if (edge.crossing) edge.crossing.served++;
         this.node[i] = edge.to;
         edge = this.edge(i);
+        if (edge?.crossing) { this.along[i]=0; break; }
       }
       if (!edge) {
         this.goal[i] = -1;

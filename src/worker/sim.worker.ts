@@ -3,7 +3,7 @@
  * Posts a compact snapshot whenever the simulation has advanced.
  */
 import { buildScenario, type Scenario } from '../sim/scenarios';
-import { isZoneStroke, meadowScenario, meadowSegments, upgradeFailure, meadowZoning, planMeadowRoad, type MeadowEdit } from '../sim/scenarios/meadow';
+import { planWalk, isZoneStroke, meadowScenario, meadowSegments, upgradeFailure, meadowZoning, planMeadowRoad, type MeadowEdit } from '../sim/scenarios/meadow';
 import { planZoneStroke } from '../sim/zoning/paint';
 import { editCost, shortage, undoCost } from '../sim/town/budget';
 import { DT, World } from '../sim/world';
@@ -44,6 +44,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     }
     case 'upgradeRoad':
     case 'bulldozeRoad':
+    case 'buildWalk':
     case 'buildRoad':
     case 'undo': {
       if (world?.scenario.name !== 'meadow') {
@@ -52,7 +53,11 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       }
       if (waiting) break;
       let proposed: MeadowEdit[];
-      if (msg.type === 'buildRoad') {
+      if (msg.type === 'buildWalk') {
+        const plan = planWalk(world.network, msg.walk, msg.start, msg.end);
+        if (typeof plan === 'string') { post({ type: 'editRejected', reason: plan }); break; }
+        proposed = [...edits,plan];
+      } else if (msg.type === 'buildRoad') {
         const plan = planMeadowRoad(edits, msg.start, msg.end, msg.bend, msg.roadType);
         if (!plan.ok) {
           post({ type: 'editRejected', reason: plan.reason });

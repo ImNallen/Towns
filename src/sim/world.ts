@@ -36,6 +36,7 @@ const SPAWN_SPACING = IDM.minGap + 3;
 
 export interface SimStats {
   walkers: number;
+  activeZebras: number;
   tick: number;
   /** Simulated seconds. */
   time: number;
@@ -152,7 +153,7 @@ export class World {
   get walkers() { return this.town?.walkers; }
 
   step(): void {
-    this.walkers?.step(DT);
+    this.walkers?.step(DT,this.vehicles);
     if (this.town && this._tick % TICKS_PER_MINUTE === 0) this.town.update(this.minute(), this);
     this.buildBuckets();
     this.computeAccelerations();
@@ -381,6 +382,15 @@ export class World {
         a = idmAccel(vi, v0, Infinity, 0, V.maxAccel[i]!, V.brake[i]!);
       }
 
+      const crossing = this.crossingGap(L,si);
+      if (crossing < LOOKAHEAD) {
+        const yieldAccel=idmAccel(vi,v0,crossing,vi,V.maxAccel[i]!,V.brake[i]!);
+        if (yieldAccel < a) {
+          a=yieldAccel;
+          const stops=this.walkers!.graph.stops[L]!;
+          for (const stop of stops) if (Math.max(0,stop.from)-si === crossing) stop.crossing.yieldingTicks++;
+        }
+      }
       let dist = this.laneLen[L]! - si;
       if (this.lanes[L]!.yieldTo.length > 0) a = Math.min(a, this.yieldAccel(i, L, dist, vi, v0));
 
@@ -391,6 +401,8 @@ export class World {
           && dist >= COMMIT_DISTANCE && this.junctionBlocked(nxt, dist, vi)) {
           a = Math.min(a, idmAccel(vi, v0, dist, vi, V.maxAccel[i]!, V.brake[i]!));
         }
+        const crossing = this.crossingGap(nxt,0);
+        if (crossing+dist < LOOKAHEAD) a=Math.min(a,idmAccel(vi,v0,Math.max(0,crossing+dist),vi,V.maxAccel[i]!,V.brake[i]!));
         const limit = this.laneSpeed[nxt]!;
         if (limit < vi) a = Math.min(a, (limit * limit - vi * vi) / (2 * Math.max(dist, 2)));
         if (!leaderFound) {
@@ -523,6 +535,25 @@ export class World {
     return false;
   }
 
+  private crossingGap(lane: number, front: number): number {
+    let gap=Infinity;
+    const stops=this.walkers?.graph.stops[lane];
+    if (stops) for (const stop of stops) {
+      if (!stop.crossing.occupied && !(stop.crossing.zebra && stop.crossing.requested)) continue;
+      const line=Math.max(0,stop.from);
+      if (front <= line) gap=Math.min(gap,line-front);
+    }
+    return gap;
+  }
+
+  private crossingOccupied(lane: number, front: number, length: number): boolean {
+    const stops=this.walkers?.graph.stops[lane];
+    if (stops) for (const stop of stops) {
+      if (stop.crossing.occupied && front >= stop.from && front-length <= stop.to) return true;
+    }
+    return false;
+  }
+
   private integrate(): void {
     const V = this.vehicles;
     const { s, v, lane, dest, acc, owner } = V;
@@ -532,7 +563,9 @@ export class World {
       let vi = v[i]! + acc[i]! * DT;
       if (vi < 0) vi = 0;
       v[i] = vi;
-      let si = s[i]! + vi * DT;
+      const room = this.crossingGap(lane[i]!,s[i]!);
+      let si = s[i]! + Math.min(vi * DT,room);
+      if (vi*DT >= room) v[i]=0;
       let L = lane[i]!;
       const d = dest[i]!;
       for (;;) {
@@ -549,6 +582,12 @@ export class World {
           this.lost++;
           if (owner[i]! >= 0) this.town?.lost(owner[i]!);
           V.despawn(i);
+          break;
+        }
+        const enterRoom=this.crossingGap(nh,0);
+        if (si-this.laneLen[L]! >= enterRoom) {
+          si=this.laneLen[L]! - 0.0001;
+          v[i]=0;
           break;
         }
         si -= this.laneLen[L]!;
@@ -576,6 +615,7 @@ export class World {
       // Enter no faster than allows a comfortable stop behind whoever is already on the lane.
       const model = sp.model ?? throughModel((pick * sp.destinations.length) % 1);
       const type = vehicleType(model);
+      if (this.crossingOccupied(sp.lane,0,type.length)) continue;
       const room = this.laneMinRear[sp.lane]! - IDM.minGap;
       const safe = Math.sqrt(2 * type.brake * Math.max(room, 0));
       const speed = Math.min(this.laneSpeed[sp.lane]!, type.speed, 10, safe);
@@ -593,6 +633,7 @@ export class World {
    * close ahead or could not stop comfortably behind it.
    */
   trySpawnAt(lane: number, s: number, dest: number, owner: number, model = Model.Estate): boolean {
+    if (this.crossingOccupied(lane,s,vehicleType(model).length)) return false;
     if (!this.admissionsOpen || this.routing.timeFrom(dest, lane, s) === Infinity || this.crowded(lane, s, vehicleType(model).length)) return false;
     const slot = this.vehicles.spawn(lane, s, 0, dest, this.time, owner, model);
     if (slot < 0) return false;
@@ -655,6 +696,7 @@ export class World {
     return {
       tick: this._tick,
       time: this.time,
+      activeZebras: this.walkers?.graph.crossings.filter(c => c.zebra && c.occupied).length ?? 0,
       walkers: this.walkers?.count ?? 0,
       active: V.count,
       spawned: this.spawned,

@@ -410,3 +410,65 @@ test('residents walk along the shop frontage', async ({ page }) => {
   }, null, { timeout: 100_000 });
   await page.screenshot({ path: 'artifacts/screens/pavement-walkers.png' });
 });
+
+test('a footpath joins the frontage and a zebra carries residents across the street', async ({ page }) => {
+  test.setTimeout(180000);
+  const { at, drag, editor } = await connectedStreet(page);
+  const stroke = async (x:number,y:number,endX:number,endY:number) => {
+    await page.mouse.move(...at(x,y));
+    await page.mouse.down();
+    await page.mouse.move(...at(endX,endY),{steps:12});
+    await page.mouse.up();
+  };
+  await page.getByRole('button',{name:'Build footpath'}).click();
+  const balance=()=>page.evaluate(()=>window.__towns!.town()!.budget.balance);
+  const before=await balance();
+  await stroke(5,3.75,20,-17);
+  await expect.poll(balance).toBeLessThan(before);
+  await page.screenshot({path:'artifacts/screens/footpath.png'});
+  await page.getByRole('button',{name:'Build zebra crossing'}).click();
+  const beforeZebra=await balance();
+  await page.mouse.click(...at(20,8));
+  await expect.poll(balance).toBe(beforeZebra-45);
+  await page.keyboard.press('z');
+  for(const [brush,start,y,end] of [['h',-34,-8,76],['w',0,24,76]] as const){
+    await page.keyboard.press(brush);
+    await drag(start,y,end);
+    await expect.poll(editor).toMatchObject({pending:false});
+  }
+  await page.keyboard.press('v');
+  await page.evaluate(()=>window.__towns!.setSpeed(200));
+  await page.waitForFunction(()=>{
+    const g=window.__towns!;
+    if(!g.stats()?.activeZebras || !g.stats()!.active) return false;
+    g.setSpeed(0);return true;
+  },null,{timeout:140000});
+  await page.screenshot({path:'artifacts/screens/zebra-crossing.png'});
+});
+
+test('pedestrians use the side-street crossing at a junction', async ({page})=>{
+  test.setTimeout(150000);
+  const {at,drag,editor}=await connectedStreet(page);
+  await page.keyboard.press('r');
+  await page.mouse.move(...at(20,8));
+  await page.mouse.down();
+  await page.mouse.move(...at(20,48),{steps:12});
+  await page.mouse.up();
+  await expect.poll(editor).toMatchObject({roadCount:2,pending:false});
+  await page.keyboard.press('z');
+  for(const [brush,start,end] of [['h',-32,8],['w',34,78]] as const){
+    await page.keyboard.press(brush);
+    await drag(start,24,end);
+    await expect.poll(editor).toMatchObject({pending:false});
+  }
+  await page.keyboard.press('v');
+  await page.evaluate(()=>window.__towns!.setSpeed(180));
+  await page.waitForFunction(()=>{
+    const g=window.__towns!, p=g.walkerPositions();
+    for(let i=0;i<p.length;i+=3) if(Math.abs(p[i]!-20)<3 && Math.abs(p[i+1]!-18)<1) {
+      g.setSpeed(0); return true;
+    }
+    return false;
+  },null,{timeout:120000});
+  await page.screenshot({path:'artifacts/screens/junction-walker.png'});
+});
