@@ -144,13 +144,18 @@ it('runs short maintaining unzoned roads while the clock and traffic keep moving
 
 it('retains tax on wages already earned when housing is erased before midnight', () => {
   const world = new World(meadowScenario(), 1);
-  const paint = new Map(Array.from(world.scenario.zones!.keys, raw => [raw as CellKey, 'residential'] as const));
+  const paint = new Map<CellKey, ZoneKind>();
+  for (const raw of world.scenario.zones!.keys) {
+    const key = raw as CellKey;
+    paint.set(key, decodeCellKey(key).side === 0 ? 'residential' : 'workplaces');
+  }
   world.setZoning(paint);
-  for (let i = 0; i < 4 * day; i++) world.step();
+  for (let i = 0; i < 5 * day; i++) world.step();
+  const morning = new Map(world.townView()!.households.map(h => [h.id, h.wages]));
   // By 22:00 the day’s returning commuters have booked their pay.
   for (let i = 0; i < (22 * 60 - CLOCK_START) * 20; i++) world.step();
   const before = world.townView()!;
-  expect(before.households.some(h => h.lot && h.wages > 0)).toBe(true);
+  expect(before.households.some(h => h.lot && h.wages > (morning.get(h.id) ?? 0))).toBe(true);
   world.setZoning(new Map());
   expect(world.townView()!.budget.today.homes).toBe(before.budget.today.homes);
   for (let i = 0; i <= 2 * 60 * 20; i++) world.step();
